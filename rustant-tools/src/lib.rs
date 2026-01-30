@@ -7,6 +7,7 @@ pub mod file;
 pub mod git;
 pub mod registry;
 pub mod shell;
+pub mod utils;
 
 use registry::{Tool, ToolRegistry};
 use std::path::PathBuf;
@@ -24,6 +25,9 @@ pub fn register_builtin_tools(registry: &mut ToolRegistry, workspace: PathBuf) {
         Arc::new(git::GitDiffTool::new(workspace.clone())),
         Arc::new(git::GitCommitTool::new(workspace.clone())),
         Arc::new(shell::ShellExecTool::new(workspace)),
+        Arc::new(utils::EchoTool),
+        Arc::new(utils::DateTimeTool),
+        Arc::new(utils::CalculatorTool),
     ];
 
     for tool in tools {
@@ -44,7 +48,7 @@ mod tests {
         let mut registry = ToolRegistry::new();
         register_builtin_tools(&mut registry, dir.path().to_path_buf());
 
-        assert_eq!(registry.len(), 9);
+        assert_eq!(registry.len(), 12);
 
         // Verify all expected tools are registered
         let names = registry.list_names();
@@ -57,6 +61,9 @@ mod tests {
         assert!(names.contains(&"git_diff".to_string()));
         assert!(names.contains(&"git_commit".to_string()));
         assert!(names.contains(&"shell_exec".to_string()));
+        assert!(names.contains(&"echo".to_string()));
+        assert!(names.contains(&"datetime".to_string()));
+        assert!(names.contains(&"calculator".to_string()));
     }
 
     #[test]
@@ -68,9 +75,16 @@ mod tests {
         let definitions = registry.list_definitions();
         for def in &definitions {
             assert!(!def.name.is_empty(), "Tool name should not be empty");
-            assert!(!def.description.is_empty(), "Tool description should not be empty");
+            assert!(
+                !def.description.is_empty(),
+                "Tool description should not be empty"
+            );
             // Parameters should be a valid JSON object
-            assert!(def.parameters.is_object(), "Parameters should be a JSON object for tool '{}'", def.name);
+            assert!(
+                def.parameters.is_object(),
+                "Parameters should be a JSON object for tool '{}'",
+                def.name
+            );
         }
     }
 }

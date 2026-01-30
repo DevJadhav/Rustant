@@ -29,7 +29,7 @@ mod tests {
     #[test]
     fn test_mcp_server_creation() {
         let _server = McpServer::new();
-        let _default = McpServer::default();
+        let _default = McpServer;
         // Placeholder test — MCP implementation comes in Phase 2
     }
 }

@@ -59,7 +59,11 @@ impl Content {
     }
 
     /// Create a tool call content.
-    pub fn tool_call(id: impl Into<String>, name: impl Into<String>, arguments: serde_json::Value) -> Self {
+    pub fn tool_call(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        arguments: serde_json::Value,
+    ) -> Self {
         Content::ToolCall {
             id: id.into(),
             name: name.into(),
@@ -68,7 +72,11 @@ impl Content {
     }
 
     /// Create a tool result content.
-    pub fn tool_result(call_id: impl Into<String>, output: impl Into<String>, is_error: bool) -> Self {
+    pub fn tool_result(
+        call_id: impl Into<String>,
+        output: impl Into<String>,
+        is_error: bool,
+    ) -> Self {
         Content::ToolResult {
             call_id: call_id.into(),
             output: output.into(),
@@ -124,7 +132,11 @@ impl Message {
     }
 
     /// Create a tool result message.
-    pub fn tool_result(call_id: impl Into<String>, output: impl Into<String>, is_error: bool) -> Self {
+    pub fn tool_result(
+        call_id: impl Into<String>,
+        output: impl Into<String>,
+        is_error: bool,
+    ) -> Self {
         Self::new(Role::Tool, Content::tool_result(call_id, output, is_error))
     }
 
@@ -390,8 +402,7 @@ mod tests {
 
     #[test]
     fn test_message_with_metadata() {
-        let msg = Message::assistant("Response")
-            .with_metadata("model", serde_json::json!("gpt-4"));
+        let msg = Message::assistant("Response").with_metadata("model", serde_json::json!("gpt-4"));
         assert_eq!(msg.metadata.get("model"), Some(&serde_json::json!("gpt-4")));
     }
 
@@ -406,7 +417,11 @@ mod tests {
     fn test_tool_result_message() {
         let msg = Message::tool_result("call-1", "file contents here", false);
         match &msg.content {
-            Content::ToolResult { call_id, output, is_error } => {
+            Content::ToolResult {
+                call_id,
+                output,
+                is_error,
+            } => {
                 assert_eq!(call_id, "call-1");
                 assert_eq!(output, "file contents here");
                 assert!(!is_error);
@@ -459,10 +474,9 @@ mod tests {
 
     #[test]
     fn test_tool_output_with_artifact() {
-        let output = ToolOutput::text("created file")
-            .with_artifact(Artifact::FileCreated {
-                path: "/tmp/test.rs".into(),
-            });
+        let output = ToolOutput::text("created file").with_artifact(Artifact::FileCreated {
+            path: "/tmp/test.rs".into(),
+        });
         assert_eq!(output.artifacts.len(), 1);
     }
 
@@ -576,6 +590,9 @@ mod tests {
     fn test_agent_status_display() {
         assert_eq!(AgentStatus::Idle.to_string(), "idle");
         assert_eq!(AgentStatus::Thinking.to_string(), "thinking");
-        assert_eq!(AgentStatus::WaitingForApproval.to_string(), "waiting for approval");
+        assert_eq!(
+            AgentStatus::WaitingForApproval.to_string(),
+            "waiting for approval"
+        );
     }
 }

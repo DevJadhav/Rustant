@@ -4,9 +4,9 @@
 //! The registry provides tool definitions for the LLM and executes tool calls
 //! with proper validation and timeout handling.
 
+use async_trait::async_trait;
 use rustant_core::error::ToolError;
 use rustant_core::types::{RiskLevel, ToolDefinition, ToolOutput};
-use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -159,10 +159,12 @@ mod tests {
         }
 
         async fn execute(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError> {
-            let text = args["text"].as_str().ok_or_else(|| ToolError::InvalidArguments {
-                name: "echo".to_string(),
-                reason: "missing 'text' parameter".to_string(),
-            })?;
+            let text = args["text"]
+                .as_str()
+                .ok_or_else(|| ToolError::InvalidArguments {
+                    name: "echo".to_string(),
+                    reason: "missing 'text' parameter".to_string(),
+                })?;
             Ok(ToolOutput::text(format!("Echo: {}", text)))
         }
 

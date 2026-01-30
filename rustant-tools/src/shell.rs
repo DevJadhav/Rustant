@@ -47,10 +47,12 @@ impl Tool for ShellExecTool {
     }
 
     async fn execute(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError> {
-        let command = args["command"].as_str().ok_or_else(|| ToolError::InvalidArguments {
-            name: "shell_exec".into(),
-            reason: "'command' parameter is required".into(),
-        })?;
+        let command = args["command"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidArguments {
+                name: "shell_exec".into(),
+                reason: "'command' parameter is required".into(),
+            })?;
 
         let working_dir = if let Some(dir) = args["working_dir"].as_str() {
             self.workspace.join(dir)
@@ -78,12 +80,23 @@ impl Tool for ShellExecTool {
         let result = format!(
             "Exit code: {}\n\n--- stdout ---\n{}\n--- stderr ---\n{}",
             exit_code,
-            if stdout.is_empty() { "(empty)" } else { &stdout },
-            if stderr.is_empty() { "(empty)" } else { &stderr }
+            if stdout.is_empty() {
+                "(empty)"
+            } else {
+                &stdout
+            },
+            if stderr.is_empty() {
+                "(empty)"
+            } else {
+                &stderr
+            }
         );
 
         if exit_code != 0 {
-            warn!(command = command, exit_code, "Command exited with non-zero status");
+            warn!(
+                command = command,
+                exit_code, "Command exited with non-zero status"
+            );
         }
 
         Ok(ToolOutput::text(result))

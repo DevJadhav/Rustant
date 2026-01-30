@@ -182,9 +182,9 @@ impl SafetyGuardian {
     /// Check explicitly denied patterns.
     fn check_denied(&self, action: &ActionRequest) -> Option<String> {
         match &action.details {
-            ActionDetails::FileRead { path } | ActionDetails::FileWrite { path, .. } | ActionDetails::FileDelete { path } => {
-                self.check_path_denied(path)
-            }
+            ActionDetails::FileRead { path }
+            | ActionDetails::FileWrite { path, .. }
+            | ActionDetails::FileDelete { path } => self.check_path_denied(path),
             ActionDetails::ShellCommand { command } => self.check_command_denied(command),
             ActionDetails::NetworkRequest { host, .. } => self.check_host_denied(host),
             _ => None,
@@ -196,7 +196,10 @@ impl SafetyGuardian {
         let path_str = path.to_string_lossy();
         for pattern in &self.config.denied_paths {
             if Self::glob_matches(pattern, &path_str) {
-                return Some(format!("Path '{}' matches denied pattern '{}'", path_str, pattern));
+                return Some(format!(
+                    "Path '{}' matches denied pattern '{}'",
+                    path_str, pattern
+                ));
             }
         }
         None
@@ -206,8 +209,13 @@ impl SafetyGuardian {
     fn check_command_denied(&self, command: &str) -> Option<String> {
         let cmd_lower = command.to_lowercase();
         for denied in &self.config.denied_commands {
-            if cmd_lower.starts_with(&denied.to_lowercase()) || cmd_lower.contains(&denied.to_lowercase()) {
-                return Some(format!("Command '{}' matches denied pattern '{}'", command, denied));
+            if cmd_lower.starts_with(&denied.to_lowercase())
+                || cmd_lower.contains(&denied.to_lowercase())
+            {
+                return Some(format!(
+                    "Command '{}' matches denied pattern '{}'",
+                    command, denied
+                ));
             }
         }
         None
@@ -219,10 +227,7 @@ impl SafetyGuardian {
             return None; // No allowlist means all allowed
         }
         if !self.config.allowed_hosts.iter().any(|h| h == host) {
-            return Some(format!(
-                "Host '{}' not in allowed hosts list",
-                host
-            ));
+            return Some(format!("Host '{}' not in allowed hosts list", host));
         }
         None
     }
@@ -239,14 +244,11 @@ impl SafetyGuardian {
             let middle = &pattern[3..pattern.len() - 3];
             let segment = format!("/{}/", middle);
             let starts_with = format!("{}/", middle);
-            return path.contains(&segment)
-                || path.starts_with(&starts_with)
-                || path == middle;
+            return path.contains(&segment) || path.starts_with(&starts_with) || path == middle;
         }
 
         // Pattern: **/*.ext — matches any file with that extension anywhere
-        if pattern.starts_with("**/") {
-            let suffix = &pattern[3..];
+        if let Some(suffix) = pattern.strip_prefix("**/") {
             if suffix.starts_with("*.") {
                 // Extension match: **/*.key means any path ending with .key
                 let ext = &suffix[1..]; // ".key"
@@ -259,8 +261,7 @@ impl SafetyGuardian {
         }
 
         // Pattern: prefix/** — matches anything under prefix/
-        if pattern.ends_with("/**") {
-            let prefix = &pattern[..pattern.len() - 3];
+        if let Some(prefix) = pattern.strip_suffix("/**") {
             return path.starts_with(prefix) && path.len() > prefix.len();
         }
 
@@ -271,8 +272,7 @@ impl SafetyGuardian {
         }
 
         // Pattern: prefix* — matches anything starting with prefix
-        if pattern.ends_with("*") {
-            let prefix = &pattern[..pattern.len() - 1];
+        if let Some(prefix) = pattern.strip_suffix("*") {
             return path.starts_with(prefix);
         }
 
@@ -368,9 +368,14 @@ mod tests {
         let action = make_action(
             "file_read",
             RiskLevel::ReadOnly,
-            ActionDetails::FileRead { path: "src/main.rs".into() },
+            ActionDetails::FileRead {
+                path: "src/main.rs".into(),
+            },
         );
-        assert_eq!(guardian.check_permission(&action), PermissionResult::Allowed);
+        assert_eq!(
+            guardian.check_permission(&action),
+            PermissionResult::Allowed
+        );
     }
 
     #[test]
@@ -392,8 +397,10 @@ mod tests {
 
     #[test]
     fn test_cautious_mode_allows_writes() {
-        let mut config = SafetyConfig::default();
-        config.approval_mode = ApprovalMode::Cautious;
+        let config = SafetyConfig {
+            approval_mode: ApprovalMode::Cautious,
+            ..SafetyConfig::default()
+        };
         let mut guardian = SafetyGuardian::new(config);
 
         let action = make_action(
@@ -404,19 +411,26 @@ mod tests {
                 size_bytes: 100,
             },
         );
-        assert_eq!(guardian.check_permission(&action), PermissionResult::Allowed);
+        assert_eq!(
+            guardian.check_permission(&action),
+            PermissionResult::Allowed
+        );
     }
 
     #[test]
     fn test_cautious_mode_requires_approval_for_execute() {
-        let mut config = SafetyConfig::default();
-        config.approval_mode = ApprovalMode::Cautious;
+        let config = SafetyConfig {
+            approval_mode: ApprovalMode::Cautious,
+            ..SafetyConfig::default()
+        };
         let mut guardian = SafetyGuardian::new(config);
 
         let action = make_action(
             "shell_exec",
             RiskLevel::Execute,
-            ActionDetails::ShellCommand { command: "cargo test".into() },
+            ActionDetails::ShellCommand {
+                command: "cargo test".into(),
+            },
         );
         assert!(matches!(
             guardian.check_permission(&action),
@@ -426,14 +440,18 @@ mod tests {
 
     #[test]
     fn test_paranoid_mode_requires_approval_for_everything() {
-        let mut config = SafetyConfig::default();
-        config.approval_mode = ApprovalMode::Paranoid;
+        let config = SafetyConfig {
+            approval_mode: ApprovalMode::Paranoid,
+            ..SafetyConfig::default()
+        };
         let mut guardian = SafetyGuardian::new(config);
 
         let action = make_action(
             "file_read",
             RiskLevel::ReadOnly,
-            ActionDetails::FileRead { path: "src/main.rs".into() },
+            ActionDetails::FileRead {
+                path: "src/main.rs".into(),
+            },
         );
         assert!(matches!(
             guardian.check_permission(&action),
@@ -443,16 +461,23 @@ mod tests {
 
     #[test]
     fn test_yolo_mode_allows_everything() {
-        let mut config = SafetyConfig::default();
-        config.approval_mode = ApprovalMode::Yolo;
+        let config = SafetyConfig {
+            approval_mode: ApprovalMode::Yolo,
+            ..SafetyConfig::default()
+        };
         let mut guardian = SafetyGuardian::new(config);
 
         let action = make_action(
             "file_delete",
             RiskLevel::Destructive,
-            ActionDetails::FileDelete { path: "important.rs".into() },
+            ActionDetails::FileDelete {
+                path: "important.rs".into(),
+            },
         );
-        assert_eq!(guardian.check_permission(&action), PermissionResult::Allowed);
+        assert_eq!(
+            guardian.check_permission(&action),
+            PermissionResult::Allowed
+        );
     }
 
     #[test]
@@ -462,7 +487,9 @@ mod tests {
         let action = make_action(
             "file_read",
             RiskLevel::ReadOnly,
-            ActionDetails::FileRead { path: ".env.local".into() },
+            ActionDetails::FileRead {
+                path: ".env.local".into(),
+            },
         );
         assert!(matches!(
             guardian.check_permission(&action),
@@ -476,7 +503,9 @@ mod tests {
         let action = make_action(
             "file_read",
             RiskLevel::ReadOnly,
-            ActionDetails::FileRead { path: "config/secrets/api.key".into() },
+            ActionDetails::FileRead {
+                path: "config/secrets/api.key".into(),
+            },
         );
         assert!(matches!(
             guardian.check_permission(&action),
@@ -490,7 +519,9 @@ mod tests {
         let action = make_action(
             "shell_exec",
             RiskLevel::Execute,
-            ActionDetails::ShellCommand { command: "sudo rm -rf /".into() },
+            ActionDetails::ShellCommand {
+                command: "sudo rm -rf /".into(),
+            },
         );
         assert!(matches!(
             guardian.check_permission(&action),
@@ -517,8 +548,10 @@ mod tests {
 
     #[test]
     fn test_allowed_host() {
-        let mut config = SafetyConfig::default();
-        config.approval_mode = ApprovalMode::Yolo;
+        let config = SafetyConfig {
+            approval_mode: ApprovalMode::Yolo,
+            ..SafetyConfig::default()
+        };
         let mut guardian = SafetyGuardian::new(config);
 
         let action = make_action(
@@ -529,7 +562,10 @@ mod tests {
                 method: "GET".into(),
             },
         );
-        assert_eq!(guardian.check_permission(&action), PermissionResult::Allowed);
+        assert_eq!(
+            guardian.check_permission(&action),
+            PermissionResult::Allowed
+        );
     }
 
     #[test]
@@ -539,7 +575,9 @@ mod tests {
         let action = make_action(
             "file_read",
             RiskLevel::ReadOnly,
-            ActionDetails::FileRead { path: "src/main.rs".into() },
+            ActionDetails::FileRead {
+                path: "src/main.rs".into(),
+            },
         );
         guardian.check_permission(&action);
 
@@ -555,7 +593,9 @@ mod tests {
         let action = make_action(
             "file_read",
             RiskLevel::ReadOnly,
-            ActionDetails::FileRead { path: ".env".into() },
+            ActionDetails::FileRead {
+                path: ".env".into(),
+            },
         );
         guardian.check_permission(&action);
 
@@ -570,7 +610,11 @@ mod tests {
 
         let entry = guardian.audit_log().back().unwrap();
         match &entry.event {
-            AuditEvent::ActionExecuted { tool, success, duration_ms } => {
+            AuditEvent::ActionExecuted {
+                tool,
+                success,
+                duration_ms,
+            } => {
                 assert_eq!(tool, "file_read");
                 assert!(success);
                 assert_eq!(*duration_ms, 42);
@@ -596,8 +640,10 @@ mod tests {
 
     #[test]
     fn test_audit_log_capacity() {
-        let mut config = SafetyConfig::default();
-        config.approval_mode = ApprovalMode::Yolo;
+        let config = SafetyConfig {
+            approval_mode: ApprovalMode::Yolo,
+            ..SafetyConfig::default()
+        };
         let mut guardian = SafetyGuardian::new(config);
         guardian.max_audit_entries = 5;
 
@@ -612,8 +658,14 @@ mod tests {
     fn test_glob_matches() {
         assert!(SafetyGuardian::glob_matches(".env*", ".env"));
         assert!(SafetyGuardian::glob_matches(".env*", ".env.local"));
-        assert!(SafetyGuardian::glob_matches("**/*.key", "path/to/secret.key"));
-        assert!(SafetyGuardian::glob_matches("**/secrets/**", "config/secrets/api.key"));
+        assert!(SafetyGuardian::glob_matches(
+            "**/*.key",
+            "path/to/secret.key"
+        ));
+        assert!(SafetyGuardian::glob_matches(
+            "**/secrets/**",
+            "config/secrets/api.key"
+        ));
         assert!(SafetyGuardian::glob_matches("src/**", "src/main.rs"));
         assert!(SafetyGuardian::glob_matches("*.rs", "main.rs"));
         assert!(!SafetyGuardian::glob_matches(".env*", "config.toml"));
@@ -625,7 +677,9 @@ mod tests {
             "file_read",
             RiskLevel::ReadOnly,
             "Reading source file",
-            ActionDetails::FileRead { path: "src/lib.rs".into() },
+            ActionDetails::FileRead {
+                path: "src/lib.rs".into(),
+            },
         );
         assert_eq!(action.tool_name, "file_read");
         assert_eq!(action.risk_level, RiskLevel::ReadOnly);
@@ -648,9 +702,11 @@ mod tests {
 
     #[test]
     fn test_empty_host_allowlist_allows_all() {
-        let mut config = SafetyConfig::default();
-        config.allowed_hosts = vec![]; // empty = no restriction
-        config.approval_mode = ApprovalMode::Yolo;
+        let config = SafetyConfig {
+            allowed_hosts: vec![], // empty = no restriction
+            approval_mode: ApprovalMode::Yolo,
+            ..SafetyConfig::default()
+        };
         let mut guardian = SafetyGuardian::new(config);
 
         let action = make_action(
@@ -661,6 +717,9 @@ mod tests {
                 method: "GET".into(),
             },
         );
-        assert_eq!(guardian.check_permission(&action), PermissionResult::Allowed);
+        assert_eq!(
+            guardian.check_permission(&action),
+            PermissionResult::Allowed
+        );
     }
 }

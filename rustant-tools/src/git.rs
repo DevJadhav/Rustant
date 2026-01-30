@@ -229,10 +229,12 @@ impl Tool for GitCommitTool {
     }
 
     async fn execute(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError> {
-        let message = args["message"].as_str().ok_or_else(|| ToolError::InvalidArguments {
-            name: "git_commit".into(),
-            reason: "'message' parameter is required".into(),
-        })?;
+        let message = args["message"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidArguments {
+                name: "git_commit".into(),
+                reason: "'message' parameter is required".into(),
+            })?;
 
         // Stage files if specified
         if let Some(files) = args["files"].as_array() {
@@ -308,7 +310,9 @@ mod tests {
         let tool = GitStatusTool::new(dir.path().to_path_buf());
 
         let result = tool.execute(serde_json::json!({})).await.unwrap();
-        assert!(result.content.contains("Working tree clean") || result.content.contains("Branch:"));
+        assert!(
+            result.content.contains("Working tree clean") || result.content.contains("Branch:")
+        );
     }
 
     #[tokio::test]

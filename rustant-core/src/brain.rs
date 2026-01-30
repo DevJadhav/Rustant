@@ -42,6 +42,67 @@ pub trait LlmProvider: Send + Sync {
     fn model_name(&self) -> &str;
 }
 
+/// Token counter using tiktoken-rs for accurate BPE tokenization.
+pub struct TokenCounter {
+    bpe: tiktoken_rs::CoreBPE,
+}
+
+impl TokenCounter {
+    /// Create a token counter for the given model.
+    /// Falls back to cl100k_base if the model isn't recognized.
+    pub fn for_model(model: &str) -> Self {
+        let bpe = tiktoken_rs::get_bpe_from_model(model).unwrap_or_else(|_| {
+            tiktoken_rs::cl100k_base().expect("cl100k_base should be available")
+        });
+        Self { bpe }
+    }
+
+    /// Count the number of tokens in a string.
+    pub fn count(&self, text: &str) -> usize {
+        self.bpe.encode_with_special_tokens(text).len()
+    }
+
+    /// Estimate the token count for a set of messages.
+    /// Adds overhead for message structure (role, separators).
+    pub fn count_messages(&self, messages: &[Message]) -> usize {
+        let mut total = 0;
+        for msg in messages {
+            // Each message has overhead: role token + separators (~4 tokens)
+            total += 4;
+            match &msg.content {
+                Content::Text { text } => total += self.count(text),
+                Content::ToolCall {
+                    name, arguments, ..
+                } => {
+                    total += self.count(name);
+                    total += self.count(&arguments.to_string());
+                }
+                Content::ToolResult { output, .. } => {
+                    total += self.count(output);
+                }
+                Content::MultiPart { parts } => {
+                    for part in parts {
+                        match part {
+                            Content::Text { text } => total += self.count(text),
+                            Content::ToolCall {
+                                name, arguments, ..
+                            } => {
+                                total += self.count(name);
+                                total += self.count(&arguments.to_string());
+                            }
+                            Content::ToolResult { output, .. } => {
+                                total += self.count(output);
+                            }
+                            _ => total += 10,
+                        }
+                    }
+                }
+            }
+        }
+        total + 3 // reply priming overhead
+    }
+}
+
 /// The Brain wraps an LLM provider and adds higher-level logic:
 /// prompt construction, cost tracking, and model selection.
 pub struct Brain {
@@ -49,23 +110,28 @@ pub struct Brain {
     system_prompt: String,
     total_usage: TokenUsage,
     total_cost: CostEstimate,
+    token_counter: TokenCounter,
 }
 
 impl Brain {
     pub fn new(provider: Arc<dyn LlmProvider>, system_prompt: impl Into<String>) -> Self {
+        let model_name = provider.model_name().to_string();
         Self {
             provider,
             system_prompt: system_prompt.into(),
             total_usage: TokenUsage::default(),
             total_cost: CostEstimate::default(),
+            token_counter: TokenCounter::for_model(&model_name),
         }
     }
 
+    /// Estimate token count for messages using tiktoken-rs.
+    pub fn estimate_tokens(&self, messages: &[Message]) -> usize {
+        self.token_counter.count_messages(messages)
+    }
+
     /// Construct messages for the LLM with system prompt prepended.
-    pub fn build_messages(
-        &self,
-        conversation: &[Message],
-    ) -> Vec<Message> {
+    pub fn build_messages(&self, conversation: &[Message]) -> Vec<Message> {
         let mut messages = Vec::with_capacity(conversation.len() + 1);
         messages.push(Message::system(&self.system_prompt));
         messages.extend_from_slice(conversation);
@@ -125,6 +191,61 @@ impl Brain {
         Ok(response)
     }
 
+    /// Send a completion request with retry logic and exponential backoff.
+    ///
+    /// Retries on transient errors (RateLimited, Timeout, Connection) up to
+    /// `max_retries` times with exponential backoff (1s, 2s, 4s, ..., capped at 32s).
+    /// Non-transient errors are returned immediately.
+    pub async fn think_with_retry(
+        &mut self,
+        conversation: &[Message],
+        tools: Option<Vec<ToolDefinition>>,
+        max_retries: usize,
+    ) -> Result<CompletionResponse, LlmError> {
+        let mut last_error = None;
+
+        for attempt in 0..=max_retries {
+            match self.think(conversation, tools.clone()).await {
+                Ok(response) => return Ok(response),
+                Err(e) if Self::is_retryable(&e) => {
+                    if attempt < max_retries {
+                        let backoff_secs = std::cmp::min(1u64 << attempt, 32);
+                        let wait = match &e {
+                            LlmError::RateLimited { retry_after_secs } => {
+                                std::cmp::max(*retry_after_secs, backoff_secs)
+                            }
+                            _ => backoff_secs,
+                        };
+                        info!(
+                            attempt = attempt + 1,
+                            max_retries,
+                            backoff_secs = wait,
+                            error = %e,
+                            "Retrying after transient error"
+                        );
+                        tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                        last_error = Some(e);
+                    } else {
+                        return Err(e);
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        Err(last_error.unwrap_or(LlmError::Connection {
+            message: "Max retries exceeded".to_string(),
+        }))
+    }
+
+    /// Check if an LLM error is transient and should be retried.
+    fn is_retryable(error: &LlmError) -> bool {
+        matches!(
+            error,
+            LlmError::RateLimited { .. } | LlmError::Timeout { .. } | LlmError::Connection { .. }
+        )
+    }
+
     /// Send a streaming completion request, returning events via channel.
     pub async fn think_streaming(
         &mut self,
@@ -164,6 +285,22 @@ impl Brain {
     /// Get the context window size.
     pub fn context_window(&self) -> usize {
         self.provider.context_window()
+    }
+
+    /// Get a reference to the underlying LLM provider.
+    pub fn provider(&self) -> &dyn LlmProvider {
+        &*self.provider
+    }
+
+    /// Track usage and cost from an external completion (e.g., streaming).
+    pub fn track_usage(&mut self, usage: &TokenUsage) {
+        self.total_usage.accumulate(usage);
+        let (input_rate, output_rate) = self.provider.cost_per_token();
+        let cost = CostEstimate {
+            input_cost: usage.input_tokens as f64 * input_rate,
+            output_cost: usage.output_tokens as f64 * output_rate,
+        };
+        self.total_cost.accumulate(&cost);
     }
 
     /// Get the current token usage as a fraction of the context window.
@@ -209,10 +346,7 @@ impl MockLlmProvider {
     }
 
     /// Create a tool call response for testing.
-    pub fn tool_call_response(
-        tool_name: &str,
-        arguments: serde_json::Value,
-    ) -> CompletionResponse {
+    pub fn tool_call_response(tool_name: &str, arguments: serde_json::Value) -> CompletionResponse {
         let call_id = format!("call_{}", uuid::Uuid::new_v4());
         CompletionResponse {
             message: Message::new(
@@ -259,7 +393,11 @@ impl LlmProvider for MockLlmProvider {
                 let _ = tx.send(StreamEvent::Token(format!("{} ", word))).await;
             }
         }
-        let _ = tx.send(StreamEvent::Done { usage: response.usage }).await;
+        let _ = tx
+            .send(StreamEvent::Done {
+                usage: response.usage,
+            })
+            .await;
         Ok(())
     }
 
@@ -331,10 +469,16 @@ mod tests {
         provider.queue_response(MockLlmProvider::text_response("first"));
         provider.queue_response(MockLlmProvider::text_response("second"));
 
-        let r1 = provider.complete(CompletionRequest::default()).await.unwrap();
+        let r1 = provider
+            .complete(CompletionRequest::default())
+            .await
+            .unwrap();
         assert_eq!(r1.message.content.as_text(), Some("first"));
 
-        let r2 = provider.complete(CompletionRequest::default()).await.unwrap();
+        let r2 = provider
+            .complete(CompletionRequest::default())
+            .await
+            .unwrap();
         assert_eq!(r2.message.content.as_text(), Some("second"));
     }
 
@@ -424,7 +568,9 @@ mod tests {
             serde_json::json!({"path": "/tmp/test.rs"}),
         );
         match &response.message.content {
-            Content::ToolCall { name, arguments, .. } => {
+            Content::ToolCall {
+                name, arguments, ..
+            } => {
                 assert_eq!(name, "file_read");
                 assert_eq!(arguments["path"], "/tmp/test.rs");
             }
@@ -436,5 +582,188 @@ mod tests {
     fn test_default_system_prompt() {
         assert!(DEFAULT_SYSTEM_PROMPT.contains("Rustant"));
         assert!(DEFAULT_SYSTEM_PROMPT.contains("autonomous"));
+    }
+
+    #[test]
+    fn test_is_retryable() {
+        assert!(Brain::is_retryable(&LlmError::RateLimited {
+            retry_after_secs: 5
+        }));
+        assert!(Brain::is_retryable(&LlmError::Timeout { timeout_secs: 30 }));
+        assert!(Brain::is_retryable(&LlmError::Connection {
+            message: "reset".into()
+        }));
+        assert!(!Brain::is_retryable(&LlmError::ContextOverflow {
+            used: 200_000,
+            limit: 128_000
+        }));
+        assert!(!Brain::is_retryable(&LlmError::AuthFailed {
+            provider: "openai".into()
+        }));
+    }
+
+    /// A mock provider that fails N times before succeeding.
+    struct FailingProvider {
+        failures_remaining: std::sync::Mutex<usize>,
+        error_type: String,
+        success_response: CompletionResponse,
+    }
+
+    impl FailingProvider {
+        fn new(failures: usize, error_type: &str) -> Self {
+            Self {
+                failures_remaining: std::sync::Mutex::new(failures),
+                error_type: error_type.to_string(),
+                success_response: MockLlmProvider::text_response("Success after retry"),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for FailingProvider {
+        async fn complete(
+            &self,
+            _request: CompletionRequest,
+        ) -> Result<CompletionResponse, LlmError> {
+            let mut remaining = self.failures_remaining.lock().unwrap();
+            if *remaining > 0 {
+                *remaining -= 1;
+                match self.error_type.as_str() {
+                    "rate_limited" => Err(LlmError::RateLimited {
+                        retry_after_secs: 0,
+                    }),
+                    "timeout" => Err(LlmError::Timeout { timeout_secs: 5 }),
+                    "connection" => Err(LlmError::Connection {
+                        message: "connection reset".into(),
+                    }),
+                    _ => Err(LlmError::ApiRequest {
+                        message: "non-retryable".into(),
+                    }),
+                }
+            } else {
+                Ok(self.success_response.clone())
+            }
+        }
+
+        async fn complete_streaming(
+            &self,
+            _request: CompletionRequest,
+            _tx: mpsc::Sender<StreamEvent>,
+        ) -> Result<(), LlmError> {
+            Ok(())
+        }
+
+        fn estimate_tokens(&self, _messages: &[Message]) -> usize {
+            100
+        }
+        fn context_window(&self) -> usize {
+            128_000
+        }
+        fn supports_tools(&self) -> bool {
+            true
+        }
+        fn cost_per_token(&self) -> (f64, f64) {
+            (0.0, 0.0)
+        }
+        fn model_name(&self) -> &str {
+            "failing-mock"
+        }
+    }
+
+    #[tokio::test]
+    async fn test_think_with_retry_succeeds_after_failures() {
+        let provider = Arc::new(FailingProvider::new(2, "connection"));
+        let mut brain = Brain::new(provider, "system");
+        let conversation = vec![Message::user("test")];
+
+        let result = brain.think_with_retry(&conversation, None, 3).await;
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap().message.content.as_text(),
+            Some("Success after retry")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_think_with_retry_exhausted() {
+        let provider = Arc::new(FailingProvider::new(5, "timeout"));
+        let mut brain = Brain::new(provider, "system");
+        let conversation = vec![Message::user("test")];
+
+        let result = brain.think_with_retry(&conversation, None, 2).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), LlmError::Timeout { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_think_with_retry_non_retryable_fails_immediately() {
+        let provider = Arc::new(FailingProvider::new(1, "non_retryable"));
+        let mut brain = Brain::new(provider, "system");
+        let conversation = vec![Message::user("test")];
+
+        let result = brain.think_with_retry(&conversation, None, 3).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), LlmError::ApiRequest { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_think_with_retry_rate_limited() {
+        let provider = Arc::new(FailingProvider::new(1, "rate_limited"));
+        let mut brain = Brain::new(provider, "system");
+        let conversation = vec![Message::user("test")];
+
+        let result = brain.think_with_retry(&conversation, None, 2).await;
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_track_usage() {
+        let provider = Arc::new(MockLlmProvider::new());
+        let mut brain = Brain::new(provider, "system");
+
+        let usage = TokenUsage {
+            input_tokens: 100,
+            output_tokens: 50,
+        };
+        brain.track_usage(&usage);
+
+        assert_eq!(brain.total_usage().input_tokens, 100);
+        assert_eq!(brain.total_usage().output_tokens, 50);
+    }
+
+    #[test]
+    fn test_token_counter_basic() {
+        let counter = TokenCounter::for_model("gpt-4o");
+        let count = counter.count("Hello, world!");
+        assert!(count > 0);
+        assert!(count < 20); // should be ~4 tokens
+    }
+
+    #[test]
+    fn test_token_counter_messages() {
+        let counter = TokenCounter::for_model("gpt-4o");
+        let messages = vec![
+            Message::system("You are a helpful assistant."),
+            Message::user("What is 2 + 2?"),
+        ];
+        let count = counter.count_messages(&messages);
+        assert!(count > 5);
+        assert!(count < 100);
+    }
+
+    #[test]
+    fn test_token_counter_unknown_model_falls_back() {
+        let counter = TokenCounter::for_model("unknown-model-xyz");
+        let count = counter.count("Hello");
+        assert!(count > 0); // Should use cl100k_base fallback
+    }
+
+    #[test]
+    fn test_brain_estimate_tokens() {
+        let provider = Arc::new(MockLlmProvider::new());
+        let brain = Brain::new(provider, "system");
+        let messages = vec![Message::user("Hello, this is a test.")];
+        let estimate = brain.estimate_tokens(&messages);
+        assert!(estimate > 0);
     }
 }

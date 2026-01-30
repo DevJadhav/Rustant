@@ -177,7 +177,10 @@ mod tests {
         let err = RustantError::Llm(LlmError::ApiRequest {
             message: "connection refused".into(),
         });
-        assert_eq!(err.to_string(), "LLM error: API request failed: connection refused");
+        assert_eq!(
+            err.to_string(),
+            "LLM error: API request failed: connection refused"
+        );
     }
 
     #[test]
@@ -193,7 +196,10 @@ mod tests {
         let err = RustantError::Safety(SafetyError::PathDenied {
             path: PathBuf::from("/etc/passwd"),
         });
-        assert_eq!(err.to_string(), "Safety error: Path access denied: /etc/passwd");
+        assert_eq!(
+            err.to_string(),
+            "Safety error: Path access denied: /etc/passwd"
+        );
     }
 
     #[test]
@@ -262,9 +268,6 @@ mod tests {
         let err = LlmError::RateLimited {
             retry_after_secs: 60,
         };
-        assert_eq!(
-            err.to_string(),
-            "Rate limited by provider, retry after 60s"
-        );
+        assert_eq!(err.to_string(), "Rate limited by provider, retry after 60s");
     }
 }

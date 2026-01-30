@@ -86,9 +86,10 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     // Resolve workspace
-    let workspace = cli.workspace.canonicalize().unwrap_or_else(|_| {
-        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-    });
+    let workspace = cli
+        .workspace
+        .canonicalize()
+        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
     // Handle subcommands
     if let Some(command) = cli.command {
