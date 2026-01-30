@@ -4,10 +4,12 @@
 //! - **Short-Term Memory**: Sliding window of recent conversation with summarization.
 //! - **Long-Term Memory**: Persistent facts and preferences across sessions.
 
+use crate::error::MemoryError;
 use crate::types::Message;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
+use std::path::Path;
 use uuid::Uuid;
 
 /// Working memory for the currently executing task.
@@ -245,7 +247,9 @@ impl LongTermMemory {
             .iter()
             .filter(|f| {
                 f.content.to_lowercase().contains(&query_lower)
-                    || f.tags.iter().any(|t| t.to_lowercase().contains(&query_lower))
+                    || f.tags
+                        .iter()
+                        .any(|t| t.to_lowercase().contains(&query_lower))
             })
             .collect()
     }
@@ -290,6 +294,106 @@ impl MemorySystem {
     }
 }
 
+/// Metadata about a saved session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionMetadata {
+    pub id: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub task_summary: Option<String>,
+}
+
+impl SessionMetadata {
+    pub fn new() -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            created_at: now,
+            updated_at: now,
+            task_summary: None,
+        }
+    }
+}
+
+impl Default for SessionMetadata {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A persistable session containing the memory state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Session {
+    pub metadata: SessionMetadata,
+    pub working: WorkingMemory,
+    pub long_term: LongTermMemory,
+    pub messages: Vec<Message>,
+    pub window_size: usize,
+}
+
+impl MemorySystem {
+    /// Save the current memory state to a JSON file.
+    pub fn save_session(&self, path: &Path) -> Result<(), MemoryError> {
+        let session = Session {
+            metadata: SessionMetadata {
+                id: Uuid::new_v4(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                task_summary: self.working.current_goal.clone(),
+            },
+            working: self.working.clone(),
+            long_term: self.long_term.clone(),
+            messages: self.short_term.messages().iter().cloned().collect(),
+            window_size: self.short_term.window_size(),
+        };
+
+        let json =
+            serde_json::to_string_pretty(&session).map_err(|e| MemoryError::PersistenceError {
+                message: format!("Failed to serialize session: {}", e),
+            })?;
+
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| MemoryError::PersistenceError {
+                message: format!("Failed to create directory: {}", e),
+            })?;
+        }
+
+        std::fs::write(path, json).map_err(|e| MemoryError::PersistenceError {
+            message: format!("Failed to write session file: {}", e),
+        })?;
+
+        Ok(())
+    }
+
+    /// Load a session from a JSON file.
+    pub fn load_session(path: &Path) -> Result<Self, MemoryError> {
+        let json = std::fs::read_to_string(path).map_err(|e| MemoryError::SessionLoadFailed {
+            message: format!("Failed to read session file: {}", e),
+        })?;
+
+        let session: Session =
+            serde_json::from_str(&json).map_err(|e| MemoryError::SessionLoadFailed {
+                message: format!("Failed to deserialize session: {}", e),
+            })?;
+
+        let mut memory = MemorySystem::new(session.window_size);
+        memory.working = session.working;
+        memory.long_term = session.long_term;
+        for msg in session.messages {
+            memory.short_term.add(msg);
+        }
+
+        Ok(memory)
+    }
+}
+
+impl ShortTermMemory {
+    /// Get the window size.
+    pub fn window_size(&self) -> usize {
+        self.window_size
+    }
+}
+
 /// Result of a context compression operation.
 #[derive(Debug, Clone)]
 pub struct CompressionResult {
@@ -316,7 +420,10 @@ mod tests {
         assert_eq!(wm.sub_tasks.len(), 2);
 
         wm.note("finding", "uses basic auth currently");
-        assert_eq!(wm.scratchpad.get("finding").map(|s| s.as_str()), Some("uses basic auth currently"));
+        assert_eq!(
+            wm.scratchpad.get("finding").map(|s| s.as_str()),
+            Some("uses basic auth currently")
+        );
 
         wm.add_active_file("src/auth/mod.rs");
         wm.add_active_file("src/auth/mod.rs"); // duplicate
@@ -378,7 +485,11 @@ mod tests {
         let messages = stm.to_messages();
         // First message should be the summary
         assert_eq!(messages.len(), 4); // 1 summary + 3 recent
-        assert!(messages[0].content.as_text().unwrap().contains("Summary of"));
+        assert!(messages[0]
+            .content
+            .as_text()
+            .unwrap()
+            .contains("Summary of"));
         assert_eq!(messages[0].role, Role::System);
     }
 
@@ -504,5 +615,80 @@ mod tests {
         mem.start_new_task("task 2");
         assert_eq!(mem.working.current_goal.as_deref(), Some("task 2"));
         assert_eq!(mem.long_term.facts.len(), 1); // preserved
+    }
+
+    // --- Session persistence tests ---
+
+    #[test]
+    fn test_session_save_load_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let session_path = dir.path().join("session.json");
+
+        // Build a memory system with data
+        let mut mem = MemorySystem::new(10);
+        mem.start_new_task("fix bug #42");
+        mem.add_message(Message::user("fix the bug"));
+        mem.add_message(Message::assistant("Looking into it."));
+        mem.long_term.add_fact(Fact::new("Uses Rust", "analysis"));
+        mem.long_term.set_preference("style", "concise");
+
+        // Save
+        mem.save_session(&session_path).unwrap();
+        assert!(session_path.exists());
+
+        // Load
+        let loaded = MemorySystem::load_session(&session_path).unwrap();
+        assert_eq!(loaded.working.current_goal.as_deref(), Some("fix bug #42"));
+        assert_eq!(loaded.short_term.len(), 2);
+        assert_eq!(loaded.long_term.facts.len(), 1);
+        assert_eq!(loaded.long_term.get_preference("style"), Some("concise"));
+
+        // Verify message content
+        let messages = loaded.context_messages();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].content.as_text(), Some("fix the bug"));
+        assert_eq!(messages[1].content.as_text(), Some("Looking into it."));
+    }
+
+    #[test]
+    fn test_session_load_missing_file() {
+        let result = MemorySystem::load_session(Path::new("/nonexistent/session.json"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_session_load_corrupt_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bad.json");
+        std::fs::write(&path, "not valid json").unwrap();
+
+        let result = MemorySystem::load_session(&path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_session_save_creates_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let session_path = dir.path().join("nested").join("dir").join("session.json");
+
+        let mem = MemorySystem::new(5);
+        mem.save_session(&session_path).unwrap();
+        assert!(session_path.exists());
+    }
+
+    #[test]
+    fn test_session_metadata() {
+        let meta = SessionMetadata::new();
+        assert!(meta.task_summary.is_none());
+        assert!(meta.created_at <= Utc::now());
+
+        let default_meta = SessionMetadata::default();
+        assert!(default_meta.task_summary.is_none());
+    }
+
+    #[test]
+    fn test_short_term_window_size() {
+        let stm = ShortTermMemory::new(7);
+        assert_eq!(stm.window_size(), 7);
     }
 }

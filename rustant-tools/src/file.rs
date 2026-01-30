@@ -25,10 +25,12 @@ impl FileReadTool {
         };
 
         // Ensure the path doesn't escape the workspace
-        let canonical = resolved.canonicalize().map_err(|e| ToolError::ExecutionFailed {
-            name: "file_read".into(),
-            message: format!("Path resolution failed: {}", e),
-        })?;
+        let canonical = resolved
+            .canonicalize()
+            .map_err(|e| ToolError::ExecutionFailed {
+                name: "file_read".into(),
+                message: format!("Path resolution failed: {}", e),
+            })?;
 
         if !canonical.starts_with(&self.workspace) {
             return Err(ToolError::PermissionDenied {
@@ -73,21 +75,24 @@ impl Tool for FileReadTool {
     }
 
     async fn execute(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError> {
-        let path_str = args["path"].as_str().ok_or_else(|| ToolError::InvalidArguments {
-            name: "file_read".into(),
-            reason: "'path' parameter is required and must be a string".into(),
-        })?;
+        let path_str = args["path"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidArguments {
+                name: "file_read".into(),
+                reason: "'path' parameter is required and must be a string".into(),
+            })?;
 
         let path = self.resolve_path(path_str)?;
 
         debug!(path = %path.display(), "Reading file");
 
-        let content = tokio::fs::read_to_string(&path)
-            .await
-            .map_err(|e| ToolError::ExecutionFailed {
-                name: "file_read".into(),
-                message: format!("Failed to read '{}': {}", path_str, e),
-            })?;
+        let content =
+            tokio::fs::read_to_string(&path)
+                .await
+                .map_err(|e| ToolError::ExecutionFailed {
+                    name: "file_read".into(),
+                    message: format!("Failed to read '{}': {}", path_str, e),
+                })?;
 
         let start_line = args["start_line"].as_u64().map(|n| n as usize);
         let end_line = args["end_line"].as_u64().map(|n| n as usize);
@@ -216,9 +221,7 @@ impl Tool for FileListTool {
                         if path == target_dir {
                             continue;
                         }
-                        let relative = path
-                            .strip_prefix(&target_dir)
-                            .unwrap_or(path);
+                        let relative = path.strip_prefix(&target_dir).unwrap_or(path);
                         let type_indicator = if path.is_dir() { "/" } else { "" };
                         entries.push(format!("{}{}", relative.display(), type_indicator));
                     }
@@ -236,18 +239,23 @@ impl Tool for FileListTool {
                         message: format!("Failed to read directory '{}': {}", path_str, e),
                     })?;
 
-            while let Some(entry) = read_dir
-                .next_entry()
-                .await
-                .map_err(|e| ToolError::ExecutionFailed {
-                    name: "file_list".into(),
-                    message: format!("Error reading entry: {}", e),
-                })?
+            while let Some(entry) =
+                read_dir
+                    .next_entry()
+                    .await
+                    .map_err(|e| ToolError::ExecutionFailed {
+                        name: "file_list".into(),
+                        message: format!("Error reading entry: {}", e),
+                    })?
             {
-                let file_type = entry.file_type().await.map_err(|e| ToolError::ExecutionFailed {
-                    name: "file_list".into(),
-                    message: format!("Error reading file type: {}", e),
-                })?;
+                let file_type =
+                    entry
+                        .file_type()
+                        .await
+                        .map_err(|e| ToolError::ExecutionFailed {
+                            name: "file_list".into(),
+                            message: format!("Error reading file type: {}", e),
+                        })?;
 
                 let name = entry.file_name().to_string_lossy().to_string();
                 let type_indicator = if file_type.is_dir() { "/" } else { "" };
@@ -259,11 +267,7 @@ impl Tool for FileListTool {
         let output = if entries.is_empty() {
             format!("Directory '{}' is empty", path_str)
         } else {
-            format!(
-                "Contents of '{}':\n{}",
-                path_str,
-                entries.join("\n")
-            )
+            format!("Contents of '{}':\n{}", path_str, entries.join("\n"))
         };
 
         Ok(ToolOutput::text(output))
@@ -321,10 +325,12 @@ impl Tool for FileSearchTool {
     }
 
     async fn execute(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError> {
-        let pattern = args["pattern"].as_str().ok_or_else(|| ToolError::InvalidArguments {
-            name: "file_search".into(),
-            reason: "'pattern' parameter is required".into(),
-        })?;
+        let pattern = args["pattern"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidArguments {
+                name: "file_search".into(),
+                reason: "'pattern' parameter is required".into(),
+            })?;
 
         let search_path = args["path"].as_str().unwrap_or(".");
         let file_pattern = args["file_pattern"].as_str();
@@ -380,9 +386,7 @@ impl Tool for FileSearchTool {
                 Err(_) => continue, // Skip binary or unreadable files
             };
 
-            let relative = path
-                .strip_prefix(&self.workspace)
-                .unwrap_or(path);
+            let relative = path.strip_prefix(&self.workspace).unwrap_or(path);
 
             for (line_num, line) in content.lines().enumerate() {
                 if results.len() >= max_results {
@@ -423,8 +427,7 @@ impl FileSearchTool {
         if pattern.starts_with("*.") {
             let ext = &pattern[1..];
             name.ends_with(ext)
-        } else if pattern.ends_with("*") {
-            let prefix = &pattern[..pattern.len() - 1];
+        } else if let Some(prefix) = pattern.strip_suffix("*") {
             name.starts_with(prefix)
         } else {
             name == pattern
@@ -471,14 +474,18 @@ impl Tool for FileWriteTool {
     }
 
     async fn execute(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError> {
-        let path_str = args["path"].as_str().ok_or_else(|| ToolError::InvalidArguments {
-            name: "file_write".into(),
-            reason: "'path' parameter is required".into(),
-        })?;
-        let content = args["content"].as_str().ok_or_else(|| ToolError::InvalidArguments {
-            name: "file_write".into(),
-            reason: "'content' parameter is required".into(),
-        })?;
+        let path_str = args["path"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidArguments {
+                name: "file_write".into(),
+                reason: "'path' parameter is required".into(),
+            })?;
+        let content = args["content"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidArguments {
+                name: "file_write".into(),
+                reason: "'content' parameter is required".into(),
+            })?;
 
         let path = self.workspace.join(path_str);
 
@@ -516,8 +523,10 @@ impl Tool for FileWriteTool {
             }
         };
 
-        Ok(ToolOutput::text(format!("{} '{}' ({} bytes)", action, path_str, bytes))
-            .with_artifact(artifact))
+        Ok(
+            ToolOutput::text(format!("{} '{}' ({} bytes)", action, path_str, bytes))
+                .with_artifact(artifact),
+        )
     }
 
     fn risk_level(&self) -> RiskLevel {
@@ -568,27 +577,34 @@ impl Tool for FilePatchTool {
     }
 
     async fn execute(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError> {
-        let path_str = args["path"].as_str().ok_or_else(|| ToolError::InvalidArguments {
-            name: "file_patch".into(),
-            reason: "'path' parameter is required".into(),
-        })?;
-        let old_text = args["old_text"].as_str().ok_or_else(|| ToolError::InvalidArguments {
-            name: "file_patch".into(),
-            reason: "'old_text' parameter is required".into(),
-        })?;
-        let new_text = args["new_text"].as_str().ok_or_else(|| ToolError::InvalidArguments {
-            name: "file_patch".into(),
-            reason: "'new_text' parameter is required".into(),
-        })?;
+        let path_str = args["path"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidArguments {
+                name: "file_patch".into(),
+                reason: "'path' parameter is required".into(),
+            })?;
+        let old_text = args["old_text"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidArguments {
+                name: "file_patch".into(),
+                reason: "'old_text' parameter is required".into(),
+            })?;
+        let new_text = args["new_text"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidArguments {
+                name: "file_patch".into(),
+                reason: "'new_text' parameter is required".into(),
+            })?;
 
         let path = self.workspace.join(path_str);
 
-        let content = tokio::fs::read_to_string(&path)
-            .await
-            .map_err(|e| ToolError::ExecutionFailed {
-                name: "file_patch".into(),
-                message: format!("Failed to read '{}': {}", path_str, e),
-            })?;
+        let content =
+            tokio::fs::read_to_string(&path)
+                .await
+                .map_err(|e| ToolError::ExecutionFailed {
+                    name: "file_patch".into(),
+                    message: format!("Failed to read '{}': {}", path_str, e),
+                })?;
 
         if !content.contains(old_text) {
             return Err(ToolError::ExecutionFailed {
@@ -618,7 +634,11 @@ impl Tool for FilePatchTool {
         ));
         output.artifacts.push(Artifact::FileModified {
             path: PathBuf::from(path_str),
-            diff: format!("- {}\n+ {}", old_text.lines().next().unwrap_or(""), new_text.lines().next().unwrap_or("")),
+            diff: format!(
+                "- {}\n+ {}",
+                old_text.lines().next().unwrap_or(""),
+                new_text.lines().next().unwrap_or("")
+            ),
         });
 
         Ok(output)
@@ -637,7 +657,11 @@ mod tests {
     fn setup_workspace() -> TempDir {
         let dir = TempDir::new().unwrap();
         // Create some test files
-        std::fs::write(dir.path().join("hello.txt"), "Hello, World!\nLine 2\nLine 3\n").unwrap();
+        std::fs::write(
+            dir.path().join("hello.txt"),
+            "Hello, World!\nLine 2\nLine 3\n",
+        )
+        .unwrap();
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
         std::fs::write(
             dir.path().join("src/main.rs"),

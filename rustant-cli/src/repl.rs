@@ -1,14 +1,12 @@
 //! REPL (Read-Eval-Print Loop) for interactive and single-task modes.
 
-use rustant_core::{
-    Agent, AgentCallback, AgentConfig, MockLlmProvider, RegisteredTool,
-};
 use rustant_core::safety::ActionRequest;
 use rustant_core::types::{AgentStatus, RiskLevel, ToolOutput};
+use rustant_core::{Agent, AgentCallback, AgentConfig, MockLlmProvider, RegisteredTool};
 use rustant_tools::register_builtin_tools;
 use rustant_tools::registry::ToolRegistry;
 use std::io::{self, BufRead, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// A CLI callback that prints to stdout and reads approval from stdin.
@@ -132,7 +130,9 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     let cost = agent.brain().total_cost();
                     println!(
                         "Tokens: {} in / {} out ({} total)",
-                        usage.input_tokens, usage.output_tokens, usage.total()
+                        usage.input_tokens,
+                        usage.output_tokens,
+                        usage.total()
                     );
                     println!("Cost: ${:.4}", cost.total());
                     continue;
@@ -146,7 +146,10 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     continue;
                 }
                 _ => {
-                    println!("Unknown command: {}. Type /help for available commands.", input);
+                    println!(
+                        "Unknown command: {}. Type /help for available commands.",
+                        input
+                    );
                     continue;
                 }
             }
@@ -207,14 +210,14 @@ pub async fn run_single_task(
 fn register_agent_tools_from_registry(
     agent: &mut Agent,
     registry: &ToolRegistry,
-    workspace: &PathBuf,
+    workspace: &Path,
 ) {
     // We re-create the tools since the agent uses a different tool registration model.
     // In Phase 1+, this will be unified.
     let tool_defs = registry.list_definitions();
     for def in tool_defs {
         let name = def.name.clone();
-        let ws = workspace.clone();
+        let ws = workspace.to_path_buf();
         let registry_clone = create_tool_executor(&name, &ws);
         if let Some(executor) = registry_clone {
             agent.register_tool(RegisteredTool {
@@ -227,11 +230,8 @@ fn register_agent_tools_from_registry(
 }
 
 /// Create a tool executor function for the given tool name.
-fn create_tool_executor(
-    name: &str,
-    workspace: &PathBuf,
-) -> Option<rustant_core::agent::ToolExecutor> {
-    let ws = workspace.clone();
+fn create_tool_executor(name: &str, workspace: &Path) -> Option<rustant_core::agent::ToolExecutor> {
+    let ws = workspace.to_path_buf();
     match name {
         "file_read" => {
             let tool = Arc::new(rustant_tools::file::FileReadTool::new(ws));
@@ -323,6 +323,36 @@ fn create_tool_executor(
                 })
             }))
         }
+        "echo" => {
+            let tool = Arc::new(rustant_tools::utils::EchoTool);
+            Some(Box::new(move |args| {
+                let t = tool.clone();
+                Box::pin(async move {
+                    use rustant_tools::registry::Tool;
+                    t.execute(args).await
+                })
+            }))
+        }
+        "datetime" => {
+            let tool = Arc::new(rustant_tools::utils::DateTimeTool);
+            Some(Box::new(move |args| {
+                let t = tool.clone();
+                Box::pin(async move {
+                    use rustant_tools::registry::Tool;
+                    t.execute(args).await
+                })
+            }))
+        }
+        "calculator" => {
+            let tool = Arc::new(rustant_tools::utils::CalculatorTool);
+            Some(Box::new(move |args| {
+                let t = tool.clone();
+                Box::pin(async move {
+                    use rustant_tools::registry::Tool;
+                    t.execute(args).await
+                })
+            }))
+        }
         _ => None,
     }
 }
@@ -330,7 +360,8 @@ fn create_tool_executor(
 /// Get the risk level for a tool by name.
 fn tool_risk_level(name: &str) -> RiskLevel {
     match name {
-        "file_read" | "file_list" | "file_search" | "git_status" | "git_diff" => RiskLevel::ReadOnly,
+        "file_read" | "file_list" | "file_search" | "git_status" | "git_diff" | "echo"
+        | "datetime" | "calculator" => RiskLevel::ReadOnly,
         "file_write" | "file_patch" | "git_commit" => RiskLevel::Write,
         "shell_exec" => RiskLevel::Execute,
         _ => RiskLevel::Execute,

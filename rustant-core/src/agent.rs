@@ -5,19 +5,17 @@
 
 use crate::brain::{Brain, LlmProvider};
 use crate::config::AgentConfig;
-use crate::error::{AgentError, RustantError, ToolError};
+use crate::error::{AgentError, LlmError, RustantError, ToolError};
 use crate::memory::MemorySystem;
-use crate::safety::{
-    ActionDetails, ActionRequest, PermissionResult, SafetyGuardian,
-};
+use crate::safety::{ActionDetails, ActionRequest, PermissionResult, SafetyGuardian};
 use crate::types::{
-    AgentState, AgentStatus, Content, CostEstimate, Message,
-    RiskLevel, TokenUsage, ToolDefinition, ToolOutput,
+    AgentState, AgentStatus, CompletionResponse, Content, CostEstimate, Message, RiskLevel, Role,
+    StreamEvent, TokenUsage, ToolDefinition, ToolOutput,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -72,8 +70,11 @@ pub trait AgentCallback: Send + Sync {
 
 /// A tool executor function type. The agent holds tool executors and their definitions.
 pub type ToolExecutor = Box<
-    dyn Fn(serde_json::Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<ToolOutput, ToolError>> + Send>>
-        + Send
+    dyn Fn(
+            serde_json::Value,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<ToolOutput, ToolError>> + Send>,
+        > + Send
         + Sync,
 >;
 
@@ -103,10 +104,7 @@ impl Agent {
         config: AgentConfig,
         callback: Arc<dyn AgentCallback>,
     ) -> Self {
-        let brain = Brain::new(
-            provider,
-            crate::brain::DEFAULT_SYSTEM_PROMPT,
-        );
+        let brain = Brain::new(provider, crate::brain::DEFAULT_SYSTEM_PROMPT);
         let memory = MemorySystem::new(config.memory.window_size);
         let safety = SafetyGuardian::new(config.safety.clone());
         let max_iter = config.safety.max_iterations;
@@ -178,7 +176,11 @@ impl Agent {
 
             let conversation = self.memory.context_messages();
             let tools = Some(self.tool_definitions());
-            let response = self.brain.think(&conversation, tools).await?;
+            let response = if self.config.llm.use_streaming {
+                self.think_streaming(&conversation, tools).await?
+            } else {
+                self.brain.think_with_retry(&conversation, tools, 3).await?
+            };
 
             // --- DECIDE ---
             self.state.status = AgentStatus::Deciding;
@@ -192,7 +194,11 @@ impl Agent {
                     // Text response means the agent is done thinking
                     break;
                 }
-                Content::ToolCall { id, name, arguments } => {
+                Content::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                } => {
                     // LLM wants to call a tool
                     info!(
                         task_id = %task_id,
@@ -202,9 +208,7 @@ impl Agent {
                     self.memory.add_message(response.message.clone());
 
                     // --- ACT ---
-                    let result = self
-                        .execute_tool(id, name, arguments)
-                        .await;
+                    let result = self.execute_tool(id, name, arguments).await;
 
                     // --- OBSERVE ---
                     match result {
@@ -250,7 +254,11 @@ impl Agent {
                                 self.callback.on_assistant_message(text).await;
                                 final_response = text.clone();
                             }
-                            Content::ToolCall { id, name, arguments } => {
+                            Content::ToolCall {
+                                id,
+                                name,
+                                arguments,
+                            } => {
                                 has_tool_call = true;
                                 let result = self.execute_tool(id, name, arguments).await;
                                 match result {
@@ -261,7 +269,7 @@ impl Agent {
                                     Err(e) => {
                                         let msg = Message::tool_result(
                                             id,
-                                            &format!("Tool error: {}", e),
+                                            format!("Tool error: {}", e),
                                             true,
                                         );
                                         self.memory.add_message(msg);
@@ -306,6 +314,75 @@ impl Agent {
         })
     }
 
+    /// Perform a streaming think operation, sending tokens to the callback as they arrive.
+    /// Returns a CompletionResponse equivalent to the non-streaming path.
+    async fn think_streaming(
+        &mut self,
+        conversation: &[Message],
+        tools: Option<Vec<ToolDefinition>>,
+    ) -> Result<CompletionResponse, LlmError> {
+        let (tx, mut rx) = mpsc::channel(64);
+
+        // Build messages and request manually to avoid double borrow
+        let messages = self.brain.build_messages(conversation);
+        let token_estimate = self.brain.provider().estimate_tokens(&messages);
+        let context_limit = self.brain.provider().context_window();
+
+        if token_estimate > context_limit {
+            return Err(LlmError::ContextOverflow {
+                used: token_estimate,
+                limit: context_limit,
+            });
+        }
+
+        let request = crate::types::CompletionRequest {
+            messages,
+            tools,
+            temperature: 0.7,
+            max_tokens: None,
+            stop_sequences: Vec::new(),
+            model: None,
+        };
+
+        // Run the streaming completion
+        self.brain
+            .provider()
+            .complete_streaming(request, tx)
+            .await?;
+
+        // Consume events from the channel
+        let mut text_parts = String::new();
+        let mut usage = TokenUsage::default();
+
+        while let Some(event) = rx.recv().await {
+            match event {
+                StreamEvent::Token(token) => {
+                    self.callback.on_token(&token).await;
+                    text_parts.push_str(&token);
+                }
+                StreamEvent::Done { usage: u } => {
+                    usage = u;
+                    break;
+                }
+                StreamEvent::Error(e) => {
+                    return Err(LlmError::Streaming { message: e });
+                }
+                _ => {}
+            }
+        }
+
+        // Track usage in brain
+        self.brain.track_usage(&usage);
+
+        let message = Message::new(Role::Assistant, Content::text(text_parts));
+        Ok(CompletionResponse {
+            message,
+            usage,
+            model: self.brain.model_name().to_string(),
+            finish_reason: Some("stop".to_string()),
+        })
+    }
+
     /// Execute a tool with safety checks.
     async fn execute_tool(
         &mut self,
@@ -314,9 +391,12 @@ impl Agent {
         arguments: &serde_json::Value,
     ) -> Result<ToolOutput, ToolError> {
         // Look up the tool
-        let tool = self.tools.get(tool_name).ok_or_else(|| ToolError::NotFound {
-            name: tool_name.to_string(),
-        })?;
+        let tool = self
+            .tools
+            .get(tool_name)
+            .ok_or_else(|| ToolError::NotFound {
+                name: tool_name.to_string(),
+            })?;
 
         // Build action request for safety check
         let action = SafetyGuardian::create_action_request(
@@ -566,7 +646,9 @@ mod tests {
             serde_json::json!({}),
         ));
         // After tool error, agent should respond with text
-        provider.queue_response(MockLlmProvider::text_response("Sorry, that tool doesn't exist."));
+        provider.queue_response(MockLlmProvider::text_response(
+            "Sorry, that tool doesn't exist.",
+        ));
 
         let (mut agent, _callback) = create_test_agent(provider);
         let result = agent.process_task("Use nonexistent tool").await.unwrap();
@@ -662,10 +744,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_agent_streaming_mode() {
+        let provider = Arc::new(MockLlmProvider::new());
+        provider.queue_response(MockLlmProvider::text_response("streaming response"));
+
+        let callback = Arc::new(RecordingCallback::new());
+        let mut config = AgentConfig::default();
+        config.llm.use_streaming = true;
+
+        let mut agent = Agent::new(provider, config, callback.clone());
+        let result = agent.process_task("Test streaming").await.unwrap();
+
+        assert!(result.success);
+        assert!(result.response.contains("streaming"));
+        // Streaming should have triggered on_token callbacks
+        // (MockLlmProvider splits on whitespace)
+    }
+
+    #[tokio::test]
     async fn test_recording_callback() {
         let callback = RecordingCallback::new();
         callback.on_assistant_message("hello").await;
-        callback.on_tool_start("file_read", &serde_json::json!({})).await;
+        callback
+            .on_tool_start("file_read", &serde_json::json!({}))
+            .await;
         callback.on_status_change(AgentStatus::Thinking).await;
 
         assert_eq!(callback.messages().await, vec!["hello"]);

@@ -12,25 +12,13 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// Top-level configuration for the Rustant agent.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentConfig {
     pub llm: LlmConfig,
     pub safety: SafetyConfig,
     pub memory: MemoryConfig,
     pub ui: UiConfig,
     pub tools: ToolsConfig,
-}
-
-impl Default for AgentConfig {
-    fn default() -> Self {
-        Self {
-            llm: LlmConfig::default(),
-            safety: SafetyConfig::default(),
-            memory: MemoryConfig::default(),
-            ui: UiConfig::default(),
-            tools: ToolsConfig::default(),
-        }
-    }
 }
 
 /// LLM provider configuration.
@@ -54,6 +42,8 @@ pub struct LlmConfig {
     pub input_cost_per_million: f64,
     /// Cost per 1M output tokens (USD).
     pub output_cost_per_million: f64,
+    /// Whether to use streaming for LLM responses (enables token-by-token output).
+    pub use_streaming: bool,
 }
 
 impl Default for LlmConfig {
@@ -68,15 +58,17 @@ impl Default for LlmConfig {
             context_window: 128_000,
             input_cost_per_million: 2.50,
             output_cost_per_million: 10.00,
+            use_streaming: false,
         }
     }
 }
 
 /// Approval mode controlling how much autonomy the agent has.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ApprovalMode {
     /// Only read operations are auto-approved; all writes require approval.
+    #[default]
     Safe,
     /// All reversible operations are auto-approved; destructive requires approval.
     Cautious,
@@ -84,12 +76,6 @@ pub enum ApprovalMode {
     Paranoid,
     /// All operations are auto-approved (use at own risk).
     Yolo,
-}
-
-impl Default for ApprovalMode {
-    fn default() -> Self {
-        Self::Safe
-    }
 }
 
 impl std::fmt::Display for ApprovalMode {
@@ -127,8 +113,16 @@ impl Default for SafetyConfig {
     fn default() -> Self {
         Self {
             approval_mode: ApprovalMode::Safe,
-            allowed_paths: vec!["src/**".to_string(), "tests/**".to_string(), "docs/**".to_string()],
-            denied_paths: vec![".env*".to_string(), "**/*.key".to_string(), "**/secrets/**".to_string()],
+            allowed_paths: vec![
+                "src/**".to_string(),
+                "tests/**".to_string(),
+                "docs/**".to_string(),
+            ],
+            denied_paths: vec![
+                ".env*".to_string(),
+                "**/*.key".to_string(),
+                "**/secrets/**".to_string(),
+            ],
             allowed_commands: vec![
                 "cargo".to_string(),
                 "git".to_string(),
@@ -238,7 +232,7 @@ impl Default for ToolsConfig {
 pub fn load_config(
     workspace: Option<&Path>,
     overrides: Option<&AgentConfig>,
-) -> Result<AgentConfig, figment::Error> {
+) -> Result<AgentConfig, Box<figment::Error>> {
     let mut figment = Figment::from(Serialized::defaults(AgentConfig::default()));
 
     // User-level config
@@ -265,7 +259,7 @@ pub fn load_config(
         figment = figment.merge(Serialized::defaults(overrides));
     }
 
-    figment.extract()
+    figment.extract().map_err(Box::new)
 }
 
 #[cfg(test)]
@@ -297,7 +291,10 @@ mod tests {
         let toml_str = toml::to_string(&config).unwrap();
         let deserialized: AgentConfig = toml::from_str(&toml_str).unwrap();
         assert_eq!(deserialized.llm.model, config.llm.model);
-        assert_eq!(deserialized.safety.approval_mode, config.safety.approval_mode);
+        assert_eq!(
+            deserialized.safety.approval_mode,
+            config.safety.approval_mode
+        );
         assert_eq!(deserialized.memory.window_size, config.memory.window_size);
     }
 

@@ -27,6 +27,7 @@ dotenvy = { workspace = true }
 reqwest = { workspace = true }
 async-trait = "0.1"
 pin-project-lite = "0.2"
+tiktoken-rs = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"
