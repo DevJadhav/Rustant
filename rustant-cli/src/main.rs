@@ -4,6 +4,7 @@
 
 mod commands;
 mod repl;
+mod tui;
 
 use clap::Parser;
 use std::path::PathBuf;
@@ -117,10 +118,12 @@ async fn main() -> anyhow::Result<()> {
         };
     }
 
-    // Start REPL or execute single task
+    // Start TUI, REPL, or execute single task
     if let Some(task) = cli.task {
         repl::run_single_task(&task, config, workspace).await
-    } else {
+    } else if cli.no_tui || !config.ui.use_tui {
         repl::run_interactive(config, workspace).await
+    } else {
+        tui::run(config, workspace).await
     }
 }

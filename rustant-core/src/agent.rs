@@ -493,6 +493,16 @@ impl Agent {
     pub fn safety(&self) -> &SafetyGuardian {
         &self.safety
     }
+
+    /// Get the memory system reference.
+    pub fn memory(&self) -> &MemorySystem {
+        &self.memory
+    }
+
+    /// Get a mutable reference to the memory system.
+    pub fn memory_mut(&mut self) -> &mut MemorySystem {
+        &mut self.memory
+    }
 }
 
 /// A no-op callback for testing.
