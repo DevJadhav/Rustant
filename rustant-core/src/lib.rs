@@ -10,6 +10,8 @@ pub mod config;
 pub mod error;
 pub mod memory;
 pub mod safety;
+pub mod sandbox;
+pub mod summarizer;
 pub mod types;
 
 // Re-export commonly used types at the crate root.
@@ -19,6 +21,8 @@ pub use config::{AgentConfig, ApprovalMode};
 pub use error::{Result, RustantError};
 pub use memory::{MemorySystem, Session, SessionMetadata};
 pub use safety::SafetyGuardian;
+pub use sandbox::SandboxedFs;
+pub use summarizer::{ContextSummarizer, ContextSummary, TokenAlert, TokenCostDisplay};
 pub use types::{
     AgentState, AgentStatus, Artifact, CompletionRequest, CompletionResponse, Content,
     CostEstimate, Message, RiskLevel, Role, StreamEvent, TokenUsage, ToolDefinition, ToolOutput,
