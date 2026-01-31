@@ -21,6 +21,7 @@ walkdir = "2.5"
 ignore = "0.4"
 globset = "0.4"
 git2 = { workspace = true }
+wasmi = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

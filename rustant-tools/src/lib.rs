@@ -8,6 +8,7 @@ pub mod file;
 pub mod git;
 pub mod lsp;
 pub mod registry;
+pub mod sandbox;
 pub mod shell;
 pub mod utils;
 
