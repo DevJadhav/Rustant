@@ -112,10 +112,7 @@ impl AnthropicProvider {
 
         // Add tools if provided.
         if let Some(tools) = &request.tools {
-            let tools_json: Vec<Value> = tools
-                .iter()
-                .map(Self::tool_definition_to_json)
-                .collect();
+            let tools_json: Vec<Value> = tools.iter().map(Self::tool_definition_to_json).collect();
             body["tools"] = Value::Array(tools_json);
         }
 

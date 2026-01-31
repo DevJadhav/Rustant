@@ -2075,15 +2075,19 @@ dependencies = [
 name = "rustant-mcp"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "async-trait",
+ "chrono",
  "rustant-core",
+ "rustant-tools",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-test",
+ "tokio-util",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
