@@ -79,6 +79,42 @@ impl CommandPalette {
                 command: "/undo".into(),
                 description: "Undo last file change".into(),
             },
+            CommandEntry {
+                command: "/audit".into(),
+                description: "Show audit trail".into(),
+            },
+            CommandEntry {
+                command: "/audit export".into(),
+                description: "Export traces (json/csv/text)".into(),
+            },
+            CommandEntry {
+                command: "/audit query".into(),
+                description: "Query traces by tool name".into(),
+            },
+            CommandEntry {
+                command: "/analytics".into(),
+                description: "Show usage analytics and patterns".into(),
+            },
+            CommandEntry {
+                command: "/replay".into(),
+                description: "Start or show replay".into(),
+            },
+            CommandEntry {
+                command: "/replay next".into(),
+                description: "Step forward in replay".into(),
+            },
+            CommandEntry {
+                command: "/replay prev".into(),
+                description: "Step backward in replay".into(),
+            },
+            CommandEntry {
+                command: "/replay timeline".into(),
+                description: "Show full replay timeline".into(),
+            },
+            CommandEntry {
+                command: "/replay reset".into(),
+                description: "Clear replay session".into(),
+            },
         ];
 
         let filtered: Vec<usize> = (0..commands.len()).collect();
