@@ -5,11 +5,13 @@
 //! safety guardian, configuration, and fundamental types.
 
 pub mod agent;
+pub mod audit;
 pub mod brain;
 pub mod config;
 pub mod error;
 pub mod memory;
 pub mod providers;
+pub mod replay;
 pub mod safety;
 pub mod sandbox;
 pub mod summarizer;
