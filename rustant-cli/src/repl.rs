@@ -86,7 +86,13 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
     );
     println!("  Type /help for commands, /quit to exit\n");
 
-    let provider = Arc::new(MockLlmProvider::new());
+    let provider = match rustant_core::create_provider(&config.llm) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("LLM provider init failed: {}. Using mock.", e);
+            Arc::new(MockLlmProvider::new())
+        }
+    };
     let callback = Arc::new(CliCallback);
     let mut agent = Agent::new(provider, config, callback);
 
@@ -183,7 +189,13 @@ pub async fn run_single_task(
     config: AgentConfig,
     workspace: PathBuf,
 ) -> anyhow::Result<()> {
-    let provider = Arc::new(MockLlmProvider::new());
+    let provider = match rustant_core::create_provider(&config.llm) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("LLM provider init failed: {}. Using mock.", e);
+            Arc::new(MockLlmProvider::new())
+        }
+    };
     let callback = Arc::new(CliCallback);
     let mut agent = Agent::new(provider, config, callback);
 

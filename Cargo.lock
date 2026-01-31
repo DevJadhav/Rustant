@@ -2033,6 +2033,7 @@ dependencies = [
  "tokio-test",
  "toml",
  "tracing",
+ "tracing-appender",
  "tracing-subscriber",
  "tui-textarea",
  "unicode-width 0.2.0",

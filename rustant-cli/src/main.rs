@@ -8,7 +8,9 @@ mod tui;
 
 use clap::Parser;
 use std::path::PathBuf;
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, Layer};
 
 /// Rustant: Your Rust-Powered Autonomous Assistant
 #[derive(Parser, Debug)]
@@ -74,16 +76,34 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
-    // Set up tracing
+    // Set up tracing: human-readable stderr + JSON file logging
     let filter = match cli.verbose {
         0 if cli.quiet => "error",
         0 => "info",
         1 => "debug",
         _ => "trace",
     };
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new(filter))
+
+    // Human-readable layer for stderr (always active)
+    let stderr_layer = tracing_subscriber::fmt::layer()
         .with_target(false)
+        .with_filter(EnvFilter::new(filter));
+
+    // JSON file layer for structured logging
+    let log_dir = directories::ProjectDirs::from("dev", "rustant", "rustant")
+        .map(|d| d.data_dir().join("logs"))
+        .unwrap_or_else(|| PathBuf::from("."));
+    let _ = std::fs::create_dir_all(&log_dir);
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "rustant.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    let json_layer = tracing_subscriber::fmt::layer()
+        .json()
+        .with_writer(non_blocking)
+        .with_filter(EnvFilter::new("debug"));
+
+    tracing_subscriber::registry()
+        .with(stderr_layer)
+        .with(json_layer)
         .init();
 
     // Resolve workspace
