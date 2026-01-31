@@ -1,0 +1,24 @@
+[package]
+name = "rustant-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "MCP (Model Context Protocol) server implementation for Rustant"
+
+[dependencies]
+rustant-core = { workspace = true }
+rustant-tools = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.14"

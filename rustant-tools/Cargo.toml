@@ -1,0 +1,29 @@
+[package]
+name = "rustant-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Tool implementations for Rustant - file, git, shell, and search tools"
+
+[dependencies]
+rustant-core = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+async-trait = "0.1"
+walkdir = "2.5"
+ignore = "0.4"
+globset = "0.4"
+git2 = { workspace = true }
+wasmi = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+pretty_assertions = "1.4"
+tempfile = "3.14"

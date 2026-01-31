@@ -1,0 +1,93 @@
+[workspace]
+resolver = "2"
+members = [
+    "rustant-core",
+    "rustant-tools",
+    "rustant-cli",
+    "rustant-mcp",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Dev Jadhav"]
+repository = "https://github.com/DevJadhav/Rustant"
+description = "A high-performance, privacy-first autonomous personal agent built in Rust"
+
+[workspace.dependencies]
+# Core runtime & async
+tokio = { version = "1.47", features = ["rt-multi-thread", "sync", "time", "macros", "net", "fs", "io-util", "io-std", "process"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tokio-stream = "0.1"
+futures = "0.3"
+
+# Serialization & data
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Logging & tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+tracing-appender = "0.2"
+
+# Configuration
+figment = { version = "0.10", features = ["toml", "env", "json"] }
+directories = "5.0"
+dotenvy = "0.15"
+
+# Networking
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# CLI & TUI
+clap = { version = "4.5", features = ["derive"] }
+ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
+crossterm = { version = "0.28", features = ["event-stream", "bracketed-paste"] }
+tui-textarea = { version = "0.7", features = ["crossterm", "search"] }
+syntect = { version = "5.2", default-features = false, features = ["default-fancy"] }
+textwrap = "0.16"
+unicode-width = "0.2"
+
+# Fuzzy matching
+nucleo-matcher = "0.3"
+
+# Clipboard
+arboard = "3.4"
+
+# Git (native bindings)
+git2 = { version = "0.19", features = ["vendored-libgit2"] }
+
+# Filesystem sandboxing
+cap-std = "3.4"
+
+# WASM sandboxing
+wasmi = { version = "1.0", features = ["default"] }
+
+# Diff computation
+similar = "2.6"
+
+# Token counting
+tiktoken-rs = "0.9"
+
+# Internal crates
+rustant-core = { path = "rustant-core" }
+rustant-tools = { path = "rustant-tools" }
+rustant-mcp = { path = "rustant-mcp" }
+
+[profile.release]
+lto = "thin"
+strip = true
+opt-level = "z"
+codegen-units = 1
+panic = "abort"
+
+[profile.dist]
+inherits = "release"
+lto = "fat"
