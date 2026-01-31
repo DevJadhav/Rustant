@@ -17,7 +17,7 @@ description = "A high-performance, privacy-first autonomous personal agent built
 
 [workspace.dependencies]
 # Core runtime & async
-tokio = { version = "1.47", features = ["rt-multi-thread", "sync", "time", "macros", "net", "fs", "io-util", "process"] }
+tokio = { version = "1.47", features = ["rt-multi-thread", "sync", "time", "macros", "net", "fs", "io-util", "io-std", "process"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 tokio-stream = "0.1"
 futures = "0.3"
