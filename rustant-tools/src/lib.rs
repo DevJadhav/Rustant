@@ -6,6 +6,7 @@
 pub mod checkpoint;
 pub mod file;
 pub mod git;
+pub mod lsp;
 pub mod registry;
 pub mod shell;
 pub mod utils;
@@ -25,7 +26,7 @@ pub fn register_builtin_tools(registry: &mut ToolRegistry, workspace: PathBuf) {
         Arc::new(git::GitStatusTool::new(workspace.clone())),
         Arc::new(git::GitDiffTool::new(workspace.clone())),
         Arc::new(git::GitCommitTool::new(workspace.clone())),
-        Arc::new(shell::ShellExecTool::new(workspace)),
+        Arc::new(shell::ShellExecTool::new(workspace.clone())),
         Arc::new(utils::EchoTool),
         Arc::new(utils::DateTimeTool),
         Arc::new(utils::CalculatorTool),
@@ -34,6 +35,22 @@ pub fn register_builtin_tools(registry: &mut ToolRegistry, workspace: PathBuf) {
     for tool in tools {
         if let Err(e) = registry.register(tool) {
             tracing::warn!("Failed to register tool: {}", e);
+        }
+    }
+}
+
+/// Register all LSP tools backed by a shared [`lsp::LspManager`].
+///
+/// The LSP tools provide code intelligence capabilities (hover, definition,
+/// references, diagnostics, completions, rename, format) by connecting to
+/// language servers installed on the system.
+pub fn register_lsp_tools(registry: &mut ToolRegistry, workspace: PathBuf) {
+    let manager = Arc::new(lsp::LspManager::new(workspace));
+    let lsp_tools = lsp::create_lsp_tools(manager);
+
+    for tool in lsp_tools {
+        if let Err(e) = registry.register(tool) {
+            tracing::warn!("Failed to register LSP tool: {}", e);
         }
     }
 }
