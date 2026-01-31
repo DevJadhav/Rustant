@@ -67,6 +67,9 @@ git2 = { version = "0.19", features = ["vendored-libgit2"] }
 # Filesystem sandboxing
 cap-std = "3.4"
 
+# WASM sandboxing
+wasmi = { version = "1.0", features = ["default"] }
+
 # Diff computation
 similar = "2.6"
 
