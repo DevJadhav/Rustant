@@ -6,6 +6,7 @@ use crate::tui::theme::Theme;
 use crate::tui::widgets::autocomplete::AutocompleteState;
 use crate::tui::widgets::command_palette::CommandPalette;
 use crate::tui::widgets::conversation::{render_conversation, ConversationState, DisplayMessage};
+use crate::tui::widgets::diff_view::DiffView;
 use crate::tui::widgets::header::{render_header, HeaderData};
 use crate::tui::widgets::input_area::{InputAction, InputWidget};
 use crate::tui::widgets::markdown::SyntaxHighlighter;
@@ -18,6 +19,7 @@ use rustant_core::types::{AgentStatus, Role};
 use rustant_core::{
     Agent, AgentConfig, MockLlmProvider, RegisteredTool, TaskResult, TokenAlert, TokenCostDisplay,
 };
+use rustant_tools::checkpoint::CheckpointManager;
 use rustant_tools::register_builtin_tools;
 use rustant_tools::registry::ToolRegistry;
 use std::path::{Path, PathBuf};
@@ -43,6 +45,10 @@ pub struct App {
     pub autocomplete: AutocompleteState,
     pub command_palette: CommandPalette,
 
+    // Week 7: Diff view & checkpoints
+    pub diff_view: DiffView,
+    checkpoint_manager: CheckpointManager,
+
     // Agent communication
     callback_rx: mpsc::UnboundedReceiver<TuiEvent>,
     agent: Agent,
@@ -64,7 +70,13 @@ impl App {
         let vim_mode = config.ui.vim_mode;
 
         let (callback, callback_rx) = TuiCallback::new();
-        let provider = Arc::new(MockLlmProvider::new());
+        let provider = match rustant_core::create_provider(&config.llm) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("LLM provider init failed: {}. Using mock.", e);
+                Arc::new(MockLlmProvider::new())
+            }
+        };
         let callback_arc = Arc::new(callback);
         let mut agent = Agent::new(provider, config.clone(), callback_arc);
 
@@ -88,7 +100,7 @@ impl App {
             ..Default::default()
         };
 
-        Self {
+        let mut app = Self {
             conversation: ConversationState::new(),
             input: InputWidget::new(&theme),
             header,
@@ -103,6 +115,8 @@ impl App {
             highlighter: SyntaxHighlighter::new(),
             autocomplete: AutocompleteState::new(workspace.clone()),
             command_palette: CommandPalette::new(),
+            diff_view: DiffView::new(),
+            checkpoint_manager: CheckpointManager::new(workspace.clone()),
             callback_rx,
             agent,
             workspace,
@@ -110,7 +124,14 @@ impl App {
             should_quit: false,
             is_processing: false,
             vim_mode,
-        }
+        };
+
+        // Load input history from previous sessions
+        app.load_history();
+        // Try to recover the last auto-saved session
+        app.try_recover_session();
+
+        app
     }
 
     /// Run the main event loop.
@@ -206,6 +227,11 @@ impl App {
         if self.command_palette.is_active() {
             self.command_palette.render(frame, input_area, &self.theme);
         }
+
+        // Diff view overlay (rendered on top of everything)
+        if self.diff_view.is_visible() {
+            self.diff_view.render(frame, frame.area(), &self.theme);
+        }
     }
 
     /// Handle a terminal event (keyboard, mouse, resize).
@@ -222,6 +248,10 @@ impl App {
     fn handle_key_event(&mut self, key: KeyEvent) {
         // Escape key: cancel streaming, close popups, or exit vim insert
         if key.code == KeyCode::Esc {
+            if self.diff_view.is_visible() {
+                self.diff_view.hide();
+                return;
+            }
             if self.autocomplete.is_active() {
                 self.autocomplete.deactivate();
                 self.mode = self.base_mode();
@@ -260,6 +290,18 @@ impl App {
         // Global keybindings (Ctrl+C, Ctrl+D, Ctrl+L)
         if let Some(action) = map_global_key(&key) {
             self.execute_action(action);
+            return;
+        }
+
+        // Diff view mode: intercept scroll keys when visible
+        if self.diff_view.is_visible() {
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => self.diff_view.scroll_up(1),
+                KeyCode::Down | KeyCode::Char('j') => self.diff_view.scroll_down(1),
+                KeyCode::PageUp => self.diff_view.scroll_up(10),
+                KeyCode::PageDown => self.diff_view.scroll_down(10),
+                _ => {}
+            }
             return;
         }
 
@@ -498,9 +540,18 @@ impl App {
             Action::CopyLastResponse => self.copy_last_response(),
             Action::Approve => self.resolve_approval(true),
             Action::Deny => self.resolve_approval(false),
-            Action::ShowDiff | Action::ShowHelp => {
-                // Week 7: diff preview
+            Action::ShowDiff => {
+                if self.diff_view.is_visible() {
+                    self.diff_view.hide();
+                } else {
+                    let diff_text = self
+                        .checkpoint_manager
+                        .diff_from_last()
+                        .unwrap_or_else(|_| "No changes to display.".to_string());
+                    self.diff_view.show(diff_text);
+                }
             }
+            Action::ShowHelp => {}
             _ => {}
         }
     }
@@ -644,6 +695,31 @@ impl App {
                     timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
                 });
             }
+            "/undo" => match self.checkpoint_manager.undo() {
+                Ok(cp) => {
+                    let files = if cp.changed_files.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({})", cp.changed_files.join(", "))
+                    };
+                    self.conversation.push_message(DisplayMessage {
+                        role: Role::System,
+                        text: format!("Restored checkpoint: {}{}", cp.label, files),
+                        tool_name: None,
+                        is_error: false,
+                        timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
+                    });
+                }
+                Err(e) => {
+                    self.conversation.push_message(DisplayMessage {
+                        role: Role::System,
+                        text: format!("Undo failed: {}", e),
+                        tool_name: None,
+                        is_error: true,
+                        timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
+                    });
+                }
+            },
             other if other.starts_with("/save") => {
                 let name = other.strip_prefix("/save").unwrap().trim();
                 if name.is_empty() {
@@ -715,6 +791,13 @@ impl App {
                 });
             }
             TuiEvent::ToolStart { name, args } => {
+                // Create a checkpoint before write/execute tools for undo support
+                if tool_risk_level(&name) >= rustant_core::types::RiskLevel::Write {
+                    let _ = self
+                        .checkpoint_manager
+                        .create_checkpoint(&format!("before {}", name));
+                }
+
                 let args_str = args.to_string();
                 let args_preview = if args_str.len() > 100 {
                     format!("{}...", &args_str[..100])
@@ -805,7 +888,6 @@ impl App {
     }
 
     /// Load input history from disk.
-    #[allow(dead_code)]
     pub fn load_history(&mut self) {
         let history_dir = directories::ProjectDirs::from("dev", "rustant", "rustant")
             .map(|d| d.data_dir().to_path_buf());
@@ -834,7 +916,6 @@ impl App {
     }
 
     /// Try to recover the last auto-saved session. Returns true if recovered.
-    #[allow(dead_code)]
     pub fn try_recover_session(&mut self) -> bool {
         let Some(dir) = Self::sessions_dir() else {
             return false;
@@ -1539,5 +1620,64 @@ mod tests {
                 let _ = std::fs::remove_file(dir.join(format!("{}.json", test_name)));
             }
         }
+    }
+
+    // Week 7 gap-closure tests
+
+    #[test]
+    fn test_show_diff_toggles() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        assert!(!app.diff_view.is_visible());
+        // ShowDiff opens the diff view
+        app.execute_action(Action::ShowDiff);
+        assert!(app.diff_view.is_visible());
+        // ShowDiff again closes it
+        app.execute_action(Action::ShowDiff);
+        assert!(!app.diff_view.is_visible());
+    }
+
+    #[test]
+    fn test_draw_with_diff_view() {
+        let backend = ratatui::backend::TestBackend::new(120, 40);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.diff_view
+            .show("--- a/file.rs\n+++ b/file.rs\n-old\n+new".to_string());
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+    }
+
+    #[test]
+    fn test_undo_no_checkpoints() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/undo");
+        assert_eq!(app.conversation.messages.len(), 1);
+        assert!(app.conversation.messages[0].is_error);
+        assert!(app.conversation.messages[0].text.contains("Undo failed"));
+    }
+
+    #[test]
+    fn test_escape_closes_diff_view() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.diff_view.show("test diff".to_string());
+        assert!(app.diff_view.is_visible());
+        let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        app.handle_key_event(key);
+        assert!(!app.diff_view.is_visible());
+    }
+
+    #[test]
+    fn test_diff_view_scroll_keys() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.diff_view.show(
+            "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10".to_string(),
+        );
+        assert!(app.diff_view.is_visible());
+        // Scroll down with j
+        let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
+        app.handle_key_event(key);
+        // Scroll up with k
+        let key = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE);
+        app.handle_key_event(key);
+        // Should not panic
     }
 }
