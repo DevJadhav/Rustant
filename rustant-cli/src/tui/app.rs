@@ -15,6 +15,8 @@ use crate::tui::widgets::status_bar::{render_status_bar, InputMode};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::Frame;
+use rustant_core::audit::{Analytics, AuditExporter, AuditQuery, AuditStore, ExecutionTrace};
+use rustant_core::replay::ReplaySession;
 use rustant_core::types::{AgentStatus, Role};
 use rustant_core::{
     Agent, AgentConfig, MockLlmProvider, RegisteredTool, TaskResult, TokenAlert, TokenCostDisplay,
@@ -56,6 +58,10 @@ pub struct App {
 
     // Approval state
     pending_approval: Option<oneshot::Sender<bool>>,
+
+    // Audit & Replay (Week 12)
+    audit_store: AuditStore,
+    replay_session: ReplaySession,
 
     // App state
     pub should_quit: bool,
@@ -121,6 +127,8 @@ impl App {
             agent,
             workspace,
             pending_approval: None,
+            audit_store: AuditStore::new(),
+            replay_session: ReplaySession::new(),
             should_quit: false,
             is_processing: false,
             vim_mode,
@@ -677,17 +685,26 @@ impl App {
                     role: Role::System,
                     text: concat!(
                         "Commands:\n",
-                        "  /help      - Show this help\n",
-                        "  /quit      - Exit Rustant\n",
-                        "  /clear     - Clear conversation\n",
-                        "  /cost      - Show token usage and cost\n",
-                        "  /tools     - List available tools\n",
-                        "  /sidebar   - Toggle sidebar\n",
-                        "  /vim       - Toggle vim mode\n",
-                        "  /theme <name> - Switch theme (dark/light)\n",
-                        "  /save <name>  - Save session\n",
-                        "  /load <name>  - Load session\n",
-                        "  /undo      - Undo last file change"
+                        "  /help            - Show this help\n",
+                        "  /quit            - Exit Rustant\n",
+                        "  /clear           - Clear conversation\n",
+                        "  /cost            - Show token usage and cost\n",
+                        "  /tools           - List available tools\n",
+                        "  /sidebar         - Toggle sidebar\n",
+                        "  /vim             - Toggle vim mode\n",
+                        "  /theme <name>    - Switch theme (dark/light)\n",
+                        "  /save <name>     - Save session\n",
+                        "  /load <name>     - Load session\n",
+                        "  /undo            - Undo last file change\n",
+                        "  /audit           - Show audit trail\n",
+                        "  /audit export <fmt> - Export traces (json/csv/text)\n",
+                        "  /audit query <tool> - Query traces by tool\n",
+                        "  /analytics       - Show usage analytics\n",
+                        "  /replay          - Start/show replay\n",
+                        "  /replay next     - Step forward in replay\n",
+                        "  /replay prev     - Step backward in replay\n",
+                        "  /replay timeline - Show full timeline\n",
+                        "  /replay reset    - Clear replay session"
                     )
                     .to_string(),
                     tool_name: None,
@@ -748,6 +765,200 @@ impl App {
                     self.load_session(name);
                 }
             }
+            // ── Week 12: Audit, Replay & Analytics commands ──────────
+            "/audit" => {
+                let traces = self.audit_store.traces();
+                if traces.is_empty() {
+                    self.push_system_msg("Audit store is empty. No traces recorded yet.");
+                } else {
+                    let latest: Vec<&ExecutionTrace> =
+                        self.audit_store.latest(10).into_iter().collect();
+                    let text = AuditExporter::to_text(&latest);
+                    self.push_system_msg(&format!(
+                        "Audit Trail ({} traces, showing latest {}):\n{}",
+                        traces.len(),
+                        latest.len(),
+                        text
+                    ));
+                }
+            }
+            other if other.starts_with("/audit export") => {
+                let format = other.strip_prefix("/audit export").unwrap_or("").trim();
+                let traces = self.audit_store.traces();
+                if traces.is_empty() {
+                    self.push_system_msg("Audit store is empty. Nothing to export.");
+                } else {
+                    let refs: Vec<&ExecutionTrace> = traces.iter().collect();
+                    let output = match format {
+                        "json" => AuditExporter::to_json(&refs)
+                            .unwrap_or_else(|e| format!("Export error: {}", e)),
+                        "jsonl" => AuditExporter::to_jsonl(&refs)
+                            .unwrap_or_else(|e| format!("Export error: {}", e)),
+                        "csv" => AuditExporter::to_csv(&refs),
+                        _ => AuditExporter::to_text(&refs),
+                    };
+                    self.push_system_msg(&format!(
+                        "Audit Export ({} format):\n{}",
+                        if format.is_empty() { "text" } else { format },
+                        output
+                    ));
+                }
+            }
+            other if other.starts_with("/audit query") => {
+                let tool_name = other.strip_prefix("/audit query").unwrap_or("").trim();
+                if tool_name.is_empty() {
+                    self.push_system_msg("Usage: /audit query <tool_name>");
+                } else {
+                    let query = AuditQuery::new().for_tool(tool_name);
+                    let results = self.audit_store.query(&query);
+                    if results.is_empty() {
+                        self.push_system_msg(&format!("No traces found for tool '{}'.", tool_name));
+                    } else {
+                        let text = AuditExporter::to_text(&results);
+                        self.push_system_msg(&format!(
+                            "Audit Query Results for '{}' ({} traces):\n{}",
+                            tool_name,
+                            results.len(),
+                            text
+                        ));
+                    }
+                }
+            }
+            "/analytics" => {
+                let traces = self.audit_store.traces();
+                if traces.is_empty() {
+                    self.push_system_msg("No traces available for analytics.");
+                } else {
+                    let refs: Vec<&ExecutionTrace> = traces.iter().collect();
+                    let usage = Analytics::tool_usage_summary(&refs);
+                    let costs = Analytics::cost_breakdown(&refs);
+                    let patterns = Analytics::detect_patterns(&refs);
+                    let success = Analytics::success_rate(&refs);
+                    let avg_iter = Analytics::avg_iterations(&refs);
+
+                    let mut text = format!(
+                        "Analytics ({} traces):\n  Success rate: {:.1}%\n  Avg iterations: {:.1}\n  Total cost: ${:.4}\n  Total tokens: {}\n",
+                        refs.len(),
+                        success * 100.0,
+                        avg_iter,
+                        costs.total_cost,
+                        costs.total_tokens,
+                    );
+
+                    if let Some(ref tool) = usage.most_used {
+                        text.push_str(&format!("  Most used tool: {}\n", tool));
+                    }
+                    if let Some(ref tool) = usage.most_denied {
+                        text.push_str(&format!("  Most denied tool: {}\n", tool));
+                    }
+
+                    if !patterns.is_empty() {
+                        text.push_str("\nDetected patterns:\n");
+                        for p in &patterns {
+                            text.push_str(&format!(
+                                "  [{:?}] {} (×{})\n",
+                                p.kind, p.description, p.occurrences
+                            ));
+                        }
+                    }
+
+                    if !costs.by_model.is_empty() {
+                        text.push_str("\nCost breakdown by model:\n");
+                        for (model, entry) in &costs.by_model {
+                            text.push_str(&format!(
+                                "  {}: {} calls, {} tokens, ${:.4}\n",
+                                model, entry.calls, entry.total_tokens, entry.total_cost
+                            ));
+                        }
+                    }
+
+                    self.push_system_msg(&text);
+                }
+            }
+            "/replay" => {
+                if self.replay_session.is_empty() {
+                    let traces = self.audit_store.traces();
+                    if traces.is_empty() {
+                        self.push_system_msg("No traces available for replay.");
+                    } else {
+                        // Load the latest trace into the replay session
+                        let latest = traces.last().unwrap().clone();
+                        let idx = self.replay_session.add_replay(latest);
+                        self.replay_session.set_active(idx).ok();
+                        let engine = self.replay_session.active().unwrap();
+                        self.push_system_msg(&format!(
+                            "Replay loaded: {} ({} events)\n  {}",
+                            engine.trace().goal,
+                            engine.total_events(),
+                            engine.describe_current()
+                        ));
+                    }
+                } else {
+                    // Show current replay state
+                    if let Some(engine) = self.replay_session.active() {
+                        let snap = engine.snapshot();
+                        self.push_system_msg(&format!(
+                            "Replay: {}\n  Position: {}/{} ({:.0}%)\n  {}",
+                            engine.trace().goal,
+                            snap.position + 1,
+                            snap.total_events,
+                            snap.progress_pct,
+                            engine.describe_current()
+                        ));
+                    }
+                }
+            }
+            "/replay next" | "/replay forward" => {
+                let msg = if let Some(engine) = self.replay_session.active_mut() {
+                    if engine.step_forward().is_some() {
+                        engine.describe_current()
+                    } else {
+                        "Already at the end of the replay.".to_string()
+                    }
+                } else {
+                    "No active replay. Use /replay to start.".to_string()
+                };
+                self.push_system_msg(&msg);
+            }
+            "/replay prev" | "/replay back" => {
+                let msg = if let Some(engine) = self.replay_session.active_mut() {
+                    if engine.step_backward().is_some() {
+                        engine.describe_current()
+                    } else {
+                        "Already at the start of the replay.".to_string()
+                    }
+                } else {
+                    "No active replay. Use /replay to start.".to_string()
+                };
+                self.push_system_msg(&msg);
+            }
+            "/replay timeline" => {
+                if let Some(engine) = self.replay_session.active() {
+                    let timeline = engine.timeline();
+                    let lines: Vec<String> = timeline
+                        .iter()
+                        .map(|entry| {
+                            let marker = if entry.is_current { "▶" } else { " " };
+                            let bm = if entry.is_bookmarked { "🔖" } else { "  " };
+                            format!(
+                                " {} {} [{:>3}] +{:>6}ms  {}",
+                                marker, bm, entry.sequence, entry.elapsed_ms, entry.description
+                            )
+                        })
+                        .collect();
+                    self.push_system_msg(&format!(
+                        "Replay Timeline ({} events):\n{}",
+                        timeline.len(),
+                        lines.join("\n")
+                    ));
+                } else {
+                    self.push_system_msg("No active replay. Use /replay to start.");
+                }
+            }
+            "/replay reset" => {
+                self.replay_session = ReplaySession::new();
+                self.push_system_msg("Replay session cleared.");
+            }
             other => {
                 self.conversation.push_message(DisplayMessage {
                     role: Role::System,
@@ -758,6 +969,17 @@ impl App {
                 });
             }
         }
+    }
+
+    /// Push a system-role message into the conversation panel.
+    fn push_system_msg(&mut self, text: &str) {
+        self.conversation.push_message(DisplayMessage {
+            role: Role::System,
+            text: text.to_string(),
+            tool_name: None,
+            is_error: false,
+            timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
+        });
     }
 
     /// Handle a TUI event from the agent callback.
@@ -1679,5 +1901,240 @@ mod tests {
         let key = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE);
         app.handle_key_event(key);
         // Should not panic
+    }
+
+    // ── Week 12 audit / replay / analytics tests ────────────────────
+
+    use rustant_core::audit::TraceEventKind;
+    use rustant_core::types::RiskLevel;
+    use uuid::Uuid;
+
+    /// Helper: build a sample trace with a few events.
+    fn sample_trace() -> ExecutionTrace {
+        let session_id = Uuid::new_v4();
+        let task_id = Uuid::new_v4();
+        let mut trace = ExecutionTrace::new(session_id, task_id, "test task");
+        trace.push_event(TraceEventKind::ToolRequested {
+            tool: "file_read".into(),
+            risk_level: RiskLevel::ReadOnly,
+            args_summary: "path=/src/main.rs".into(),
+        });
+        trace.push_event(TraceEventKind::ToolApproved {
+            tool: "file_read".into(),
+        });
+        trace.push_event(TraceEventKind::ToolExecuted {
+            tool: "file_read".into(),
+            success: true,
+            duration_ms: 42,
+            output_preview: "fn main()".into(),
+        });
+        trace.push_event(TraceEventKind::LlmCall {
+            model: "gpt-4".into(),
+            input_tokens: 500,
+            output_tokens: 200,
+            cost: 0.021,
+        });
+        trace.complete(true);
+        trace
+    }
+
+    #[test]
+    fn test_handle_command_audit_empty() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/audit");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("empty"));
+    }
+
+    #[test]
+    fn test_handle_command_audit_with_traces() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.audit_store.add_trace(sample_trace());
+        app.handle_command("/audit");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("Audit Trail"));
+        assert!(last.text.contains("1 traces"));
+    }
+
+    #[test]
+    fn test_handle_command_audit_export_json() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.audit_store.add_trace(sample_trace());
+        app.handle_command("/audit export json");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("json"));
+        assert!(last.text.contains("trace_id"));
+    }
+
+    #[test]
+    fn test_handle_command_audit_export_csv() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.audit_store.add_trace(sample_trace());
+        app.handle_command("/audit export csv");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("csv"));
+    }
+
+    #[test]
+    fn test_handle_command_audit_export_text() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.audit_store.add_trace(sample_trace());
+        app.handle_command("/audit export text");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("text"));
+    }
+
+    #[test]
+    fn test_handle_command_audit_export_empty() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/audit export json");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("empty"));
+    }
+
+    #[test]
+    fn test_handle_command_audit_query_no_tool() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/audit query");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("Usage"));
+    }
+
+    #[test]
+    fn test_handle_command_audit_query_with_tool() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.audit_store.add_trace(sample_trace());
+        app.handle_command("/audit query file_read");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("file_read"));
+    }
+
+    #[test]
+    fn test_handle_command_audit_query_no_match() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.audit_store.add_trace(sample_trace());
+        app.handle_command("/audit query nonexistent_tool");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("No traces found"));
+    }
+
+    #[test]
+    fn test_handle_command_analytics_empty() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/analytics");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("No traces available"));
+    }
+
+    #[test]
+    fn test_handle_command_analytics_with_data() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.audit_store.add_trace(sample_trace());
+        app.handle_command("/analytics");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("Analytics"));
+        assert!(last.text.contains("Success rate"));
+        assert!(last.text.contains("Total cost"));
+    }
+
+    #[test]
+    fn test_handle_command_replay_no_traces() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/replay");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("No traces available"));
+    }
+
+    #[test]
+    fn test_handle_command_replay_loads_trace() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.audit_store.add_trace(sample_trace());
+        app.handle_command("/replay");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("Replay loaded"));
+        assert!(last.text.contains("test task"));
+    }
+
+    #[test]
+    fn test_handle_command_replay_shows_status() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.audit_store.add_trace(sample_trace());
+        app.handle_command("/replay"); // load
+        app.handle_command("/replay"); // show status
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("Replay:"));
+        assert!(last.text.contains("Position:"));
+    }
+
+    #[test]
+    fn test_handle_command_replay_next() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.audit_store.add_trace(sample_trace());
+        app.handle_command("/replay");
+        app.handle_command("/replay next");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("[2/"));
+    }
+
+    #[test]
+    fn test_handle_command_replay_prev() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.audit_store.add_trace(sample_trace());
+        app.handle_command("/replay");
+        app.handle_command("/replay next");
+        app.handle_command("/replay prev");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("[1/"));
+    }
+
+    #[test]
+    fn test_handle_command_replay_prev_at_start() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.audit_store.add_trace(sample_trace());
+        app.handle_command("/replay");
+        app.handle_command("/replay prev");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("Already at the start"));
+    }
+
+    #[test]
+    fn test_handle_command_replay_next_no_replay() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/replay next");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("No active replay"));
+    }
+
+    #[test]
+    fn test_handle_command_replay_timeline() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.audit_store.add_trace(sample_trace());
+        app.handle_command("/replay");
+        app.handle_command("/replay timeline");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("Timeline"));
+        assert!(last.text.contains("Task started"));
+    }
+
+    #[test]
+    fn test_handle_command_replay_reset() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.audit_store.add_trace(sample_trace());
+        app.handle_command("/replay");
+        assert!(!app.replay_session.is_empty());
+        app.handle_command("/replay reset");
+        assert!(app.replay_session.is_empty());
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("cleared"));
+    }
+
+    #[test]
+    fn test_handle_command_help_contains_audit() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/help");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("/audit"));
+        assert!(last.text.contains("/analytics"));
+        assert!(last.text.contains("/replay"));
     }
 }
