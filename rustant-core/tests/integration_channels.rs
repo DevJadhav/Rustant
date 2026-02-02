@@ -438,6 +438,34 @@ fn test_channel_oauth_config_serialization_roundtrip() {
     assert_eq!(restored.auth_method, AuthMethod::OAuth);
 }
 
+// ── Gmail XOAUTH2 ───────────────────────────────────────────────────────
+
+#[tokio::test]
+#[ignore = "requires GMAIL_OAUTH_TOKEN and GMAIL_EMAIL env vars"]
+async fn test_gmail_imap_xoauth2_real_connection() {
+    use rustant_core::channels::email::{create_email_channel, EmailAuthMethod, EmailConfig};
+
+    let token = std::env::var("GMAIL_OAUTH_TOKEN").expect("set GMAIL_OAUTH_TOKEN");
+    let email = std::env::var("GMAIL_EMAIL").expect("set GMAIL_EMAIL");
+
+    let config = EmailConfig {
+        imap_host: "imap.gmail.com".into(),
+        imap_port: 993,
+        smtp_host: "smtp.gmail.com".into(),
+        smtp_port: 587,
+        username: email.clone(),
+        password: token,
+        from_address: email,
+        allowed_senders: vec![],
+        auth_method: EmailAuthMethod::XOAuth2,
+    };
+    let mut ch = create_email_channel(config);
+    ch.connect()
+        .await
+        .expect("Gmail IMAP XOAUTH2 connect should succeed");
+    assert!(ch.is_connected());
+}
+
 #[test]
 fn test_email_auth_method_xoauth2_config() {
     use rustant_core::channels::email::{EmailAuthMethod, EmailConfig};

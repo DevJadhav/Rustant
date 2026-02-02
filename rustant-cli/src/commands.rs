@@ -75,6 +75,9 @@ async fn handle_channel(action: ChannelAction, workspace: &Path) -> anyhow::Resu
     let channels_config = config.channels.unwrap_or_default();
 
     match action {
+        ChannelAction::Setup { channel } => {
+            return crate::channel_setup::run_channel_setup(workspace, channel.as_deref()).await;
+        }
         ChannelAction::List => {
             let mgr = rustant_core::channels::build_channel_manager(&channels_config);
             let names = mgr.channel_names();

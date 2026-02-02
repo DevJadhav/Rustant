@@ -1,24 +1,72 @@
 //! Channels ↔ Multi-Agent bridge — routes channel messages to the multi-agent system.
+//!
+//! Optionally integrates with [`PairingManager`] to enforce device pairing for DM channels.
+//! When a `PairingManager` is attached, only messages from paired device IDs are routed;
+//! unpaired senders receive the `default_agent` fallback.
 
 use crate::channels::{ChannelMessage, ChannelType, ChannelUser};
 use crate::multi::messaging::{AgentEnvelope, AgentPayload};
 use crate::multi::routing::{AgentRouter, RouteRequest};
+use crate::pairing::PairingManager;
 use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Bridge routing channel messages to agents and back.
+///
+/// When `pairing` is set, the bridge will only route messages from senders
+/// whose `sender.id` matches a paired device name. Messages from unpaired
+/// senders are routed to the `default_agent`.
 pub struct ChannelAgentBridge {
     router: AgentRouter,
+    pairing: Option<PairingManager>,
 }
 
 impl ChannelAgentBridge {
     pub fn new(router: AgentRouter) -> Self {
-        Self { router }
+        Self {
+            router,
+            pairing: None,
+        }
+    }
+
+    /// Attach a pairing manager to enforce device-pairing for DM routing.
+    pub fn with_pairing(mut self, pairing: PairingManager) -> Self {
+        self.pairing = Some(pairing);
+        self
+    }
+
+    /// Returns `true` if the sender is paired (or no pairing manager is set).
+    pub fn is_sender_paired(&self, sender_id: &str) -> bool {
+        match &self.pairing {
+            None => true,
+            Some(pm) => pm
+                .paired_devices()
+                .iter()
+                .any(|d| d.device_name == sender_id || d.device_id.to_string() == sender_id),
+        }
+    }
+
+    /// Access the pairing manager, if present.
+    pub fn pairing(&self) -> Option<&PairingManager> {
+        self.pairing.as_ref()
+    }
+
+    /// Mutable access to the pairing manager, if present.
+    pub fn pairing_mut(&mut self) -> Option<&mut PairingManager> {
+        self.pairing.as_mut()
     }
 
     /// Route a channel message to the appropriate agent.
     /// Returns the target agent ID.
+    ///
+    /// If a pairing manager is attached, unpaired senders are routed to
+    /// `default_agent` regardless of router rules.
     pub fn route_channel_message(&self, msg: &ChannelMessage, default_agent: Uuid) -> Uuid {
+        // When pairing is enabled, reject unpaired senders
+        if !self.is_sender_paired(&msg.sender.id) {
+            return default_agent;
+        }
+
         let text = msg.content.as_text().unwrap_or("").to_string();
         let request = RouteRequest::new()
             .with_channel(msg.channel_type)
@@ -178,5 +226,122 @@ mod tests {
 
         let msg = ChannelAgentBridge::envelope_to_channel_message(&envelope, ChannelType::Slack);
         assert!(msg.is_none());
+    }
+
+    // -- Pairing integration --------------------------------------------------
+
+    #[test]
+    fn test_bridge_without_pairing_allows_all() {
+        let router = AgentRouter::new();
+        let bridge = ChannelAgentBridge::new(router);
+        assert!(bridge.is_sender_paired("anyone"));
+        assert!(bridge.pairing().is_none());
+    }
+
+    #[test]
+    fn test_bridge_with_pairing_rejects_unpaired_sender() {
+        let mut router = AgentRouter::new();
+        let agent_id = Uuid::new_v4();
+        let default = Uuid::new_v4();
+        router.add_route(AgentRoute {
+            priority: 1,
+            target_agent_id: agent_id,
+            conditions: vec![RouteCondition::ChannelType(ChannelType::IMessage)],
+        });
+
+        let pm = PairingManager::new(b"secret");
+        let bridge = ChannelAgentBridge::new(router).with_pairing(pm);
+
+        // No paired devices → unpaired sender goes to default
+        let sender = ChannelUser::new("stranger", ChannelType::IMessage);
+        let msg = ChannelMessage::text(ChannelType::IMessage, "dm", sender, "hello");
+        assert_eq!(bridge.route_channel_message(&msg, default), default);
+    }
+
+    #[test]
+    fn test_bridge_with_pairing_routes_paired_device() {
+        use crate::pairing::PairingResponse;
+
+        let secret = b"shared-secret-key-for-tests-32b!";
+        let mut router = AgentRouter::new();
+        let agent_id = Uuid::new_v4();
+        let default = Uuid::new_v4();
+        router.add_route(AgentRoute {
+            priority: 1,
+            target_agent_id: agent_id,
+            conditions: vec![RouteCondition::ChannelType(ChannelType::IMessage)],
+        });
+
+        let mut pm = PairingManager::new(secret);
+        let challenge = pm.create_challenge();
+
+        // Simulate the device computing the correct HMAC
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        type HmacSha256 = Hmac<Sha256>;
+        let mut mac = HmacSha256::new_from_slice(secret).unwrap();
+        mac.update(challenge.nonce.as_bytes());
+        let hmac_result = mac.finalize().into_bytes();
+        let response_hmac: String = hmac_result.iter().map(|b| format!("{:02x}", b)).collect();
+
+        let device_id = Uuid::new_v4();
+        let pair_resp = PairingResponse {
+            challenge_id: challenge.challenge_id,
+            device_id,
+            device_name: "my-phone".into(),
+            public_key: "pk-abc".into(),
+            response_hmac,
+        };
+        pm.verify_response(&pair_resp);
+
+        let bridge = ChannelAgentBridge::new(router).with_pairing(pm);
+
+        // Paired device name matches sender.id → routed to agent
+        assert!(bridge.is_sender_paired("my-phone"));
+        let sender = ChannelUser::new("my-phone", ChannelType::IMessage);
+        let msg = ChannelMessage::text(ChannelType::IMessage, "dm", sender, "hello");
+        assert_eq!(bridge.route_channel_message(&msg, default), agent_id);
+
+        // Unknown sender → falls back to default
+        assert!(!bridge.is_sender_paired("stranger"));
+        let sender2 = ChannelUser::new("stranger", ChannelType::IMessage);
+        let msg2 = ChannelMessage::text(ChannelType::IMessage, "dm", sender2, "hello");
+        assert_eq!(bridge.route_channel_message(&msg2, default), default);
+    }
+
+    #[test]
+    fn test_bridge_pairing_revoke_device() {
+        use crate::pairing::PairingResponse;
+
+        let secret = b"shared-secret-key-for-tests-32b!";
+        let mut pm = PairingManager::new(secret);
+        let challenge = pm.create_challenge();
+
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        type HmacSha256 = Hmac<Sha256>;
+        let mut mac = HmacSha256::new_from_slice(secret).unwrap();
+        mac.update(challenge.nonce.as_bytes());
+        let hmac_result = mac.finalize().into_bytes();
+        let response_hmac: String = hmac_result.iter().map(|b| format!("{:02x}", b)).collect();
+
+        let device_id = Uuid::new_v4();
+        let pair_resp = PairingResponse {
+            challenge_id: challenge.challenge_id,
+            device_id,
+            device_name: "laptop".into(),
+            public_key: "pk".into(),
+            response_hmac,
+        };
+        pm.verify_response(&pair_resp);
+
+        let router = AgentRouter::new();
+        let mut bridge = ChannelAgentBridge::new(router).with_pairing(pm);
+
+        assert!(bridge.is_sender_paired("laptop"));
+
+        // Revoke
+        bridge.pairing_mut().unwrap().revoke_device(&device_id);
+        assert!(!bridge.is_sender_paired("laptop"));
     }
 }

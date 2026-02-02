@@ -1204,6 +1204,26 @@ pub fn oauth_config_for_provider(provider: &str) -> Option<OAuthProviderConfig> 
     }
 }
 
+/// Build an OAuth configuration using directly-provided credentials.
+///
+/// Unlike [`oauth_config_for_provider`] which reads client credentials from
+/// environment variables, this function accepts them as parameters. This is
+/// used by the interactive `channel setup` wizard where the user enters
+/// credentials at a prompt rather than setting env vars.
+pub fn oauth_config_with_credentials(
+    provider: &str,
+    client_id: &str,
+    client_secret: Option<&str>,
+) -> Option<OAuthProviderConfig> {
+    let secret = client_secret.map(String::from);
+    match provider {
+        "slack" => Some(slack_oauth_config(client_id, secret)),
+        "discord" => Some(discord_oauth_config(client_id, secret)),
+        "gmail" => Some(gmail_oauth_config(client_id, secret)),
+        _ => None,
+    }
+}
+
 /// Check whether a provider supports OAuth login.
 pub fn provider_supports_oauth(provider: &str) -> bool {
     match provider {

@@ -8,6 +8,7 @@ pub mod canvas;
 pub mod checkpoint;
 pub mod file;
 pub mod git;
+pub mod imessage;
 pub mod lsp;
 pub mod registry;
 pub mod sandbox;
@@ -20,7 +21,7 @@ use std::sync::Arc;
 
 /// Register all built-in tools with the given workspace path.
 pub fn register_builtin_tools(registry: &mut ToolRegistry, workspace: PathBuf) {
-    let tools: Vec<Arc<dyn Tool>> = vec![
+    let mut tools: Vec<Arc<dyn Tool>> = vec![
         Arc::new(file::FileReadTool::new(workspace.clone())),
         Arc::new(file::FileListTool::new(workspace.clone())),
         Arc::new(file::FileSearchTool::new(workspace.clone())),
@@ -34,6 +35,14 @@ pub fn register_builtin_tools(registry: &mut ToolRegistry, workspace: PathBuf) {
         Arc::new(utils::DateTimeTool),
         Arc::new(utils::CalculatorTool),
     ];
+
+    // iMessage tools — macOS only
+    #[cfg(target_os = "macos")]
+    {
+        tools.push(Arc::new(imessage::IMessageContactsTool));
+        tools.push(Arc::new(imessage::IMessageSendTool));
+        tools.push(Arc::new(imessage::IMessageReadTool));
+    }
 
     for tool in tools {
         if let Err(e) = registry.register(tool) {
@@ -69,6 +78,10 @@ mod tests {
         let mut registry = ToolRegistry::new();
         register_builtin_tools(&mut registry, dir.path().to_path_buf());
 
+        // 12 base tools + 3 iMessage tools on macOS
+        #[cfg(target_os = "macos")]
+        assert_eq!(registry.len(), 15);
+        #[cfg(not(target_os = "macos"))]
         assert_eq!(registry.len(), 12);
 
         // Verify all expected tools are registered
@@ -85,6 +98,14 @@ mod tests {
         assert!(names.contains(&"echo".to_string()));
         assert!(names.contains(&"datetime".to_string()));
         assert!(names.contains(&"calculator".to_string()));
+
+        // iMessage tools on macOS
+        #[cfg(target_os = "macos")]
+        {
+            assert!(names.contains(&"imessage_contacts".to_string()));
+            assert!(names.contains(&"imessage_send".to_string()));
+            assert!(names.contains(&"imessage_read".to_string()));
+        }
     }
 
     #[test]

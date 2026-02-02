@@ -588,6 +588,51 @@ pub fn load_config(
     figment.extract().map_err(Box::new)
 }
 
+/// Update a specific channel's configuration in the workspace config file.
+///
+/// Loads the existing `.rustant/config.toml`, sets or replaces the named channel's
+/// config, preserves all other channels and settings, and writes back.
+/// Returns the path to the config file.
+pub fn update_channel_config(
+    workspace: &std::path::Path,
+    channel_name: &str,
+    channel_toml: toml::Value,
+) -> anyhow::Result<std::path::PathBuf> {
+    let config_dir = workspace.join(".rustant");
+    std::fs::create_dir_all(&config_dir)?;
+    let config_path = config_dir.join("config.toml");
+
+    // Load existing config or start from defaults
+    let mut config: AgentConfig = if config_path.exists() {
+        let content = std::fs::read_to_string(&config_path)?;
+        toml::from_str(&content).unwrap_or_default()
+    } else {
+        AgentConfig::default()
+    };
+
+    // Serialize to a TOML table so we can set the channel dynamically
+    let mut table: toml::Value = toml::Value::try_from(&config)?;
+
+    // Ensure [channels] table exists
+    let channels_table = table
+        .as_table_mut()
+        .ok_or_else(|| anyhow::anyhow!("config is not a TOML table"))?
+        .entry("channels")
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+
+    // Set channels.<channel_name> = channel_toml
+    if let Some(ch_table) = channels_table.as_table_mut() {
+        ch_table.insert(channel_name.to_string(), channel_toml);
+    }
+
+    // Deserialize back to verify it's valid, then write
+    config = table.try_into()?;
+    let toml_str = toml::to_string_pretty(&config)?;
+    std::fs::write(&config_path, &toml_str)?;
+
+    Ok(config_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

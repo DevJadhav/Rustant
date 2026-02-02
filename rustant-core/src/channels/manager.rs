@@ -1,21 +1,45 @@
 //! Channel manager — registers, connects, polls, and broadcasts across channels.
+//!
+//! Optionally holds a [`PairingManager`] for device-pairing enforcement.
 
 use super::{
     Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, MessageId, StreamingMode,
 };
 use crate::error::{ChannelError, RustantError};
+use crate::pairing::PairingManager;
 use std::collections::HashMap;
 
 /// Manages a set of registered channels.
+///
+/// When a `PairingManager` is attached, it can be used to verify that
+/// incoming DM senders are paired before processing their messages.
 pub struct ChannelManager {
     channels: HashMap<String, Box<dyn Channel>>,
+    pairing: Option<PairingManager>,
 }
 
 impl ChannelManager {
     pub fn new() -> Self {
         Self {
             channels: HashMap::new(),
+            pairing: None,
         }
+    }
+
+    /// Attach a pairing manager for device-pairing enforcement.
+    pub fn with_pairing(mut self, pairing: PairingManager) -> Self {
+        self.pairing = Some(pairing);
+        self
+    }
+
+    /// Access the pairing manager, if present.
+    pub fn pairing(&self) -> Option<&PairingManager> {
+        self.pairing.as_ref()
+    }
+
+    /// Mutable access to the pairing manager, if present.
+    pub fn pairing_mut(&mut self) -> Option<&mut PairingManager> {
+        self.pairing.as_mut()
     }
 
     /// Register a channel by name.

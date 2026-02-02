@@ -224,6 +224,10 @@ mod tests {
         .to_string();
         let resp = server.process_message(&list_req).await.unwrap().unwrap();
         let tools = resp.result.unwrap()["tools"].as_array().unwrap().clone();
+        // 12 base tools + 3 iMessage tools on macOS
+        #[cfg(target_os = "macos")]
+        assert_eq!(tools.len(), 15);
+        #[cfg(not(target_os = "macos"))]
         assert_eq!(tools.len(), 12);
     }
 
@@ -310,6 +314,10 @@ mod tests {
         let resp_str = client.read_message().await.unwrap().unwrap();
         let resp: JsonRpcResponse = serde_json::from_str(&resp_str).unwrap();
         let tools = resp.result.unwrap()["tools"].as_array().unwrap().clone();
+        // 12 base tools + 3 iMessage tools on macOS
+        #[cfg(target_os = "macos")]
+        assert_eq!(tools.len(), 15);
+        #[cfg(not(target_os = "macos"))]
         assert_eq!(tools.len(), 12);
 
         // 4. Call echo tool

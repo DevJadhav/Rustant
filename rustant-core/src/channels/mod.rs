@@ -24,7 +24,7 @@ pub mod webhook;
 pub mod whatsapp;
 
 pub use agent_bridge::ChannelAgentBridge;
-pub use imessage::{IMessageChannel, IMessageConfig};
+pub use imessage::{IMessageChannel, IMessageConfig, ResolvedContact};
 pub use irc::{IrcChannel, IrcConfig};
 pub use manager::{build_channel_manager, ChannelManager};
 pub use normalize::MessageNormalizer;

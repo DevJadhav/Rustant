@@ -203,6 +203,8 @@ pub struct RealSmtp {
     username: String,
     password: String,
     from_address: String,
+    /// Authentication method — when `XOAuth2`, uses SASL XOAUTH2 mechanism.
+    pub auth_method: EmailAuthMethod,
 }
 
 impl RealSmtp {
@@ -212,6 +214,7 @@ impl RealSmtp {
         username: String,
         password: String,
         from_address: String,
+        auth_method: EmailAuthMethod,
     ) -> Self {
         Self {
             host,
@@ -219,6 +222,7 @@ impl RealSmtp {
             username,
             password,
             from_address,
+            auth_method,
         }
     }
 }
@@ -242,12 +246,20 @@ impl SmtpSender for RealSmtp {
             self.password.clone(),
         );
 
-        let mailer =
+        let mut builder =
             lettre::AsyncSmtpTransport::<lettre::Tokio1Executor>::starttls_relay(&self.host)
                 .map_err(|e| format!("SMTP relay error: {e}"))?
                 .port(self.port)
-                .credentials(creds)
-                .build();
+                .credentials(creds);
+
+        // Force XOAUTH2 SASL mechanism when using OAuth tokens.
+        // With Password auth, lettre auto-negotiates the mechanism.
+        if self.auth_method == EmailAuthMethod::XOAuth2 {
+            use lettre::transport::smtp::authentication::Mechanism;
+            builder = builder.authentication(vec![Mechanism::Xoauth2]);
+        }
+
+        let mailer = builder.build();
 
         use lettre::AsyncTransport;
         let response = mailer
@@ -259,21 +271,64 @@ impl SmtpSender for RealSmtp {
     }
 }
 
+/// SASL XOAUTH2 authenticator for `async-imap`.
+///
+/// Implements the [XOAUTH2 protocol](https://developers.google.com/gmail/imap/xoauth2-protocol)
+/// used by Gmail (and other providers) for IMAP authentication with OAuth tokens.
+pub struct XOAuth2Authenticator {
+    user: String,
+    access_token: String,
+}
+
+impl XOAuth2Authenticator {
+    pub fn new(user: &str, access_token: &str) -> Self {
+        Self {
+            user: user.to_string(),
+            access_token: access_token.to_string(),
+        }
+    }
+
+    /// Build the SASL XOAUTH2 response string.
+    pub fn response(&self) -> String {
+        format!(
+            "user={}\x01auth=Bearer {}\x01\x01",
+            self.user, self.access_token
+        )
+    }
+}
+
+impl async_imap::Authenticator for XOAuth2Authenticator {
+    type Response = String;
+
+    fn process(&mut self, _challenge: &[u8]) -> Self::Response {
+        self.response()
+    }
+}
+
 /// Real IMAP reader using async-imap.
 pub struct RealImap {
     host: String,
     port: u16,
     username: String,
     password: String,
+    /// Authentication method — when `XOAuth2`, uses SASL XOAUTH2 instead of plain login.
+    pub auth_method: EmailAuthMethod,
 }
 
 impl RealImap {
-    pub fn new(host: String, port: u16, username: String, password: String) -> Self {
+    pub fn new(
+        host: String,
+        port: u16,
+        username: String,
+        password: String,
+        auth_method: EmailAuthMethod,
+    ) -> Self {
         Self {
             host,
             port,
             username,
             password,
+            auth_method,
         }
     }
 }
@@ -293,12 +348,31 @@ impl ImapReader for RealImap {
             .await
             .map_err(|e| format!("TLS connect error: {e}"))?;
 
-        let client = async_imap::Client::new(tls_stream);
+        let mut client = async_imap::Client::new(tls_stream);
 
-        let mut session = client
-            .login(&self.username, &self.password)
+        // Read and discard the server greeting before authentication.
+        // async-imap's Client::new() does NOT consume the greeting, and
+        // login() handles this internally, but authenticate() does not —
+        // the unread greeting causes do_auth_handshake() to deadlock.
+        client
+            .read_response()
             .await
-            .map_err(|e| format!("IMAP login error: {}", e.0))?;
+            .map_err(|e| format!("IMAP greeting read error: {e}"))?
+            .ok_or_else(|| "IMAP server closed connection before greeting".to_string())?;
+
+        let mut session = match self.auth_method {
+            EmailAuthMethod::XOAuth2 => {
+                let auth = XOAuth2Authenticator::new(&self.username, &self.password);
+                client
+                    .authenticate("XOAUTH2", auth)
+                    .await
+                    .map_err(|e| format!("IMAP XOAUTH2 auth error: {}", e.0))?
+            }
+            EmailAuthMethod::Password => client
+                .login(&self.username, &self.password)
+                .await
+                .map_err(|e| format!("IMAP login error: {}", e.0))?,
+        };
 
         session
             .select("INBOX")
@@ -371,12 +445,28 @@ impl ImapReader for RealImap {
             .await
             .map_err(|e| format!("TLS connect error: {e}"))?;
 
-        let client = async_imap::Client::new(tls_stream);
+        let mut client = async_imap::Client::new(tls_stream);
 
-        let mut session = client
-            .login(&self.username, &self.password)
+        // Read the server greeting — required before authenticate().
+        client
+            .read_response()
             .await
-            .map_err(|e| format!("IMAP login error: {}", e.0))?;
+            .map_err(|e| format!("IMAP greeting read error: {e}"))?
+            .ok_or_else(|| "IMAP server closed connection before greeting".to_string())?;
+
+        let mut session = match self.auth_method {
+            EmailAuthMethod::XOAuth2 => {
+                let auth = XOAuth2Authenticator::new(&self.username, &self.password);
+                client
+                    .authenticate("XOAUTH2", auth)
+                    .await
+                    .map_err(|e| format!("IMAP XOAUTH2 auth error: {}", e.0))?
+            }
+            EmailAuthMethod::Password => client
+                .login(&self.username, &self.password)
+                .await
+                .map_err(|e| format!("IMAP login error: {}", e.0))?,
+        };
 
         let _ = session.logout().await;
         Ok(())
@@ -391,12 +481,14 @@ pub fn create_email_channel(config: EmailConfig) -> EmailChannel {
         config.username.clone(),
         config.password.clone(),
         config.from_address.clone(),
+        config.auth_method.clone(),
     );
     let imap = RealImap::new(
         config.imap_host.clone(),
         config.imap_port,
         config.username.clone(),
         config.password.clone(),
+        config.auth_method.clone(),
     );
     EmailChannel::new(config, Box::new(smtp), Box::new(imap))
 }
@@ -550,5 +642,123 @@ mod tests {
         assert!(token.starts_with("user=user@gmail.com\x01"));
         assert!(token.contains("auth=Bearer ya29.access-token"));
         assert!(token.ends_with("\x01\x01"));
+    }
+
+    // ── XOAUTH2 Authenticator Tests ─────────────────────────────────────
+
+    #[test]
+    fn test_xoauth2_authenticator_response_format() {
+        let auth = XOAuth2Authenticator::new("user@gmail.com", "ya29.test-token");
+        let response = auth.response();
+        assert_eq!(
+            response,
+            "user=user@gmail.com\x01auth=Bearer ya29.test-token\x01\x01"
+        );
+    }
+
+    #[test]
+    fn test_xoauth2_authenticator_process() {
+        let mut auth = XOAuth2Authenticator::new("user@gmail.com", "ya29.test-token");
+        // async-imap's Authenticator trait calls process() with the server challenge
+        let response = async_imap::Authenticator::process(&mut auth, b"");
+        assert_eq!(
+            response,
+            "user=user@gmail.com\x01auth=Bearer ya29.test-token\x01\x01"
+        );
+    }
+
+    #[test]
+    fn test_xoauth2_authenticator_ignores_challenge() {
+        let mut auth = XOAuth2Authenticator::new("alice@example.com", "token123");
+        // The XOAUTH2 protocol sends the same response regardless of challenge
+        let r1 = async_imap::Authenticator::process(&mut auth, b"");
+        let r2 = async_imap::Authenticator::process(&mut auth, b"some challenge data");
+        assert_eq!(r1, r2);
+    }
+
+    // ── RealImap / RealSmtp auth_method Tests ───────────────────────────
+
+    #[test]
+    fn test_real_imap_stores_auth_method_password() {
+        let imap = RealImap::new(
+            "imap.gmail.com".into(),
+            993,
+            "user@gmail.com".into(),
+            "password123".into(),
+            EmailAuthMethod::Password,
+        );
+        assert_eq!(imap.auth_method, EmailAuthMethod::Password);
+    }
+
+    #[test]
+    fn test_real_imap_stores_auth_method_xoauth2() {
+        let imap = RealImap::new(
+            "imap.gmail.com".into(),
+            993,
+            "user@gmail.com".into(),
+            "ya29.token".into(),
+            EmailAuthMethod::XOAuth2,
+        );
+        assert_eq!(imap.auth_method, EmailAuthMethod::XOAuth2);
+    }
+
+    #[test]
+    fn test_real_smtp_stores_auth_method_password() {
+        let smtp = RealSmtp::new(
+            "smtp.gmail.com".into(),
+            587,
+            "user@gmail.com".into(),
+            "password123".into(),
+            "user@gmail.com".into(),
+            EmailAuthMethod::Password,
+        );
+        assert_eq!(smtp.auth_method, EmailAuthMethod::Password);
+    }
+
+    #[test]
+    fn test_real_smtp_stores_auth_method_xoauth2() {
+        let smtp = RealSmtp::new(
+            "smtp.gmail.com".into(),
+            587,
+            "user@gmail.com".into(),
+            "ya29.token".into(),
+            "user@gmail.com".into(),
+            EmailAuthMethod::XOAuth2,
+        );
+        assert_eq!(smtp.auth_method, EmailAuthMethod::XOAuth2);
+    }
+
+    #[test]
+    fn test_create_email_channel_passes_auth_method_password() {
+        let config = EmailConfig {
+            imap_host: "imap.gmail.com".into(),
+            imap_port: 993,
+            smtp_host: "smtp.gmail.com".into(),
+            smtp_port: 587,
+            username: "user@gmail.com".into(),
+            password: "pass".into(),
+            from_address: "user@gmail.com".into(),
+            auth_method: EmailAuthMethod::Password,
+            ..Default::default()
+        };
+        // Should not panic — auth_method is passed through
+        let _ch = create_email_channel(config);
+    }
+
+    #[test]
+    fn test_create_email_channel_passes_auth_method_xoauth2() {
+        let config = EmailConfig {
+            imap_host: "imap.gmail.com".into(),
+            imap_port: 993,
+            smtp_host: "smtp.gmail.com".into(),
+            smtp_port: 587,
+            username: "user@gmail.com".into(),
+            password: "ya29.token".into(),
+            from_address: "user@gmail.com".into(),
+            auth_method: EmailAuthMethod::XOAuth2,
+            ..Default::default()
+        };
+        // Should not panic — auth_method is passed through to RealImap/RealSmtp
+        let _ch = create_email_channel(config);
     }
 }

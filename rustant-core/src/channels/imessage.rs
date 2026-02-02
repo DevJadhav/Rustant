@@ -27,12 +27,22 @@ impl Default for IMessageConfig {
     }
 }
 
+/// A resolved macOS contact.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvedContact {
+    pub name: String,
+    pub phone: Option<String>,
+    pub email: Option<String>,
+}
+
 /// Trait for iMessage interactions, allowing test mocking.
 #[async_trait]
 pub trait IMessageBridge: Send + Sync {
     async fn send_message(&self, recipient: &str, text: &str) -> Result<(), String>;
     async fn receive_messages(&self) -> Result<Vec<IMessageIncoming>, String>;
     async fn is_available(&self) -> Result<bool, String>;
+    /// Search macOS Contacts for a name, returning matching contacts with phone/email.
+    async fn resolve_contact(&self, query: &str) -> Result<Vec<ResolvedContact>, String>;
 }
 
 /// An incoming iMessage.
@@ -64,6 +74,30 @@ impl IMessageChannel {
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
         self.name = name.into();
         self
+    }
+
+    /// Search macOS Contacts by name and return matching entries.
+    pub async fn resolve_contact(&self, query: &str) -> Result<Vec<ResolvedContact>, String> {
+        self.bridge.resolve_contact(query).await
+    }
+
+    /// Send an iMessage to a recipient (phone number or email) via the bridge.
+    /// This can be used directly without going through the Channel trait.
+    pub async fn send_imessage(&self, recipient: &str, text: &str) -> Result<(), RustantError> {
+        if self.status != ChannelStatus::Connected {
+            return Err(RustantError::Channel(ChannelError::NotConnected {
+                name: self.name.clone(),
+            }));
+        }
+        self.bridge
+            .send_message(recipient, text)
+            .await
+            .map_err(|e| {
+                RustantError::Channel(ChannelError::SendFailed {
+                    name: self.name.clone(),
+                    message: e,
+                })
+            })
     }
 }
 
@@ -269,6 +303,77 @@ impl IMessageBridge for RealIMessageBridge {
         let stdout = String::from_utf8_lossy(&output.stdout);
         Ok(stdout.trim() == "true")
     }
+
+    async fn resolve_contact(&self, query: &str) -> Result<Vec<ResolvedContact>, String> {
+        let escaped_query = query.replace('"', "\\\"");
+        let script = format!(
+            r#"tell application "Contacts"
+    set matchingPeople to every person whose name contains "{query}"
+    set output to ""
+    repeat with p in matchingPeople
+        set pName to name of p
+        set pPhone to ""
+        set pEmail to ""
+        try
+            set pPhone to value of phone 1 of p
+        end try
+        try
+            set pEmail to value of email 1 of p
+        end try
+        set output to output & pName & "||" & pPhone & "||" & pEmail & "%%"
+    end repeat
+    return output
+end tell"#,
+            query = escaped_query
+        );
+
+        let output = tokio::process::Command::new("osascript")
+            .args(["-e", &script])
+            .output()
+            .await
+            .map_err(|e| format!("Failed to run osascript: {e}"))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Contacts lookup failed: {}", stderr));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let contacts = stdout
+            .trim()
+            .split("%%")
+            .filter(|s| !s.is_empty())
+            .filter_map(|entry| {
+                let parts: Vec<&str> = entry.split("||").collect();
+                if parts.is_empty() {
+                    return None;
+                }
+                let name = parts[0].trim().to_string();
+                if name.is_empty() {
+                    return None;
+                }
+                let phone = parts.get(1).and_then(|p| {
+                    let p = p.trim();
+                    if p.is_empty() {
+                        None
+                    } else {
+                        Some(p.to_string())
+                    }
+                });
+                let email = parts.get(2).and_then(|e| {
+                    let e = e.trim();
+                    if e.is_empty() {
+                        None
+                    } else {
+                        Some(e.to_string())
+                    }
+                });
+                Some(ResolvedContact { name, phone, email })
+            })
+            .collect();
+
+        Ok(contacts)
+    }
 }
 
 /// Create an iMessage channel with the real osascript bridge.
@@ -301,6 +406,14 @@ mod tests {
         }
         async fn is_available(&self) -> Result<bool, String> {
             Ok(self.available)
+        }
+        async fn resolve_contact(&self, query: &str) -> Result<Vec<ResolvedContact>, String> {
+            // Return a fake contact for testing
+            Ok(vec![ResolvedContact {
+                name: format!("Mock {}", query),
+                phone: Some("+1234567890".to_string()),
+                email: Some("mock@example.com".to_string()),
+            }])
         }
     }
 

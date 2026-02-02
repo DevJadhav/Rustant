@@ -309,6 +309,10 @@ mod tests {
 
         let result = handler.handle_tools_list().unwrap();
         let tools = result["tools"].as_array().unwrap();
+        // 12 base tools + 3 iMessage tools on macOS
+        #[cfg(target_os = "macos")]
+        assert_eq!(tools.len(), 15);
+        #[cfg(not(target_os = "macos"))]
         assert_eq!(tools.len(), 12);
 
         // Check that each tool has required fields

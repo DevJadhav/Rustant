@@ -115,6 +115,10 @@ impl CommandPalette {
                 command: "/replay reset".into(),
                 description: "Clear replay session".into(),
             },
+            CommandEntry {
+                command: "/channel-setup".into(),
+                description: "Set up a messaging channel (run from CLI)".into(),
+            },
         ];
 
         let filtered: Vec<usize> = (0..commands.len()).collect();

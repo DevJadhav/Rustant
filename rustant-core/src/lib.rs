@@ -46,8 +46,8 @@ pub use browser::{
 pub use channels::{
     Channel, ChannelAgentBridge, ChannelCapabilities, ChannelManager, ChannelMessage,
     ChannelStatus, ChannelType, ChannelUser, IMessageChannel, IMessageConfig, IrcChannel,
-    IrcConfig, MessageContent, MessageId, SmsChannel, SmsConfig, StreamingMode, TeamsChannel,
-    TeamsConfig, ThreadId, WebhookChannel, WebhookConfig,
+    IrcConfig, MessageContent, MessageId, ResolvedContact, SmsChannel, SmsConfig, StreamingMode,
+    TeamsChannel, TeamsConfig, ThreadId, WebhookChannel, WebhookConfig,
 };
 pub use config::MultiAgentConfig;
 pub use config::{AgentConfig, ApprovalMode};

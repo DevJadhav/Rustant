@@ -2,6 +2,7 @@
 //!
 //! Provides both single-task and interactive REPL modes.
 
+pub(crate) mod channel_setup;
 mod commands;
 mod repl;
 pub(crate) mod setup;
@@ -300,6 +301,11 @@ enum ConfigAction {
 enum ChannelAction {
     /// List all configured channels and their status
     List,
+    /// Interactive channel setup wizard
+    Setup {
+        /// Channel to configure (slack, discord, telegram, email, sms, imessage). Omit for menu.
+        channel: Option<String>,
+    },
     /// Test a channel's connection (connect + disconnect)
     Test {
         /// Channel name (e.g., slack, telegram, discord)
