@@ -1,0 +1,15 @@
+[book]
+title = "Rustant User Guide"
+authors = ["Dev Jadhav"]
+description = "Documentation for the Rustant autonomous personal agent"
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/DevJadhav/Rustant"
+edit-url-template = "https://github.com/DevJadhav/Rustant/edit/main/docs/{path}"

@@ -105,6 +105,14 @@ impl SessionManager {
         self.sessions.len()
     }
 
+    /// List all active sessions.
+    pub fn list_active(&self) -> Vec<&GatewaySession> {
+        self.sessions
+            .values()
+            .filter(|s| s.state == SessionState::Active)
+            .collect()
+    }
+
     /// Remove ended sessions.
     pub fn cleanup_ended(&mut self) -> usize {
         let before = self.sessions.len();

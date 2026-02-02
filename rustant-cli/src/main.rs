@@ -92,6 +92,95 @@ enum Commands {
         #[command(subcommand)]
         action: BrowserAction,
     },
+    /// Launch the Tauri dashboard UI
+    Ui {
+        /// Gateway port to connect to
+        #[arg(short, long, default_value = "18790")]
+        port: u16,
+    },
+    /// Canvas operations (push, clear, snapshot)
+    Canvas {
+        #[command(subcommand)]
+        action: CanvasAction,
+    },
+    /// Manage skills (SKILL.md files)
+    Skill {
+        #[command(subcommand)]
+        action: SkillAction,
+    },
+    /// Manage plugins
+    Plugin {
+        #[command(subcommand)]
+        action: PluginAction,
+    },
+    /// Check for updates or install the latest version
+    Update {
+        #[command(subcommand)]
+        action: UpdateAction,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum CanvasAction {
+    /// Push content to the canvas
+    Push {
+        /// Content type (html, markdown, code, chart, table, form, image, diagram)
+        content_type: String,
+        /// Content string (raw text, JSON for chart/table/form/diagram)
+        content: String,
+    },
+    /// Clear the canvas
+    Clear,
+    /// Get a snapshot of the canvas state
+    Snapshot,
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum SkillAction {
+    /// List loaded skills
+    List {
+        /// Directory to scan for skill files
+        #[arg(short, long)]
+        dir: Option<String>,
+    },
+    /// Show details of a skill
+    Info {
+        /// Path to a SKILL.md file
+        path: String,
+    },
+    /// Validate a skill file for security issues
+    Validate {
+        /// Path to a SKILL.md file
+        path: String,
+    },
+    /// Load a skill file and show parsed definition
+    Load {
+        /// Path to a SKILL.md file
+        path: String,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum PluginAction {
+    /// List loaded plugins
+    List {
+        /// Directory to scan for plugin files
+        #[arg(short, long)]
+        dir: Option<String>,
+    },
+    /// Show plugin info
+    Info {
+        /// Plugin name
+        name: String,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum UpdateAction {
+    /// Check for available updates
+    Check,
+    /// Download and install the latest version
+    Install,
 }
 
 #[derive(clap::Subcommand, Debug)]

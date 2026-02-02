@@ -8,6 +8,7 @@ pub mod agent;
 pub mod audit;
 pub mod brain;
 pub mod browser;
+pub mod canvas;
 pub mod channels;
 pub mod config;
 pub mod credentials;
@@ -27,8 +28,10 @@ pub mod safety;
 pub mod sandbox;
 pub mod scheduler;
 pub mod search;
+pub mod skills;
 pub mod summarizer;
 pub mod types;
+pub mod updater;
 pub mod voice;
 pub mod workflow;
 
@@ -87,6 +90,11 @@ pub use scheduler::{
     JobManager, JobStatus, WebhookEndpoint, WebhookHandler,
 };
 pub use search::{HybridSearchEngine, SearchConfig, SearchResult};
+pub use skills::{
+    parse_skill_md, validate_skill, ParseError as SkillParseError, SkillConfig, SkillDefinition,
+    SkillLoader, SkillRegistry, SkillRequirement, SkillRiskLevel, SkillToolDef, ValidationError,
+    ValidationResult,
+};
 pub use summarizer::{ContextSummarizer, ContextSummary, TokenAlert, TokenCostDisplay};
 pub use types::{
     AgentState, AgentStatus, Artifact, CompletionRequest, CompletionResponse, Content,

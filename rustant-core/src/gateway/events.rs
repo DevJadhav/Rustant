@@ -48,6 +48,23 @@ pub enum GatewayEvent {
     AgentSpawned { agent_id: String, name: String },
     /// An agent was terminated.
     AgentTerminated { agent_id: String },
+    /// Metrics update for dashboard monitoring.
+    MetricsUpdate {
+        active_connections: usize,
+        active_sessions: usize,
+        total_tool_calls: u64,
+        total_llm_requests: u64,
+        uptime_secs: u64,
+    },
+    /// An approval request awaiting user decision.
+    ApprovalRequest {
+        approval_id: Uuid,
+        tool_name: String,
+        description: String,
+        risk_level: String,
+    },
+    /// A config snapshot was requested or changed.
+    ConfigSnapshot { config_json: String },
 }
 
 /// Status of a tool execution.
@@ -77,6 +94,16 @@ pub enum ClientMessage {
     ListChannels,
     /// List registered nodes.
     ListNodes,
+    /// Request current metrics for the dashboard.
+    GetMetrics,
+    /// Request current configuration snapshot.
+    GetConfig,
+    /// Submit an approval decision.
+    ApprovalDecision {
+        approval_id: Uuid,
+        approved: bool,
+        reason: Option<String>,
+    },
 }
 
 /// Messages sent from the gateway to clients.
@@ -101,6 +128,18 @@ pub enum ServerMessage {
     ChannelStatus { channels: Vec<(String, String)> },
     /// Node status listing.
     NodeStatus { nodes: Vec<(String, String)> },
+    /// Metrics snapshot for dashboard.
+    MetricsResponse {
+        active_connections: usize,
+        active_sessions: usize,
+        total_tool_calls: u64,
+        total_llm_requests: u64,
+        uptime_secs: u64,
+    },
+    /// Configuration snapshot.
+    ConfigResponse { config_json: String },
+    /// Approval decision acknowledgment.
+    ApprovalAck { approval_id: Uuid, accepted: bool },
 }
 
 #[cfg(test)]
@@ -212,13 +251,29 @@ mod tests {
             GatewayEvent::AgentTerminated {
                 agent_id: "a1".into(),
             },
+            GatewayEvent::MetricsUpdate {
+                active_connections: 5,
+                active_sessions: 2,
+                total_tool_calls: 100,
+                total_llm_requests: 50,
+                uptime_secs: 3600,
+            },
+            GatewayEvent::ApprovalRequest {
+                approval_id: Uuid::new_v4(),
+                tool_name: "shell_exec".into(),
+                description: "Run rm -rf".into(),
+                risk_level: "high".into(),
+            },
+            GatewayEvent::ConfigSnapshot {
+                config_json: "{}".into(),
+            },
         ];
 
         for event in &events {
             let json = serde_json::to_string(event).unwrap();
             let _: GatewayEvent = serde_json::from_str(&json).unwrap();
         }
-        assert_eq!(events.len(), 13);
+        assert_eq!(events.len(), 16);
     }
 
     #[test]

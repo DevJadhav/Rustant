@@ -1,0 +1,24 @@
+[package]
+name = "rustant-plugins"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Plugin system for Rustant agent — native dynamic loading and WASM sandboxed plugins"
+
+[dependencies]
+rustant-core = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+async-trait = "0.1"
+libloading = { workspace = true }
+wasmi = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true, features = ["test-util"] }

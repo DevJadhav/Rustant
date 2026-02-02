@@ -1,0 +1,8 @@
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/rustant-{ target }.tar.gz"
+bin-dir = "rustant"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/rustant-windows-x86_64.exe"
+pkg-fmt = "bin"

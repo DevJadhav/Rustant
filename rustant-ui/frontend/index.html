@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rustant Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <nav id="sidebar">
+      <div class="logo">
+        <h1>Rustant</h1>
+        <span class="version" id="nav-version">v0.1.0</span>
+      </div>
+      <ul class="nav-links">
+        <li><a href="#dashboard" class="nav-link active" data-page="dashboard">Dashboard</a></li>
+        <li><a href="#sessions" class="nav-link" data-page="sessions">Sessions</a></li>
+        <li><a href="#config" class="nav-link" data-page="config">Configuration</a></li>
+        <li><a href="#monitoring" class="nav-link" data-page="monitoring">Monitoring</a></li>
+        <li><a href="#security" class="nav-link" data-page="security">Security</a></li>
+      </ul>
+      <div class="nav-footer">
+        <div class="status-indicator" id="ws-status">
+          <span class="dot disconnected"></span>
+          <span>Disconnected</span>
+        </div>
+      </div>
+    </nav>
+
+    <main id="content">
+      <div id="page-dashboard" class="page active"></div>
+      <div id="page-sessions" class="page"></div>
+      <div id="page-config" class="page"></div>
+      <div id="page-monitoring" class="page"></div>
+      <div id="page-security" class="page"></div>
+    </main>
+  </div>
+
+  <script src="pages/dashboard.js"></script>
+  <script src="pages/sessions.js"></script>
+  <script src="pages/config.js"></script>
+  <script src="pages/monitoring.js"></script>
+  <script src="pages/security.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

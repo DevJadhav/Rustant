@@ -52,6 +52,7 @@ tower-http = { workspace = true }
 rcgen = { workspace = true }
 rustls = { workspace = true }
 hound = { workspace = true }
+self_update = { workspace = true }
 
 # Optional voice dependencies (only compiled with "voice" feature)
 cpal = { workspace = true, optional = true }
@@ -69,3 +70,9 @@ browser = ["dep:chromiumoxide"]
 tokio-test = "0.4"
 pretty_assertions = "1.4"
 tempfile = "3.14"
+criterion = { workspace = true }
+proptest = { workspace = true }
+
+[[bench]]
+name = "core_benchmarks"
+harness = false

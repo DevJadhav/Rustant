@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegui/nicegui/main/tauri.conf.json",
+  "productName": "Rustant Dashboard",
+  "version": "0.1.0",
+  "identifier": "dev.rustant.dashboard",
+  "build": {
+    "frontendDist": "frontend",
+    "devUrl": "http://localhost:18790"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Rustant Dashboard",
+        "width": 1280,
+        "height": 720,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
+    }
+  }
+}

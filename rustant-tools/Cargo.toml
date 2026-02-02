@@ -28,3 +28,8 @@ wasmi = { workspace = true }
 tokio-test = "0.4"
 pretty_assertions = "1.4"
 tempfile = "3.14"
+criterion = { workspace = true }
+
+[[bench]]
+name = "tool_benchmarks"
+harness = false

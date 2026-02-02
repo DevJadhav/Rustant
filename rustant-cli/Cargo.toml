@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 rustant-core = { workspace = true }
 rustant-tools = { workspace = true }
+rustant-plugins = { path = "../rustant-plugins" }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 futures = { workspace = true }

@@ -8,10 +8,11 @@ use super::GatewayConfig;
 use axum::{
     extract::{
         ws::{Message as WsMessage, WebSocket, WebSocketUpgrade},
-        State,
+        Path, State,
     },
+    http::StatusCode,
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use chrono::Utc;
@@ -43,6 +44,26 @@ pub struct GatewayServer {
     event_tx: broadcast::Sender<GatewayEvent>,
     started_at: chrono::DateTime<Utc>,
     status_provider: Option<Box<dyn StatusProvider>>,
+    /// Counters for metrics dashboard.
+    total_tool_calls: u64,
+    total_llm_requests: u64,
+    /// Pending approvals for security queue.
+    pending_approvals: Vec<PendingApproval>,
+    /// Snapshot of configuration JSON for the UI.
+    config_json: String,
+}
+
+/// A pending approval request awaiting user decision.
+#[derive(Debug, Clone)]
+pub struct PendingApproval {
+    /// Unique approval ID.
+    pub id: Uuid,
+    /// Tool requesting approval.
+    pub tool_name: String,
+    /// Description of the action.
+    pub description: String,
+    /// Risk level string.
+    pub risk_level: String,
 }
 
 impl std::fmt::Debug for GatewayServer {
@@ -71,6 +92,10 @@ impl GatewayServer {
             event_tx,
             started_at: Utc::now(),
             status_provider: None,
+            total_tool_calls: 0,
+            total_llm_requests: 0,
+            pending_approvals: Vec::new(),
+            config_json: "{}".to_string(),
         }
     }
 
@@ -133,6 +158,67 @@ impl GatewayServer {
     /// Number of active sessions.
     pub fn active_sessions(&self) -> usize {
         self.sessions.active_count()
+    }
+
+    /// Increment the tool call counter.
+    pub fn record_tool_call(&mut self) {
+        self.total_tool_calls += 1;
+    }
+
+    /// Increment the LLM request counter.
+    pub fn record_llm_request(&mut self) {
+        self.total_llm_requests += 1;
+    }
+
+    /// Total tool calls since startup.
+    pub fn total_tool_calls(&self) -> u64 {
+        self.total_tool_calls
+    }
+
+    /// Total LLM requests since startup.
+    pub fn total_llm_requests(&self) -> u64 {
+        self.total_llm_requests
+    }
+
+    /// Add a pending approval request.
+    pub fn add_approval(&mut self, approval: PendingApproval) {
+        let id = approval.id;
+        self.pending_approvals.push(approval.clone());
+        self.broadcast(GatewayEvent::ApprovalRequest {
+            approval_id: id,
+            tool_name: approval.tool_name,
+            description: approval.description,
+            risk_level: approval.risk_level,
+        });
+    }
+
+    /// Resolve a pending approval (returns true if found).
+    pub fn resolve_approval(&mut self, approval_id: &Uuid, _approved: bool) -> bool {
+        if let Some(pos) = self
+            .pending_approvals
+            .iter()
+            .position(|a| a.id == *approval_id)
+        {
+            self.pending_approvals.remove(pos);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get all pending approvals.
+    pub fn pending_approvals(&self) -> &[PendingApproval] {
+        &self.pending_approvals
+    }
+
+    /// Set the configuration JSON snapshot for the UI.
+    pub fn set_config_json(&mut self, json: String) {
+        self.config_json = json;
+    }
+
+    /// Get the current configuration JSON snapshot.
+    pub fn config_json(&self) -> &str {
+        &self.config_json
     }
 
     /// Handle a client message and produce a server response.
@@ -213,15 +299,43 @@ impl GatewayServer {
                     .unwrap_or_default();
                 ServerMessage::NodeStatus { nodes }
             }
+            ClientMessage::GetMetrics => ServerMessage::MetricsResponse {
+                active_connections: self.connections.active_count(),
+                active_sessions: self.sessions.active_count(),
+                total_tool_calls: self.total_tool_calls,
+                total_llm_requests: self.total_llm_requests,
+                uptime_secs: self.uptime_secs(),
+            },
+            ClientMessage::GetConfig => ServerMessage::ConfigResponse {
+                config_json: self.config_json.clone(),
+            },
+            ClientMessage::ApprovalDecision {
+                approval_id,
+                approved,
+                reason: _,
+            } => {
+                let found = self.resolve_approval(&approval_id, approved);
+                ServerMessage::ApprovalAck {
+                    approval_id,
+                    accepted: found,
+                }
+            }
         }
     }
 }
 
-/// Build an axum Router with `/ws` and `/health` routes.
+/// Build an axum Router with `/ws`, `/health`, and REST API routes.
 pub fn router(shared: SharedGateway) -> Router {
     Router::new()
         .route("/ws", get(ws_handler))
         .route("/health", get(health_handler))
+        .route("/api/status", get(api_status_handler))
+        .route("/api/sessions", get(api_sessions_handler))
+        .route("/api/config", get(api_config_handler))
+        .route("/api/metrics", get(api_metrics_handler))
+        .route("/api/audit", get(api_audit_handler))
+        .route("/api/approvals", get(api_approvals_handler))
+        .route("/api/approval/{id}", post(api_approval_decision_handler))
         .with_state(shared)
 }
 
@@ -240,6 +354,139 @@ async fn health_handler(State(gw): State<SharedGateway>) -> impl IntoResponse {
         "uptime_secs": gw.uptime_secs(),
     });
     axum::Json(body)
+}
+
+/// REST API: Get server status overview.
+async fn api_status_handler(State(gw): State<SharedGateway>) -> impl IntoResponse {
+    let gw = gw.lock().await;
+    let channels = gw
+        .status_provider
+        .as_ref()
+        .map(|p| p.channel_statuses())
+        .unwrap_or_default();
+    let nodes = gw
+        .status_provider
+        .as_ref()
+        .map(|p| p.node_statuses())
+        .unwrap_or_default();
+
+    let body = serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "uptime_secs": gw.uptime_secs(),
+        "active_connections": gw.active_connections(),
+        "active_sessions": gw.active_sessions(),
+        "total_tool_calls": gw.total_tool_calls(),
+        "total_llm_requests": gw.total_llm_requests(),
+        "channels": channels.iter().map(|(n, s)| serde_json::json!({"name": n, "status": s})).collect::<Vec<_>>(),
+        "nodes": nodes.iter().map(|(n, s)| serde_json::json!({"name": n, "status": s})).collect::<Vec<_>>(),
+        "pending_approvals": gw.pending_approvals().len(),
+    });
+    axum::Json(body)
+}
+
+/// REST API: Get active sessions.
+async fn api_sessions_handler(State(gw): State<SharedGateway>) -> impl IntoResponse {
+    let gw = gw.lock().await;
+    let body = serde_json::json!({
+        "total": gw.active_sessions(),
+        "sessions": gw.sessions().list_active().iter().map(|s| {
+            serde_json::json!({
+                "id": s.session_id.to_string(),
+                "connection_id": s.connection_id.to_string(),
+                "state": format!("{:?}", s.state),
+                "created_at": s.created_at.to_rfc3339(),
+            })
+        }).collect::<Vec<_>>(),
+    });
+    axum::Json(body)
+}
+
+/// REST API: Get current configuration snapshot.
+async fn api_config_handler(State(gw): State<SharedGateway>) -> impl IntoResponse {
+    let gw = gw.lock().await;
+    let config_json = gw.config_json();
+    match serde_json::from_str::<serde_json::Value>(config_json) {
+        Ok(val) => axum::Json(val),
+        Err(_) => axum::Json(serde_json::json!({"error": "Invalid config JSON"})),
+    }
+}
+
+/// REST API: Get metrics snapshot.
+async fn api_metrics_handler(State(gw): State<SharedGateway>) -> impl IntoResponse {
+    let gw = gw.lock().await;
+    let body = serde_json::json!({
+        "active_connections": gw.active_connections(),
+        "active_sessions": gw.active_sessions(),
+        "total_tool_calls": gw.total_tool_calls(),
+        "total_llm_requests": gw.total_llm_requests(),
+        "uptime_secs": gw.uptime_secs(),
+    });
+    axum::Json(body)
+}
+
+/// REST API: Get audit trail (placeholder — returns recent events).
+async fn api_audit_handler(State(_gw): State<SharedGateway>) -> impl IntoResponse {
+    // In a full implementation, this would query the AuditTrail from rustant-core.
+    // For now, return an empty list to indicate the endpoint is functional.
+    let body = serde_json::json!({
+        "entries": [],
+        "total": 0,
+    });
+    axum::Json(body)
+}
+
+/// REST API: Get pending approval requests.
+async fn api_approvals_handler(State(gw): State<SharedGateway>) -> impl IntoResponse {
+    let gw = gw.lock().await;
+    let approvals: Vec<serde_json::Value> = gw
+        .pending_approvals()
+        .iter()
+        .map(|a| {
+            serde_json::json!({
+                "id": a.id.to_string(),
+                "tool_name": a.tool_name,
+                "description": a.description,
+                "risk_level": a.risk_level,
+            })
+        })
+        .collect();
+    axum::Json(serde_json::json!({ "approvals": approvals }))
+}
+
+/// REST API: Submit an approval decision.
+async fn api_approval_decision_handler(
+    Path(id): Path<String>,
+    State(gw): State<SharedGateway>,
+    axum::Json(body): axum::Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let approval_id = match Uuid::parse_str(&id) {
+        Ok(uuid) => uuid,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                axum::Json(serde_json::json!({"error": "Invalid UUID"})),
+            );
+        }
+    };
+
+    let approved = body
+        .get("approved")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let mut gw = gw.lock().await;
+    let found = gw.resolve_approval(&approval_id, approved);
+
+    if found {
+        (
+            StatusCode::OK,
+            axum::Json(serde_json::json!({"status": "resolved", "approved": approved})),
+        )
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            axum::Json(serde_json::json!({"error": "Approval not found"})),
+        )
+    }
 }
 
 /// Handle an individual WebSocket connection.

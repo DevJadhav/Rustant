@@ -2,11 +2,15 @@
 
 use crate::AuthAction;
 use crate::BrowserAction;
+use crate::CanvasAction;
 use crate::ChannelAction;
 use crate::Commands;
 use crate::ConfigAction;
 use crate::CronAction;
+use crate::PluginAction;
+use crate::SkillAction;
 use crate::SlackCommand;
+use crate::UpdateAction;
 use crate::VoiceAction;
 use crate::WorkflowAction;
 use std::path::Path;
@@ -22,6 +26,11 @@ pub async fn handle_command(command: Commands, workspace: &Path) -> anyhow::Resu
         Commands::Cron { action } => handle_cron(action, workspace).await,
         Commands::Voice { action } => handle_voice(action).await,
         Commands::Browser { action } => handle_browser(action, workspace).await,
+        Commands::Ui { port } => handle_ui(port).await,
+        Commands::Canvas { action } => handle_canvas(action).await,
+        Commands::Skill { action } => handle_skill(action).await,
+        Commands::Plugin { action } => handle_plugin(action).await,
+        Commands::Update { action } => handle_update(action).await,
     }
 }
 
@@ -976,6 +985,359 @@ async fn handle_browser(action: BrowserAction, _workspace: &Path) -> anyhow::Res
                 );
                 Ok(())
             }
+        }
+    }
+}
+
+async fn handle_ui(port: u16) -> anyhow::Result<()> {
+    println!("Starting Rustant Dashboard...");
+    println!("Gateway will listen on: http://127.0.0.1:{}", port);
+    println!();
+
+    // Start the gateway server in the background
+    let config = rustant_core::gateway::GatewayConfig {
+        enabled: true,
+        host: "127.0.0.1".into(),
+        port,
+        auth_tokens: Vec::new(),
+        max_connections: 50,
+        session_timeout_secs: 3600,
+    };
+
+    let gw: rustant_core::gateway::SharedGateway = std::sync::Arc::new(tokio::sync::Mutex::new(
+        rustant_core::gateway::GatewayServer::new(config.clone()),
+    ));
+
+    let gw_for_server = gw.clone();
+
+    tokio::spawn(async move {
+        if let Err(e) = rustant_core::gateway::run_gateway(gw_for_server).await {
+            eprintln!("Gateway error: {}", e);
+        }
+    });
+
+    // Give the server a moment to start
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    println!("Gateway running. Open your browser to:");
+    println!("  http://127.0.0.1:{}/api/status", port);
+    println!();
+    println!("Dashboard UI requires the rustant-ui binary (Tauri).");
+    println!("  Build it with: cargo build -p rustant-ui");
+    println!("  Or run the gateway-only mode and open the API in a browser.");
+    println!();
+    println!("Press Ctrl+C to stop.");
+
+    // Wait forever (or until Ctrl+C)
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+    }
+}
+
+async fn handle_canvas(action: CanvasAction) -> anyhow::Result<()> {
+    use rustant_core::canvas::{CanvasManager, CanvasTarget, ContentType};
+
+    // Create a local canvas manager for CLI operations
+    let mut canvas = CanvasManager::new();
+    let target = CanvasTarget::Broadcast;
+
+    match action {
+        CanvasAction::Push {
+            content_type,
+            content,
+        } => {
+            let ct = ContentType::from_str_loose(&content_type).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Unknown content type '{}'. Valid types: html, markdown, code, chart, table, form, image, diagram",
+                    content_type
+                )
+            })?;
+
+            // For structured types, try to render them
+            match ct {
+                ContentType::Chart => {
+                    let spec: rustant_core::canvas::ChartSpec = serde_json::from_str(&content)
+                        .map_err(|e| anyhow::anyhow!("Invalid chart JSON: {}", e))?;
+                    let config = rustant_core::canvas::render_chart_config(&spec);
+                    println!("Chart.js config:\n{}", config);
+                }
+                ContentType::Table => {
+                    let spec: rustant_core::canvas::TableSpec = serde_json::from_str(&content)
+                        .map_err(|e| anyhow::anyhow!("Invalid table JSON: {}", e))?;
+                    let html = rustant_core::canvas::render_table_html(&spec);
+                    println!("Table HTML:\n{}", html);
+                }
+                ContentType::Form => {
+                    let spec: rustant_core::canvas::FormSpec = serde_json::from_str(&content)
+                        .map_err(|e| anyhow::anyhow!("Invalid form JSON: {}", e))?;
+                    let html = rustant_core::canvas::render_form_html(&spec);
+                    println!("Form HTML:\n{}", html);
+                }
+                ContentType::Diagram => {
+                    let spec: rustant_core::canvas::DiagramSpec = serde_json::from_str(&content)
+                        .map_err(|e| anyhow::anyhow!("Invalid diagram JSON: {}", e))?;
+                    let mermaid = rustant_core::canvas::render_diagram_mermaid(&spec);
+                    println!("Mermaid:\n{}", mermaid);
+                }
+                _ => {
+                    println!("Content ({}):\n{}", content_type, content);
+                }
+            }
+
+            let id = canvas
+                .push(&target, ct, content)
+                .map_err(|e| anyhow::anyhow!("Canvas push failed: {}", e))?;
+            println!("\nPushed to canvas (id: {})", id);
+            Ok(())
+        }
+        CanvasAction::Clear => {
+            canvas.clear(&target);
+            println!("Canvas cleared.");
+            Ok(())
+        }
+        CanvasAction::Snapshot => {
+            let items = canvas.snapshot(&target);
+            if items.is_empty() {
+                println!("Canvas is empty.");
+            } else {
+                println!("Canvas snapshot ({} items):", items.len());
+                for item in items {
+                    println!(
+                        "  [{}] {:?}: {}",
+                        &item.id.to_string()[..8],
+                        item.content_type,
+                        if item.content.len() > 80 {
+                            format!("{}...", &item.content[..77])
+                        } else {
+                            item.content.clone()
+                        }
+                    );
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+async fn handle_skill(action: SkillAction) -> anyhow::Result<()> {
+    use rustant_core::skills::{parse_skill_md, validate_skill, SkillLoader};
+
+    match action {
+        SkillAction::List { dir } => {
+            let skills_dir = dir.unwrap_or_else(|| {
+                directories::ProjectDirs::from("dev", "rustant", "rustant")
+                    .map(|d| d.data_dir().join("skills").to_string_lossy().into_owned())
+                    .unwrap_or_else(|| ".rustant/skills".into())
+            });
+
+            let loader = SkillLoader::new(&skills_dir);
+            let results = loader.scan();
+
+            if results.is_empty() {
+                println!("No skill files found in: {}", skills_dir);
+                println!("Create SKILL.md files in that directory to define skills.");
+            } else {
+                println!("Skills in {}:", skills_dir);
+                for result in &results {
+                    match result {
+                        Ok(skill) => {
+                            println!(
+                                "  {} v{} - {} ({} tools)",
+                                skill.name,
+                                skill.version,
+                                skill.description,
+                                skill.tools.len()
+                            );
+                        }
+                        Err((path, err)) => {
+                            println!("  {} (error: {})", path.display(), err);
+                        }
+                    }
+                }
+                println!("\nTotal: {} skill files", results.len());
+            }
+            Ok(())
+        }
+        SkillAction::Info { path } => {
+            let content = std::fs::read_to_string(&path)
+                .map_err(|e| anyhow::anyhow!("Failed to read '{}': {}", path, e))?;
+            let skill = parse_skill_md(&content)
+                .map_err(|e| anyhow::anyhow!("Failed to parse '{}': {}", path, e))?;
+
+            println!("Skill: {}", skill.name);
+            println!("Version: {}", skill.version);
+            println!("Description: {}", skill.description);
+            if let Some(author) = &skill.author {
+                println!("Author: {}", author);
+            }
+            println!("Risk Level: {:?}", skill.risk_level);
+
+            if !skill.requires.is_empty() {
+                println!("\nRequirements:");
+                for req in &skill.requires {
+                    println!("  {} ({})", req.name, req.req_type);
+                }
+            }
+
+            if !skill.tools.is_empty() {
+                println!("\nTools ({}):", skill.tools.len());
+                for tool in &skill.tools {
+                    println!("  {} - {}", tool.name, tool.description);
+                    if !tool.body.is_empty() {
+                        let body_preview = if tool.body.len() > 60 {
+                            format!("{}...", &tool.body[..57])
+                        } else {
+                            tool.body.clone()
+                        };
+                        println!("    Body: {}", body_preview);
+                    }
+                }
+            }
+            Ok(())
+        }
+        SkillAction::Validate { path } => {
+            let content = std::fs::read_to_string(&path)
+                .map_err(|e| anyhow::anyhow!("Failed to read '{}': {}", path, e))?;
+            let skill = parse_skill_md(&content)
+                .map_err(|e| anyhow::anyhow!("Failed to parse '{}': {}", path, e))?;
+
+            // Validate with empty available tools/secrets (strict check)
+            let result = validate_skill(&skill, &[], &[]);
+
+            println!("Validation result for '{}':", skill.name);
+            println!("  Valid: {}", result.is_valid);
+            println!("  Risk Level: {:?}", result.risk_level);
+
+            if !result.warnings.is_empty() {
+                println!("\n  Warnings:");
+                for warning in &result.warnings {
+                    println!("    - {}", warning);
+                }
+            }
+
+            if !result.errors.is_empty() {
+                println!("\n  Errors:");
+                for error in &result.errors {
+                    println!("    - {}", error);
+                }
+            }
+
+            if result.is_valid && result.warnings.is_empty() {
+                println!("\n  Skill passed all validation checks.");
+            }
+            Ok(())
+        }
+        SkillAction::Load { path } => {
+            let content = std::fs::read_to_string(&path)
+                .map_err(|e| anyhow::anyhow!("Failed to read '{}': {}", path, e))?;
+            let skill = parse_skill_md(&content)
+                .map_err(|e| anyhow::anyhow!("Failed to parse '{}': {}", path, e))?;
+
+            println!("Loaded skill: {}", skill.name);
+            let json = serde_json::to_string_pretty(&skill)?;
+            println!("{}", json);
+            Ok(())
+        }
+    }
+}
+
+async fn handle_plugin(action: PluginAction) -> anyhow::Result<()> {
+    use rustant_plugins::NativePluginLoader;
+
+    match action {
+        PluginAction::List { dir } => {
+            let plugins_dir = dir.unwrap_or_else(|| {
+                directories::ProjectDirs::from("dev", "rustant", "rustant")
+                    .map(|d| d.data_dir().join("plugins").to_string_lossy().into_owned())
+                    .unwrap_or_else(|| ".rustant/plugins".into())
+            });
+
+            let mut loader = NativePluginLoader::new();
+            loader.add_search_dir(&plugins_dir);
+            let found = loader.discover();
+
+            if found.is_empty() {
+                println!("No plugins found in: {}", plugins_dir);
+                println!("Place .so/.dll/.dylib plugin files in that directory.");
+            } else {
+                println!("Plugin files in {}:", plugins_dir);
+                for path in &found {
+                    println!("  {}", path.display());
+                }
+                println!("\nTotal: {} plugin files", found.len());
+            }
+            Ok(())
+        }
+        PluginAction::Info { name } => {
+            println!("Plugin: {}", name);
+            println!("  Status: not loaded");
+            println!("  (Plugin loading requires an active agent session)");
+            Ok(())
+        }
+    }
+}
+
+async fn handle_update(action: UpdateAction) -> anyhow::Result<()> {
+    use rustant_core::updater::{UpdateChecker, UpdateConfig, Updater, CURRENT_VERSION};
+
+    match action {
+        UpdateAction::Check => {
+            println!("Current version: {}", CURRENT_VERSION);
+            println!("Checking for updates...");
+
+            let config = UpdateConfig::default();
+            let checker = UpdateChecker::new(config);
+
+            match checker.check().await {
+                Ok(result) => {
+                    if result.update_available {
+                        println!(
+                            "Update available: {} -> {}",
+                            result.current_version,
+                            result.latest_version.as_deref().unwrap_or("unknown")
+                        );
+                        if let Some(url) = &result.release_url {
+                            println!("Release: {}", url);
+                        }
+                        if let Some(notes) = &result.release_notes {
+                            if !notes.is_empty() {
+                                let preview = if notes.len() > 200 {
+                                    format!("{}...", &notes[..197])
+                                } else {
+                                    notes.clone()
+                                };
+                                println!("\nRelease notes:\n{}", preview);
+                            }
+                        }
+                        println!("\nRun `rustant update install` to update.");
+                    } else {
+                        println!("You are running the latest version.");
+                    }
+                }
+                Err(e) => {
+                    println!("Failed to check for updates: {}", e);
+                    println!("You can check manually at:");
+                    println!("  https://github.com/DevJadhav/Rustant/releases");
+                }
+            }
+            Ok(())
+        }
+        UpdateAction::Install => {
+            println!("Current version: {}", CURRENT_VERSION);
+            println!("Downloading and installing latest version...");
+
+            match Updater::update() {
+                Ok(()) => {
+                    println!("Update installed successfully!");
+                    println!("Restart rustant to use the new version.");
+                }
+                Err(e) => {
+                    println!("Update failed: {}", e);
+                    println!("You can update manually by downloading from:");
+                    println!("  https://github.com/DevJadhav/Rustant/releases");
+                }
+            }
+            Ok(())
         }
     }
 }

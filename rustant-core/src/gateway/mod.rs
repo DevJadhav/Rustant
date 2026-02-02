@@ -18,7 +18,8 @@ pub use connection::ConnectionManager;
 pub use events::{ClientMessage, GatewayEvent, ServerMessage};
 pub use node_bridge::NodeBridge;
 pub use server::{
-    router as gateway_router, run as run_gateway, GatewayServer, SharedGateway, StatusProvider,
+    router as gateway_router, run as run_gateway, GatewayServer, PendingApproval, SharedGateway,
+    StatusProvider,
 };
 pub use session::{GatewaySession, SessionManager, SessionState};
 

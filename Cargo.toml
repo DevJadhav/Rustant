@@ -5,10 +5,12 @@ members = [
     "rustant-tools",
     "rustant-cli",
     "rustant-mcp",
+    "rustant-ui",
+    "rustant-plugins",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 license = "MIT"
 authors = ["Dev Jadhav"]
@@ -88,6 +90,12 @@ cap-std = "3.4"
 # WASM sandboxing
 wasmi = { version = "1.0", features = ["default"] }
 
+# Dynamic library loading
+libloading = "0.8"
+
+# Self-update
+self_update = "0.41"
+
 # Credential storage
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 
@@ -126,6 +134,12 @@ chromiumoxide = "0.8"
 
 # Token counting
 tiktoken-rs = "0.9"
+
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Property testing
+proptest = "1.5"
 
 # Internal crates
 rustant-core = { path = "rustant-core" }

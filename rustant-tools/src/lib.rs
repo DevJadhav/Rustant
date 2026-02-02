@@ -4,6 +4,7 @@
 //! Provides file operations, search, git integration, and shell execution.
 
 pub mod browser;
+pub mod canvas;
 pub mod checkpoint;
 pub mod file;
 pub mod git;
