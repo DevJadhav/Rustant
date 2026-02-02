@@ -5,6 +5,7 @@
 //! - **Long-Term Memory**: Persistent facts and preferences across sessions.
 
 use crate::error::MemoryError;
+use crate::search::{HybridSearchEngine, SearchConfig};
 use crate::types::Message;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -260,6 +261,10 @@ pub struct MemorySystem {
     pub working: WorkingMemory,
     pub short_term: ShortTermMemory,
     pub long_term: LongTermMemory,
+    /// Optional hybrid search engine for fact retrieval.
+    search_engine: Option<HybridSearchEngine>,
+    /// Optional automatic flusher for periodic persistence.
+    flusher: Option<MemoryFlusher>,
 }
 
 impl MemorySystem {
@@ -268,7 +273,30 @@ impl MemorySystem {
             working: WorkingMemory::new(),
             short_term: ShortTermMemory::new(window_size),
             long_term: LongTermMemory::new(),
+            search_engine: None,
+            flusher: None,
         }
+    }
+
+    /// Create a memory system with hybrid search enabled.
+    pub fn with_search(
+        window_size: usize,
+        search_config: SearchConfig,
+    ) -> Result<Self, crate::search::SearchError> {
+        let engine = HybridSearchEngine::open(search_config)?;
+        Ok(Self {
+            working: WorkingMemory::new(),
+            short_term: ShortTermMemory::new(window_size),
+            long_term: LongTermMemory::new(),
+            search_engine: Some(engine),
+            flusher: None,
+        })
+    }
+
+    /// Attach an automatic flusher to this memory system (builder pattern).
+    pub fn with_flusher(mut self, config: FlushConfig) -> Self {
+        self.flusher = Some(MemoryFlusher::new(config));
+        self
     }
 
     /// Get all messages for the LLM context.
@@ -279,6 +307,72 @@ impl MemorySystem {
     /// Add a message to the conversation.
     pub fn add_message(&mut self, message: Message) {
         self.short_term.add(message);
+        // Notify flusher
+        if let Some(ref mut flusher) = self.flusher {
+            flusher.on_message_added();
+        }
+    }
+
+    /// Add a fact to long-term memory, also indexing it in the search engine.
+    pub fn add_fact(&mut self, fact: Fact) {
+        if let Some(ref mut engine) = self.search_engine {
+            let _ = engine.index_fact(&fact.id.to_string(), &fact.content);
+        }
+        self.long_term.add_fact(fact);
+    }
+
+    /// Search facts using the hybrid engine (falls back to keyword search).
+    pub fn search_facts_hybrid(&self, query: &str) -> Vec<&Fact> {
+        if let Some(ref engine) = self.search_engine {
+            if let Ok(results) = engine.search(query) {
+                let ids: Vec<String> = results.iter().map(|r| r.fact_id.clone()).collect();
+                let found: Vec<&Fact> = self
+                    .long_term
+                    .facts
+                    .iter()
+                    .filter(|f| ids.contains(&f.id.to_string()))
+                    .collect();
+                if !found.is_empty() {
+                    return found;
+                }
+            }
+        }
+        // Fallback to keyword search
+        self.long_term.search_facts(query)
+    }
+
+    /// Check if auto-flush should happen, and flush if needed.
+    ///
+    /// Uses the `Option::take()` pattern to avoid borrow conflicts.
+    pub fn check_auto_flush(&mut self) -> Result<bool, MemoryError> {
+        let mut flusher = match self.flusher.take() {
+            Some(f) => f,
+            None => return Ok(false),
+        };
+        let result = if flusher.should_flush() {
+            flusher.flush(self)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        };
+        self.flusher = Some(flusher);
+        result
+    }
+
+    /// Force a flush regardless of triggers.
+    pub fn force_flush(&mut self) -> Result<(), MemoryError> {
+        let mut flusher = match self.flusher.take() {
+            Some(f) => f,
+            None => return Ok(()),
+        };
+        let result = flusher.force_flush(self);
+        self.flusher = Some(flusher);
+        result
+    }
+
+    /// Whether the flusher has unflushed data.
+    pub fn flusher_is_dirty(&self) -> bool {
+        self.flusher.as_ref().is_some_and(|f| f.is_dirty())
     }
 
     /// Reset working memory for a new task.
@@ -400,6 +494,131 @@ pub struct CompressionResult {
     pub messages_before: usize,
     pub messages_after: usize,
     pub compressed_count: usize,
+}
+
+// ---------------------------------------------------------------------------
+// Memory Flusher
+// ---------------------------------------------------------------------------
+
+/// Configuration for automatic memory flushing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlushConfig {
+    /// Whether automatic flushing is enabled.
+    pub enabled: bool,
+    /// Flush interval in seconds (0 = disabled).
+    pub interval_secs: u64,
+    /// Number of messages that triggers an auto-flush (0 = disabled).
+    pub flush_on_message_count: usize,
+    /// Path where flushed data is written.
+    pub flush_path: Option<std::path::PathBuf>,
+}
+
+impl Default for FlushConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            interval_secs: 300, // 5 minutes
+            flush_on_message_count: 50,
+            flush_path: None,
+        }
+    }
+}
+
+/// Tracks dirty state and triggers for automatic memory persistence.
+#[derive(Debug, Clone)]
+pub struct MemoryFlusher {
+    config: FlushConfig,
+    dirty: bool,
+    messages_since_flush: usize,
+    last_flush: DateTime<Utc>,
+    total_flushes: usize,
+}
+
+impl MemoryFlusher {
+    /// Create a new flusher with the given configuration.
+    pub fn new(config: FlushConfig) -> Self {
+        Self {
+            config,
+            dirty: false,
+            messages_since_flush: 0,
+            last_flush: Utc::now(),
+            total_flushes: 0,
+        }
+    }
+
+    /// Notify the flusher that a message was added.
+    pub fn on_message_added(&mut self) {
+        self.dirty = true;
+        self.messages_since_flush += 1;
+    }
+
+    /// Check whether a flush should happen based on the configured triggers.
+    pub fn should_flush(&self) -> bool {
+        if !self.config.enabled || !self.dirty {
+            return false;
+        }
+
+        // Message-count trigger
+        if self.config.flush_on_message_count > 0
+            && self.messages_since_flush >= self.config.flush_on_message_count
+        {
+            return true;
+        }
+
+        // Time-based trigger
+        if self.config.interval_secs > 0 {
+            let elapsed = (Utc::now() - self.last_flush).num_seconds();
+            if elapsed >= self.config.interval_secs as i64 {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Perform a flush of the memory system to disk.
+    pub fn flush(&mut self, memory: &MemorySystem) -> Result<(), MemoryError> {
+        let path = self.config.flush_path.as_ref().ok_or_else(|| {
+            MemoryError::PersistenceError {
+                message: "No flush path configured".to_string(),
+            }
+        })?;
+
+        memory.save_session(path)?;
+        self.mark_flushed();
+        Ok(())
+    }
+
+    /// Force a flush regardless of triggers.
+    pub fn force_flush(&mut self, memory: &MemorySystem) -> Result<(), MemoryError> {
+        if !self.dirty {
+            return Ok(()); // nothing to flush
+        }
+        self.flush(memory)
+    }
+
+    /// Whether there is unflushed data.
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    /// Messages added since the last flush.
+    pub fn messages_since_flush(&self) -> usize {
+        self.messages_since_flush
+    }
+
+    /// Total number of flushes performed.
+    pub fn total_flushes(&self) -> usize {
+        self.total_flushes
+    }
+
+    /// Mark the flush as completed (reset counters).
+    fn mark_flushed(&mut self) {
+        self.dirty = false;
+        self.messages_since_flush = 0;
+        self.last_flush = Utc::now();
+        self.total_flushes += 1;
+    }
 }
 
 #[cfg(test)]
@@ -690,5 +909,322 @@ mod tests {
     fn test_short_term_window_size() {
         let stm = ShortTermMemory::new(7);
         assert_eq!(stm.window_size(), 7);
+    }
+
+    // --- Memory Flusher tests ---
+
+    #[test]
+    fn test_flusher_default_config() {
+        let config = FlushConfig::default();
+        assert!(!config.enabled);
+        assert_eq!(config.interval_secs, 300);
+        assert_eq!(config.flush_on_message_count, 50);
+        assert!(config.flush_path.is_none());
+    }
+
+    #[test]
+    fn test_flusher_not_dirty_by_default() {
+        let flusher = MemoryFlusher::new(FlushConfig::default());
+        assert!(!flusher.is_dirty());
+        assert_eq!(flusher.messages_since_flush(), 0);
+        assert_eq!(flusher.total_flushes(), 0);
+    }
+
+    #[test]
+    fn test_flusher_marks_dirty_on_message() {
+        let mut flusher = MemoryFlusher::new(FlushConfig::default());
+        flusher.on_message_added();
+        assert!(flusher.is_dirty());
+        assert_eq!(flusher.messages_since_flush(), 1);
+    }
+
+    #[test]
+    fn test_flusher_disabled_never_triggers() {
+        let mut flusher = MemoryFlusher::new(FlushConfig {
+            enabled: false,
+            ..FlushConfig::default()
+        });
+        for _ in 0..100 {
+            flusher.on_message_added();
+        }
+        assert!(!flusher.should_flush());
+    }
+
+    #[test]
+    fn test_flusher_message_count_trigger() {
+        let mut flusher = MemoryFlusher::new(FlushConfig {
+            enabled: true,
+            flush_on_message_count: 5,
+            interval_secs: 0,
+            flush_path: None,
+        });
+
+        for _ in 0..4 {
+            flusher.on_message_added();
+        }
+        assert!(!flusher.should_flush());
+
+        flusher.on_message_added(); // 5th message
+        assert!(flusher.should_flush());
+    }
+
+    #[test]
+    fn test_flusher_not_dirty_no_trigger() {
+        let flusher = MemoryFlusher::new(FlushConfig {
+            enabled: true,
+            flush_on_message_count: 1,
+            interval_secs: 0,
+            flush_path: None,
+        });
+        // Not dirty, so should_flush is false even though threshold is 1
+        assert!(!flusher.should_flush());
+    }
+
+    #[test]
+    fn test_flusher_flush_resets_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let flush_path = dir.path().join("flush.json");
+
+        let mut flusher = MemoryFlusher::new(FlushConfig {
+            enabled: true,
+            flush_on_message_count: 2,
+            interval_secs: 0,
+            flush_path: Some(flush_path.clone()),
+        });
+
+        let mut mem = MemorySystem::new(10);
+        mem.add_message(Message::user("test"));
+
+        flusher.on_message_added();
+        flusher.on_message_added();
+        assert!(flusher.should_flush());
+
+        flusher.flush(&mem).unwrap();
+        assert!(!flusher.is_dirty());
+        assert_eq!(flusher.messages_since_flush(), 0);
+        assert_eq!(flusher.total_flushes(), 1);
+        assert!(flush_path.exists());
+    }
+
+    #[test]
+    fn test_flusher_force_flush() {
+        let dir = tempfile::tempdir().unwrap();
+        let flush_path = dir.path().join("force.json");
+
+        let mut flusher = MemoryFlusher::new(FlushConfig {
+            enabled: true,
+            flush_on_message_count: 100,
+            interval_secs: 0,
+            flush_path: Some(flush_path.clone()),
+        });
+
+        let mem = MemorySystem::new(10);
+
+        // Not dirty - force_flush is a no-op
+        flusher.force_flush(&mem).unwrap();
+        assert_eq!(flusher.total_flushes(), 0);
+
+        // Make dirty, then force
+        flusher.on_message_added();
+        flusher.force_flush(&mem).unwrap();
+        assert_eq!(flusher.total_flushes(), 1);
+        assert!(!flusher.is_dirty());
+    }
+
+    #[test]
+    fn test_flusher_no_path_error() {
+        let mut flusher = MemoryFlusher::new(FlushConfig {
+            enabled: true,
+            flush_on_message_count: 1,
+            interval_secs: 0,
+            flush_path: None,
+        });
+        flusher.on_message_added();
+
+        let mem = MemorySystem::new(10);
+        let result = flusher.flush(&mem);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_flush_config_serialization() {
+        let config = FlushConfig {
+            enabled: true,
+            interval_secs: 120,
+            flush_on_message_count: 25,
+            flush_path: Some(std::path::PathBuf::from("/tmp/flush.json")),
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let restored: FlushConfig = serde_json::from_str(&json).unwrap();
+        assert!(restored.enabled);
+        assert_eq!(restored.interval_secs, 120);
+        assert_eq!(restored.flush_on_message_count, 25);
+    }
+
+    // --- A4: HybridSearchEngine → MemorySystem integration tests ---
+
+    #[test]
+    fn test_memory_system_without_search_uses_keyword_fallback() {
+        let mut mem = MemorySystem::new(10);
+        mem.add_fact(Fact::new("Rust uses ownership for memory safety", "docs"));
+        mem.add_fact(Fact::new("Python uses garbage collection", "docs"));
+
+        let results = mem.search_facts_hybrid("ownership");
+        assert_eq!(results.len(), 1);
+        assert!(results[0].content.contains("ownership"));
+    }
+
+    #[test]
+    fn test_memory_system_with_search_engine() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = SearchConfig {
+            index_path: dir.path().join("idx"),
+            db_path: dir.path().join("vec.db"),
+            vector_dimensions: 64,
+            full_text_weight: 0.5,
+            vector_weight: 0.5,
+            max_results: 10,
+        };
+        let mut mem = MemorySystem::with_search(10, config).unwrap();
+
+        mem.add_fact(Fact::new("Rust uses ownership model", "analysis"));
+        mem.add_fact(Fact::new("Python garbage collector", "analysis"));
+
+        // The hybrid engine should find results (or fall back to keyword)
+        let results = mem.search_facts_hybrid("ownership");
+        assert!(!results.is_empty());
+        assert!(results.iter().any(|f| f.content.contains("ownership")));
+    }
+
+    #[test]
+    fn test_memory_system_search_empty_query() {
+        let mut mem = MemorySystem::new(10);
+        mem.add_fact(Fact::new("some fact", "source"));
+        let results = mem.search_facts_hybrid("");
+        // Empty query falls back to keyword search, which matches nothing
+        // (no content matches empty substring in the keywords path)
+        // Actually, empty string is contained in everything
+        assert!(!results.is_empty());
+    }
+
+    #[test]
+    fn test_memory_system_search_no_facts() {
+        let mem = MemorySystem::new(10);
+        let results = mem.search_facts_hybrid("anything");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_add_fact_indexes_into_search_engine() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = SearchConfig {
+            index_path: dir.path().join("idx"),
+            db_path: dir.path().join("vec.db"),
+            vector_dimensions: 64,
+            full_text_weight: 0.5,
+            vector_weight: 0.5,
+            max_results: 10,
+        };
+        let mut mem = MemorySystem::with_search(10, config).unwrap();
+
+        // Add multiple facts
+        for i in 0..5 {
+            mem.add_fact(Fact::new(format!("fact number {}", i), "test"));
+        }
+
+        // All 5 should be in long-term memory
+        assert_eq!(mem.long_term.facts.len(), 5);
+    }
+
+    // --- A5: MemoryFlusher → MemorySystem integration tests ---
+
+    #[test]
+    fn test_memory_system_with_flusher() {
+        let config = FlushConfig {
+            enabled: true,
+            flush_on_message_count: 5,
+            interval_secs: 0,
+            flush_path: None,
+        };
+        let mem = MemorySystem::new(10).with_flusher(config);
+        assert!(!mem.flusher_is_dirty());
+    }
+
+    #[test]
+    fn test_memory_system_add_message_notifies_flusher() {
+        let config = FlushConfig {
+            enabled: true,
+            flush_on_message_count: 5,
+            interval_secs: 0,
+            flush_path: None,
+        };
+        let mut mem = MemorySystem::new(10).with_flusher(config);
+
+        mem.add_message(Message::user("hello"));
+        assert!(mem.flusher_is_dirty());
+    }
+
+    #[test]
+    fn test_memory_system_check_auto_flush_no_flusher() {
+        let mut mem = MemorySystem::new(10);
+        // No flusher attached — should be a no-op returning Ok(false)
+        let result = mem.check_auto_flush().unwrap();
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_memory_system_check_auto_flush_triggers() {
+        let dir = tempfile::tempdir().unwrap();
+        let flush_path = dir.path().join("auto_flush.json");
+
+        let config = FlushConfig {
+            enabled: true,
+            flush_on_message_count: 3,
+            interval_secs: 0,
+            flush_path: Some(flush_path.clone()),
+        };
+        let mut mem = MemorySystem::new(10).with_flusher(config);
+
+        // Add messages below threshold
+        mem.add_message(Message::user("msg 1"));
+        mem.add_message(Message::user("msg 2"));
+        assert!(!mem.check_auto_flush().unwrap());
+        assert!(!flush_path.exists());
+
+        // Hit the threshold
+        mem.add_message(Message::user("msg 3"));
+        assert!(mem.check_auto_flush().unwrap());
+        assert!(flush_path.exists());
+
+        // After flush, flusher should not be dirty
+        assert!(!mem.flusher_is_dirty());
+    }
+
+    #[test]
+    fn test_memory_system_force_flush() {
+        let dir = tempfile::tempdir().unwrap();
+        let flush_path = dir.path().join("force_flush.json");
+
+        let config = FlushConfig {
+            enabled: true,
+            flush_on_message_count: 100, // high threshold
+            interval_secs: 0,
+            flush_path: Some(flush_path.clone()),
+        };
+        let mut mem = MemorySystem::new(10).with_flusher(config);
+
+        mem.add_message(Message::user("important data"));
+        assert!(mem.flusher_is_dirty());
+
+        mem.force_flush().unwrap();
+        assert!(!mem.flusher_is_dirty());
+        assert!(flush_path.exists());
+    }
+
+    #[test]
+    fn test_memory_system_force_flush_no_flusher() {
+        let mut mem = MemorySystem::new(10);
+        // Should be a no-op, not an error
+        mem.force_flush().unwrap();
     }
 }

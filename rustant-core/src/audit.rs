@@ -4,6 +4,7 @@
 //! tool execution records, and token/cost tracking into a single
 //! queryable, exportable trace.
 
+use crate::merkle::{MerkleChain, VerificationResult};
 use crate::safety::AuditEvent;
 use crate::types::{CostEstimate, RiskLevel, TokenUsage};
 use chrono::{DateTime, Utc};
@@ -393,6 +394,7 @@ pub enum AuditError {
 pub struct AuditStore {
     traces: Vec<ExecutionTrace>,
     max_traces: usize,
+    merkle_chain: Option<MerkleChain>,
 }
 
 impl AuditStore {
@@ -401,16 +403,52 @@ impl AuditStore {
         Self {
             traces: Vec::new(),
             max_traces: 1000,
+            merkle_chain: None,
+        }
+    }
+
+    /// Create a new store with Merkle chain integrity verification enabled.
+    pub fn with_merkle_chain() -> Self {
+        Self {
+            traces: Vec::new(),
+            max_traces: 1000,
+            merkle_chain: Some(MerkleChain::new()),
         }
     }
 
     /// Add a trace to the store, evicting the oldest trace when capacity is
-    /// reached.
+    /// reached. If the Merkle chain is enabled, the serialized trace is
+    /// appended to the chain for tamper-evident integrity.
     pub fn add_trace(&mut self, trace: ExecutionTrace) {
+        // Append to Merkle chain if enabled
+        if let Some(ref mut chain) = self.merkle_chain {
+            if let Ok(serialized) = serde_json::to_vec(&trace) {
+                chain.append(&serialized);
+            }
+        }
         if self.traces.len() >= self.max_traces {
             self.traces.remove(0);
         }
         self.traces.push(trace);
+    }
+
+    /// Verify the integrity of the Merkle chain.
+    ///
+    /// Returns `Some(VerificationResult)` if the chain is enabled, or `None`.
+    pub fn verify_integrity(&self) -> Option<VerificationResult> {
+        self.merkle_chain.as_ref().map(|chain| chain.verify_chain())
+    }
+
+    /// Return the root hash of the Merkle chain, if enabled.
+    pub fn merkle_root_hash(&self) -> Option<String> {
+        self.merkle_chain
+            .as_ref()
+            .and_then(|chain| chain.root_hash().map(|h| h.to_string()))
+    }
+
+    /// Access the underlying Merkle chain, if present.
+    pub fn merkle_chain(&self) -> Option<&MerkleChain> {
+        self.merkle_chain.as_ref()
     }
 
     /// Get a slice of all stored traces.
@@ -457,7 +495,22 @@ impl AuditStore {
         Ok(Self {
             max_traces: 1000,
             traces,
+            merkle_chain: None,
         })
+    }
+
+    /// Load a store from a JSON file and rebuild the Merkle chain from
+    /// the loaded traces.
+    pub fn load_with_merkle(path: &Path) -> Result<Self, AuditError> {
+        let mut store = Self::load(path)?;
+        let mut chain = MerkleChain::new();
+        for trace in &store.traces {
+            if let Ok(serialized) = serde_json::to_vec(trace) {
+                chain.append(&serialized);
+            }
+        }
+        store.merkle_chain = Some(chain);
+        Ok(store)
     }
 
     /// Return the number of stored traces.
@@ -1204,6 +1257,7 @@ mod tests {
         let mut store = AuditStore {
             traces: Vec::new(),
             max_traces: 3,
+            merkle_chain: None,
         };
 
         for i in 0..5 {
@@ -1695,7 +1749,93 @@ mod tests {
         assert_eq!(restored.success, Some(true));
     }
 
+    // --- Merkle chain integration tests ---
+
     // 30
+    #[test]
+    fn test_audit_store_with_merkle_chain() {
+        let store = AuditStore::with_merkle_chain();
+        assert!(store.merkle_chain().is_some());
+        assert!(store.is_empty());
+    }
+
+    // 31
+    #[test]
+    fn test_audit_store_merkle_appends_on_add() {
+        let mut store = AuditStore::with_merkle_chain();
+        store.add_trace(make_trace("trace 1"));
+        store.add_trace(make_trace("trace 2"));
+
+        let chain = store.merkle_chain().unwrap();
+        assert_eq!(chain.len(), 2);
+    }
+
+    // 32
+    #[test]
+    fn test_audit_store_verify_integrity_valid() {
+        let mut store = AuditStore::with_merkle_chain();
+        store.add_trace(make_trace("a"));
+        store.add_trace(make_trace("b"));
+        store.add_trace(make_trace("c"));
+
+        let result = store.verify_integrity().unwrap();
+        assert!(result.is_valid);
+        assert_eq!(result.checked_nodes, 3);
+        assert!(result.first_invalid.is_none());
+    }
+
+    // 33
+    #[test]
+    fn test_audit_store_verify_integrity_without_merkle() {
+        let store = AuditStore::new();
+        assert!(store.verify_integrity().is_none());
+    }
+
+    // 34
+    #[test]
+    fn test_audit_store_merkle_root_hash_changes() {
+        let mut store = AuditStore::with_merkle_chain();
+        assert!(store.merkle_root_hash().is_none()); // empty chain
+
+        store.add_trace(make_trace("first"));
+        let hash1 = store.merkle_root_hash().unwrap();
+
+        store.add_trace(make_trace("second"));
+        let hash2 = store.merkle_root_hash().unwrap();
+
+        assert_ne!(hash1, hash2);
+    }
+
+    // 35
+    #[test]
+    fn test_audit_store_load_with_merkle_rebuilds() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit_merkle.json");
+
+        // Save without merkle
+        let mut store = AuditStore::new();
+        store.add_trace(make_trace("alpha"));
+        store.add_trace(make_trace("beta"));
+        store.save(&path).unwrap();
+
+        // Load with merkle — should rebuild chain
+        let loaded = AuditStore::load_with_merkle(&path).unwrap();
+        assert!(loaded.merkle_chain().is_some());
+        assert_eq!(loaded.merkle_chain().unwrap().len(), 2);
+
+        let result = loaded.verify_integrity().unwrap();
+        assert!(result.is_valid);
+    }
+
+    // 36
+    #[test]
+    fn test_audit_store_no_merkle_by_default() {
+        let store = AuditStore::new();
+        assert!(store.merkle_chain().is_none());
+        assert!(store.merkle_root_hash().is_none());
+    }
+
+    // 37
     #[test]
     fn test_audit_error_display() {
         let err = AuditError::SerializationFailed("bad json".into());

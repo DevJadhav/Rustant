@@ -86,11 +86,22 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
     );
     println!("  Type /help for commands, /quit to exit\n");
 
-    let provider = match rustant_core::create_provider(&config.llm) {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::warn!("LLM provider init failed: {}. Using mock.", e);
-            Arc::new(MockLlmProvider::new())
+    let provider = if config.llm.auth_method == "oauth" {
+        let cred_store = rustant_core::credentials::KeyringCredentialStore::new();
+        match rustant_core::create_provider_with_auth(&config.llm, &cred_store).await {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("LLM provider (OAuth) init failed: {}. Using mock.", e);
+                Arc::new(MockLlmProvider::new())
+            }
+        }
+    } else {
+        match rustant_core::create_provider(&config.llm) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("LLM provider init failed: {}. Using mock.", e);
+                Arc::new(MockLlmProvider::new())
+            }
         }
     };
     let callback = Arc::new(CliCallback);
@@ -189,11 +200,22 @@ pub async fn run_single_task(
     config: AgentConfig,
     workspace: PathBuf,
 ) -> anyhow::Result<()> {
-    let provider = match rustant_core::create_provider(&config.llm) {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::warn!("LLM provider init failed: {}. Using mock.", e);
-            Arc::new(MockLlmProvider::new())
+    let provider = if config.llm.auth_method == "oauth" {
+        let cred_store = rustant_core::credentials::KeyringCredentialStore::new();
+        match rustant_core::create_provider_with_auth(&config.llm, &cred_store).await {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("LLM provider (OAuth) init failed: {}. Using mock.", e);
+                Arc::new(MockLlmProvider::new())
+            }
+        }
+    } else {
+        match rustant_core::create_provider(&config.llm) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("LLM provider init failed: {}. Using mock.", e);
+                Arc::new(MockLlmProvider::new())
+            }
         }
     };
     let callback = Arc::new(CliCallback);

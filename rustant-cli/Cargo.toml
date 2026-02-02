@@ -39,6 +39,8 @@ unicode-width = { workspace = true }
 nucleo-matcher = { workspace = true }
 arboard = { workspace = true }
 similar = { workspace = true }
+dialoguer = { workspace = true }
+keyring = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

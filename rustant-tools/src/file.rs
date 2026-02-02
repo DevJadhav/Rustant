@@ -7,6 +7,73 @@ use rustant_core::types::{Artifact, RiskLevel, ToolOutput};
 use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
 
+/// Validate that a path stays inside the workspace.
+///
+/// For existing paths, canonicalizes both path and workspace to handle symlinks.
+/// For non-existent paths (e.g., new files to create), checks that the
+/// normalized path doesn't contain `..` components that escape the workspace.
+fn validate_workspace_path(
+    workspace: &Path,
+    path_str: &str,
+    tool_name: &str,
+) -> Result<PathBuf, ToolError> {
+    // Canonicalize workspace to handle symlinks (e.g., /var -> /private/var on macOS)
+    let workspace_canonical = workspace
+        .canonicalize()
+        .unwrap_or_else(|_| workspace.to_path_buf());
+
+    let resolved = if Path::new(path_str).is_absolute() {
+        PathBuf::from(path_str)
+    } else {
+        workspace_canonical.join(path_str)
+    };
+
+    // For existing paths, use canonicalize for accurate resolution
+    if resolved.exists() {
+        let canonical = resolved
+            .canonicalize()
+            .map_err(|e| ToolError::ExecutionFailed {
+                name: tool_name.into(),
+                message: format!("Path resolution failed: {}", e),
+            })?;
+
+        if !canonical.starts_with(&workspace_canonical) {
+            return Err(ToolError::PermissionDenied {
+                name: tool_name.into(),
+                reason: format!("Path '{}' is outside the workspace", path_str),
+            });
+        }
+        return Ok(canonical);
+    }
+
+    // For non-existent paths, normalize away ".." components and check
+    let mut normalized = Vec::new();
+    for component in resolved.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                if normalized.pop().is_none() {
+                    return Err(ToolError::PermissionDenied {
+                        name: tool_name.into(),
+                        reason: format!("Path '{}' escapes the workspace", path_str),
+                    });
+                }
+            }
+            std::path::Component::CurDir => {} // skip "."
+            other => normalized.push(other),
+        }
+    }
+    let normalized_path: PathBuf = normalized.iter().collect();
+
+    if !normalized_path.starts_with(&workspace_canonical) {
+        return Err(ToolError::PermissionDenied {
+            name: tool_name.into(),
+            reason: format!("Path '{}' is outside the workspace", path_str),
+        });
+    }
+
+    Ok(resolved)
+}
+
 /// Read a file's contents.
 pub struct FileReadTool {
     workspace: PathBuf,
@@ -32,7 +99,13 @@ impl FileReadTool {
                 message: format!("Path resolution failed: {}", e),
             })?;
 
-        if !canonical.starts_with(&self.workspace) {
+        // Canonicalize workspace too, to handle symlinks (e.g., /var -> /private/var on macOS)
+        let workspace_canonical = self
+            .workspace
+            .canonicalize()
+            .unwrap_or_else(|_| self.workspace.clone());
+
+        if !canonical.starts_with(&workspace_canonical) {
             return Err(ToolError::PermissionDenied {
                 name: "file_read".into(),
                 reason: format!("Path '{}' is outside the workspace", path),
@@ -487,6 +560,8 @@ impl Tool for FileWriteTool {
                 reason: "'content' parameter is required".into(),
             })?;
 
+        // Validate the path stays inside the workspace
+        let _ = validate_workspace_path(&self.workspace, path_str, "file_write")?;
         let path = self.workspace.join(path_str);
 
         // Create parent directories if needed
@@ -596,6 +671,8 @@ impl Tool for FilePatchTool {
                 reason: "'new_text' parameter is required".into(),
             })?;
 
+        // Validate the path stays inside the workspace
+        let _ = validate_workspace_path(&self.workspace, path_str, "file_patch")?;
         let path = self.workspace.join(path_str);
 
         let content =
@@ -1003,5 +1080,74 @@ mod tests {
         let tool = FilePatchTool::new(PathBuf::from("/tmp"));
         assert_eq!(tool.name(), "file_patch");
         assert_eq!(tool.risk_level(), RiskLevel::Write);
+    }
+
+    // --- Workspace boundary validation tests ---
+
+    #[tokio::test]
+    async fn test_file_write_rejects_path_traversal() {
+        let dir = setup_workspace();
+        let tool = FileWriteTool::new(dir.path().to_path_buf());
+
+        let result = tool
+            .execute(serde_json::json!({
+                "path": "../../escape.txt",
+                "content": "escaped!"
+            }))
+            .await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ToolError::PermissionDenied { name, .. } => assert_eq!(name, "file_write"),
+            e => panic!("Expected PermissionDenied, got: {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_file_write_rejects_absolute_path_outside_workspace() {
+        let dir = setup_workspace();
+        let tool = FileWriteTool::new(dir.path().to_path_buf());
+
+        let result = tool
+            .execute(serde_json::json!({
+                "path": "/tmp/escape.txt",
+                "content": "escaped!"
+            }))
+            .await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ToolError::PermissionDenied { name, .. } => assert_eq!(name, "file_write"),
+            e => panic!("Expected PermissionDenied, got: {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_file_patch_rejects_path_traversal() {
+        let dir = setup_workspace();
+        let tool = FilePatchTool::new(dir.path().to_path_buf());
+
+        let result = tool
+            .execute(serde_json::json!({
+                "path": "../../escape.txt",
+                "old_text": "old",
+                "new_text": "new"
+            }))
+            .await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ToolError::PermissionDenied { name, .. } => assert_eq!(name, "file_patch"),
+            e => panic!("Expected PermissionDenied, got: {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_file_read_rejects_path_traversal() {
+        let dir = setup_workspace();
+        let tool = FileReadTool::new(dir.path().to_path_buf());
+
+        // Attempt to read outside workspace using path traversal
+        let result = tool
+            .execute(serde_json::json!({"path": "../../etc/passwd"}))
+            .await;
+        assert!(result.is_err());
     }
 }

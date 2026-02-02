@@ -46,6 +46,20 @@ dotenvy = "0.15"
 # Networking
 reqwest = { version = "0.12", features = ["json", "stream"] }
 
+# Email (SMTP + IMAP)
+lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "builder", "hostname", "pool", "smtp-transport"] }
+async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }
+native-tls = "0.2"
+tokio-native-tls = "0.3"
+
+# Encoding
+base64 = "0.22"
+
+# OAuth / browser
+open = "5"
+url = "2"
+urlencoding = "2"
+
 # CLI & TUI
 clap = { version = "4.5", features = ["derive"] }
 ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
@@ -54,6 +68,9 @@ tui-textarea = { version = "0.7", features = ["crossterm", "search"] }
 syntect = { version = "5.2", default-features = false, features = ["default-fancy"] }
 textwrap = "0.16"
 unicode-width = "0.2"
+
+# Interactive prompts
+dialoguer = "0.11"
 
 # Fuzzy matching
 nucleo-matcher = "0.3"
@@ -70,8 +87,30 @@ cap-std = "3.4"
 # WASM sandboxing
 wasmi = { version = "1.0", features = ["default"] }
 
+# Credential storage
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+
 # Diff computation
 similar = "2.6"
+sha2 = "0.10"
+hmac = "0.12"
+rand = "0.8"
+
+# Full-text search
+tantivy = "0.22"
+
+# SQLite (for vector storage)
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# WebSocket gateway
+axum = { version = "0.8", features = ["ws"] }
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# TLS certificate generation (self-signed, for local OAuth callbacks)
+rcgen = "0.13"
+rustls = { version = "0.23", features = ["aws_lc_rs"] }
 
 # Token counting
 tiktoken-rs = "0.9"

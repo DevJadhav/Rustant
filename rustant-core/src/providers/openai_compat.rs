@@ -70,6 +70,8 @@ pub struct OpenAiCompatibleProvider {
 
 impl OpenAiCompatibleProvider {
     /// Create a new provider from configuration.
+    ///
+    /// Reads the API key from the environment variable specified in `config.api_key_env`.
     pub fn new(config: &LlmConfig) -> Result<Self, LlmError> {
         let api_key = std::env::var(&config.api_key_env).map_err(|_| LlmError::AuthFailed {
             provider: format!(
@@ -77,7 +79,13 @@ impl OpenAiCompatibleProvider {
                 config.api_key_env
             ),
         })?;
+        Self::new_with_key(config, api_key)
+    }
 
+    /// Create a new provider with an explicitly provided API key.
+    ///
+    /// Use this when the API key has been resolved externally (e.g., from a credential store).
+    pub fn new_with_key(config: &LlmConfig, api_key: String) -> Result<Self, LlmError> {
         let base_url = config
             .base_url
             .clone()
@@ -319,9 +327,12 @@ impl OpenAiCompatibleProvider {
     /// Map an HTTP status code to the appropriate LlmError.
     fn map_http_error(status: reqwest::StatusCode, body: &str) -> LlmError {
         match status.as_u16() {
-            401 => LlmError::AuthFailed {
-                provider: "OpenAI-compatible".to_string(),
-            },
+            401 => {
+                debug!(body = %body, "Authentication failed (401)");
+                LlmError::AuthFailed {
+                    provider: "OpenAI-compatible".to_string(),
+                }
+            }
             429 => {
                 // Try to parse retry-after from response
                 let retry_secs = serde_json::from_str::<Value>(body)
@@ -589,6 +600,9 @@ mod tests {
             input_cost_per_million: 2.5,
             output_cost_per_million: 10.0,
             use_streaming: false,
+            fallback_providers: Vec::new(),
+            credential_store_key: None,
+            auth_method: String::new(),
         }
     }
 

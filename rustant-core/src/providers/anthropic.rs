@@ -53,7 +53,13 @@ impl AnthropicProvider {
         let api_key = std::env::var(&config.api_key_env).map_err(|_| LlmError::AuthFailed {
             provider: format!("Anthropic (env var '{}' not set)", config.api_key_env),
         })?;
+        Self::new_with_key(config, api_key)
+    }
 
+    /// Create a new Anthropic provider with an explicitly provided API key.
+    ///
+    /// Use this when the API key has been resolved externally (e.g., from a credential store).
+    pub fn new_with_key(config: &LlmConfig, api_key: String) -> Result<Self, LlmError> {
         let base_url = config
             .base_url
             .clone()
@@ -631,6 +637,9 @@ mod tests {
             input_cost_per_million: 3.0,
             output_cost_per_million: 15.0,
             use_streaming: false,
+            fallback_providers: Vec::new(),
+            credential_store_key: None,
+            auth_method: String::new(),
         }
     }
 

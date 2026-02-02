@@ -26,6 +26,12 @@ pub enum RustantError {
     #[error("Agent error: {0}")]
     Agent(#[from] AgentError),
 
+    #[error("Channel error: {0}")]
+    Channel(#[from] ChannelError),
+
+    #[error("Node error: {0}")]
+    Node(#[from] NodeError),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -62,6 +68,9 @@ pub enum LlmError {
 
     #[error("Provider connection failed: {message}")]
     Connection { message: String },
+
+    #[error("OAuth flow failed: {message}")]
+    OAuthFailed { message: String },
 }
 
 /// Errors from tool registration and execution.
@@ -165,6 +174,44 @@ pub enum AgentError {
     InvalidStateTransition { from: String, to: String },
 }
 
+/// Errors from the channel system.
+#[derive(Debug, thiserror::Error)]
+pub enum ChannelError {
+    #[error("Channel '{name}' connection failed: {message}")]
+    ConnectionFailed { name: String, message: String },
+
+    #[error("Channel '{name}' send failed: {message}")]
+    SendFailed { name: String, message: String },
+
+    #[error("Channel '{name}' is not connected")]
+    NotConnected { name: String },
+
+    #[error("Channel '{name}' authentication failed")]
+    AuthFailed { name: String },
+
+    #[error("Channel '{name}' rate limited")]
+    RateLimited { name: String },
+}
+
+/// Errors from the node system.
+#[derive(Debug, thiserror::Error)]
+pub enum NodeError {
+    #[error("No capable node for capability: {capability}")]
+    NoCapableNode { capability: String },
+
+    #[error("Node '{node_id}' execution failed: {message}")]
+    ExecutionFailed { node_id: String, message: String },
+
+    #[error("Node '{node_id}' is unreachable")]
+    Unreachable { node_id: String },
+
+    #[error("Consent denied for capability: {capability}")]
+    ConsentDenied { capability: String },
+
+    #[error("Node discovery failed: {message}")]
+    DiscoveryFailed { message: String },
+}
+
 /// A type alias for results using the top-level `RustantError`.
 pub type Result<T> = std::result::Result<T, RustantError>;
 
@@ -252,6 +299,42 @@ mod tests {
             timeout_secs: 30,
         };
         assert_eq!(err.to_string(), "Tool 'shell_exec' timed out after 30s");
+    }
+
+    #[test]
+    fn test_error_display_channel() {
+        let err = RustantError::Channel(ChannelError::ConnectionFailed {
+            name: "telegram".into(),
+            message: "timeout".into(),
+        });
+        assert_eq!(
+            err.to_string(),
+            "Channel error: Channel 'telegram' connection failed: timeout"
+        );
+
+        let err = ChannelError::NotConnected {
+            name: "slack".into(),
+        };
+        assert_eq!(err.to_string(), "Channel 'slack' is not connected");
+    }
+
+    #[test]
+    fn test_error_display_node() {
+        let err = RustantError::Node(NodeError::NoCapableNode {
+            capability: "shell".into(),
+        });
+        assert_eq!(
+            err.to_string(),
+            "Node error: No capable node for capability: shell"
+        );
+
+        let err = NodeError::ConsentDenied {
+            capability: "filesystem".into(),
+        };
+        assert_eq!(
+            err.to_string(),
+            "Consent denied for capability: filesystem"
+        );
     }
 
     #[test]

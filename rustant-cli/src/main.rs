@@ -4,6 +4,7 @@
 
 mod commands;
 mod repl;
+pub(crate) mod setup;
 mod tui;
 
 use clap::Parser;
@@ -59,6 +60,18 @@ enum Commands {
         #[command(subcommand)]
         action: ConfigAction,
     },
+    /// Interactive provider setup wizard
+    Setup,
+    /// Manage messaging channels
+    Channel {
+        #[command(subcommand)]
+        action: ChannelAction,
+    },
+    /// Manage OAuth authentication for LLM providers and channels
+    Auth {
+        #[command(subcommand)]
+        action: AuthAction,
+    },
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -67,6 +80,44 @@ enum ConfigAction {
     Init,
     /// Show current configuration
     Show,
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum ChannelAction {
+    /// List all configured channels and their status
+    List,
+    /// Test a channel's connection (connect + disconnect)
+    Test {
+        /// Channel name (e.g., slack, telegram, discord)
+        name: String,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum AuthAction {
+    /// Show current authentication status for all providers
+    Status,
+    /// Login to an LLM provider or channel via OAuth browser flow
+    Login {
+        /// Provider name (e.g., openai, gemini, slack, discord, teams, whatsapp)
+        provider: String,
+
+        /// Override the redirect URI (e.g. an ngrok HTTPS tunnel URL).
+        /// Required for providers like Slack that mandate HTTPS redirect URIs.
+        /// Example: --redirect-uri https://abc123.ngrok-free.app/auth/callback
+        #[arg(long)]
+        redirect_uri: Option<String>,
+    },
+    /// Remove stored OAuth tokens for a provider or channel
+    Logout {
+        /// Provider name (e.g., openai, gemini, slack, discord, teams, whatsapp)
+        provider: String,
+    },
+    /// Manually refresh an OAuth token for a provider or channel
+    Refresh {
+        /// Provider name (e.g., openai, gemini, slack, discord, teams, whatsapp)
+        provider: String,
+    },
 }
 
 #[tokio::main]

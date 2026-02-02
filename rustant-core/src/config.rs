@@ -11,6 +11,23 @@ use figment::{
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use crate::channels::discord::DiscordConfig;
+use crate::channels::email::EmailConfig;
+use crate::channels::matrix::MatrixConfig;
+use crate::channels::signal::SignalConfig;
+use crate::channels::slack::SlackConfig;
+use crate::channels::telegram::TelegramConfig;
+use crate::channels::webchat::WebChatConfig;
+use crate::channels::imessage::IMessageConfig;
+use crate::channels::teams::TeamsConfig;
+use crate::channels::sms::SmsConfig;
+use crate::channels::irc::IrcConfig;
+use crate::channels::webhook::WebhookConfig;
+use crate::channels::whatsapp::WhatsAppConfig;
+use crate::gateway::GatewayConfig;
+use crate::memory::FlushConfig;
+use crate::search::SearchConfig;
+
 /// Top-level configuration for the Rustant agent.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentConfig {
@@ -19,6 +36,81 @@ pub struct AgentConfig {
     pub memory: MemoryConfig,
     pub ui: UiConfig,
     pub tools: ToolsConfig,
+    /// Optional WebSocket gateway configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gateway: Option<GatewayConfig>,
+    /// Optional hybrid search configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<SearchConfig>,
+    /// Optional memory flush configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flush: Option<FlushConfig>,
+    /// Optional channels configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channels: Option<ChannelsConfig>,
+    /// Optional multi-agent configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multi_agent: Option<MultiAgentConfig>,
+}
+
+/// Configuration for the multi-agent system.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiAgentConfig {
+    /// Whether multi-agent mode is enabled.
+    pub enabled: bool,
+    /// Maximum number of concurrent agents.
+    pub max_agents: usize,
+    /// Maximum messages per agent mailbox.
+    pub max_mailbox_size: usize,
+    /// Default resource limits applied to new agents.
+    #[serde(default)]
+    pub default_resource_limits: crate::multi::ResourceLimits,
+    /// Default base directory for agent workspaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_workspace_base: Option<String>,
+}
+
+impl Default for MultiAgentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_agents: 8,
+            max_mailbox_size: 1000,
+            default_resource_limits: crate::multi::ResourceLimits::default(),
+            default_workspace_base: None,
+        }
+    }
+}
+
+/// Configuration for messaging channels.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ChannelsConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telegram: Option<TelegramConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discord: Option<DiscordConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slack: Option<SlackConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webchat: Option<WebChatConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matrix: Option<MatrixConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal: Option<SignalConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub whatsapp: Option<WhatsAppConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<EmailConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imessage: Option<IMessageConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub teams: Option<TeamsConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sms: Option<SmsConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub irc: Option<IrcConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook: Option<WebhookConfig>,
 }
 
 /// LLM provider configuration.
@@ -44,6 +136,32 @@ pub struct LlmConfig {
     pub output_cost_per_million: f64,
     /// Whether to use streaming for LLM responses (enables token-by-token output).
     pub use_streaming: bool,
+    /// Optional fallback providers tried in order if the primary fails.
+    #[serde(default)]
+    pub fallback_providers: Vec<FallbackProviderConfig>,
+    /// Optional credential store key (provider name in the OS credential store).
+    /// If set, the API key is loaded from the credential store instead of the env var.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_store_key: Option<String>,
+    /// Authentication method: "api_key" (default) or "oauth".
+    /// When set to "oauth", the provider will use an OAuth token from the credential
+    /// store instead of a traditional API key.
+    #[serde(default)]
+    pub auth_method: String,
+}
+
+/// Configuration for a fallback LLM provider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FallbackProviderConfig {
+    /// Provider name: "openai", "anthropic", etc.
+    pub provider: String,
+    /// Model identifier.
+    pub model: String,
+    /// Environment variable name containing the API key.
+    pub api_key_env: String,
+    /// Optional base URL override.
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 impl Default for LlmConfig {
@@ -59,6 +177,9 @@ impl Default for LlmConfig {
             input_cost_per_million: 2.50,
             output_cost_per_million: 10.00,
             use_streaming: false,
+            fallback_providers: Vec::new(),
+            credential_store_key: None,
+            auth_method: String::new(),
         }
     }
 }
@@ -107,6 +228,30 @@ pub struct SafetyConfig {
     pub allowed_hosts: Vec<String>,
     /// Maximum iterations before the agent pauses.
     pub max_iterations: usize,
+    /// Prompt injection detection settings.
+    #[serde(default)]
+    pub injection_detection: InjectionDetectionConfig,
+}
+
+/// Configuration for the prompt injection detection system.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InjectionDetectionConfig {
+    /// Whether injection detection is enabled.
+    pub enabled: bool,
+    /// Risk score threshold (0.0 - 1.0) above which content is considered suspicious.
+    pub threshold: f32,
+    /// Whether to scan tool outputs for indirect injection attempts.
+    pub scan_tool_outputs: bool,
+}
+
+impl Default for InjectionDetectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            threshold: 0.5,
+            scan_tool_outputs: true,
+        }
+    }
 }
 
 impl Default for SafetyConfig {
@@ -148,6 +293,7 @@ impl Default for SafetyConfig {
                 "registry.npmjs.org".to_string(),
             ],
             max_iterations: 25,
+            injection_detection: InjectionDetectionConfig::default(),
         }
     }
 }
@@ -400,5 +546,146 @@ max_output_bytes = 1048576
         assert_eq!(json, "\"paranoid\"");
         let mode: ApprovalMode = serde_json::from_str("\"yolo\"").unwrap();
         assert_eq!(mode, ApprovalMode::Yolo);
+    }
+
+    #[test]
+    fn test_agent_config_with_gateway() {
+        let mut config = AgentConfig::default();
+        config.gateway = Some(crate::gateway::GatewayConfig::default());
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: AgentConfig = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.gateway.is_some());
+        let gw = deserialized.gateway.unwrap();
+        assert_eq!(gw.port, 8080);
+    }
+
+    #[test]
+    fn test_agent_config_with_search() {
+        let mut config = AgentConfig::default();
+        config.search = Some(crate::search::SearchConfig::default());
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: AgentConfig = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.search.is_some());
+        let sc = deserialized.search.unwrap();
+        assert_eq!(sc.max_results, 10);
+    }
+
+    #[test]
+    fn test_agent_config_with_flush() {
+        let mut config = AgentConfig::default();
+        config.flush = Some(crate::memory::FlushConfig::default());
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: AgentConfig = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.flush.is_some());
+        let fc = deserialized.flush.unwrap();
+        assert!(!fc.enabled);
+        assert_eq!(fc.interval_secs, 300);
+    }
+
+    #[test]
+    fn test_agent_config_backward_compat_no_optional_fields() {
+        // Deserialize config without gateway/search/flush — all should be None
+        let json = serde_json::json!({
+            "llm": LlmConfig::default(),
+            "safety": SafetyConfig::default(),
+            "memory": MemoryConfig::default(),
+            "ui": UiConfig::default(),
+            "tools": ToolsConfig::default()
+        });
+        let config: AgentConfig = serde_json::from_value(json).unwrap();
+        assert!(config.gateway.is_none());
+        assert!(config.search.is_none());
+        assert!(config.flush.is_none());
+        assert!(config.multi_agent.is_none());
+    }
+
+    #[test]
+    fn test_agent_config_with_multi_agent() {
+        let mut config = AgentConfig::default();
+        config.multi_agent = Some(MultiAgentConfig::default());
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: AgentConfig = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.multi_agent.is_some());
+        let ma = deserialized.multi_agent.unwrap();
+        assert!(!ma.enabled);
+        assert_eq!(ma.max_agents, 8);
+        assert_eq!(ma.max_mailbox_size, 1000);
+    }
+
+    #[test]
+    fn test_injection_detection_config_defaults() {
+        let config = InjectionDetectionConfig::default();
+        assert!(config.enabled);
+        assert!((config.threshold - 0.5).abs() < f32::EPSILON);
+        assert!(config.scan_tool_outputs);
+    }
+
+    #[test]
+    fn test_safety_config_includes_injection_detection() {
+        let config = SafetyConfig::default();
+        assert!(config.injection_detection.enabled);
+        // Serialization roundtrip
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: SafetyConfig = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.injection_detection.enabled);
+        assert!(deserialized.injection_detection.scan_tool_outputs);
+    }
+
+    #[test]
+    fn test_multi_agent_config_with_resource_limits() {
+        let mut config = MultiAgentConfig::default();
+        config.default_resource_limits = crate::multi::ResourceLimits {
+            max_memory_mb: Some(256),
+            max_tokens_per_turn: Some(2048),
+            max_tool_calls: Some(20),
+            max_runtime_secs: Some(120),
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: MultiAgentConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            deserialized.default_resource_limits.max_memory_mb,
+            Some(256)
+        );
+        assert_eq!(
+            deserialized.default_resource_limits.max_tool_calls,
+            Some(20)
+        );
+    }
+
+    #[test]
+    fn test_multi_agent_config_with_workspace_base() {
+        let mut config = MultiAgentConfig::default();
+        config.default_workspace_base = Some("/tmp/rustant-workspaces".into());
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: MultiAgentConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            deserialized.default_workspace_base.as_deref(),
+            Some("/tmp/rustant-workspaces")
+        );
+    }
+
+    #[test]
+    fn test_multi_agent_config_backward_compat() {
+        // Deserialize config without new fields — should use defaults
+        let json = serde_json::json!({
+            "enabled": true,
+            "max_agents": 4,
+            "max_mailbox_size": 500
+        });
+        let config: MultiAgentConfig = serde_json::from_value(json).unwrap();
+        assert!(config.enabled);
+        assert_eq!(config.max_agents, 4);
+        assert!(config.default_resource_limits.max_memory_mb.is_none());
+        assert!(config.default_workspace_base.is_none());
+    }
+
+    #[test]
+    fn test_multi_agent_config_defaults() {
+        let config = MultiAgentConfig::default();
+        assert!(!config.enabled);
+        assert_eq!(config.max_agents, 8);
+        assert_eq!(config.max_mailbox_size, 1000);
+        assert!(config.default_resource_limits.max_memory_mb.is_none());
+        assert!(config.default_workspace_base.is_none());
     }
 }
