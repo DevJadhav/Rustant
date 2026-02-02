@@ -156,12 +156,7 @@ impl ExplanationBuilder {
     }
 
     /// Record an alternative that was considered but not selected.
-    pub fn add_alternative(
-        &mut self,
-        tool: &str,
-        reason: &str,
-        risk: RiskLevel,
-    ) -> &mut Self {
+    pub fn add_alternative(&mut self, tool: &str, reason: &str, risk: RiskLevel) -> &mut Self {
         self.considered_alternatives.push(AlternativeAction {
             tool_name: tool.to_owned(),
             reason_not_selected: reason.to_owned(),
@@ -171,11 +166,7 @@ impl ExplanationBuilder {
     }
 
     /// Record a contextual factor that influenced the decision.
-    pub fn add_context_factor(
-        &mut self,
-        factor: &str,
-        influence: FactorInfluence,
-    ) -> &mut Self {
+    pub fn add_context_factor(&mut self, factor: &str, influence: FactorInfluence) -> &mut Self {
         self.context_factors.push(ContextFactor {
             factor: factor.to_owned(),
             influence,
@@ -255,7 +246,10 @@ mod tests {
         let explanation = builder.build();
 
         assert_eq!(explanation.considered_alternatives.len(), 2);
-        assert_eq!(explanation.considered_alternatives[0].tool_name, "shell_exec");
+        assert_eq!(
+            explanation.considered_alternatives[0].tool_name,
+            "shell_exec"
+        );
         assert_eq!(
             explanation.considered_alternatives[0].estimated_risk,
             RiskLevel::Execute
@@ -277,9 +271,18 @@ mod tests {
         let explanation = builder.build();
 
         assert_eq!(explanation.context_factors.len(), 3);
-        assert_eq!(explanation.context_factors[0].influence, FactorInfluence::Positive);
-        assert_eq!(explanation.context_factors[1].influence, FactorInfluence::Negative);
-        assert_eq!(explanation.context_factors[2].influence, FactorInfluence::Neutral);
+        assert_eq!(
+            explanation.context_factors[0].influence,
+            FactorInfluence::Positive
+        );
+        assert_eq!(
+            explanation.context_factors[1].influence,
+            FactorInfluence::Negative
+        );
+        assert_eq!(
+            explanation.context_factors[2].influence,
+            FactorInfluence::Neutral
+        );
     }
 
     #[test]
@@ -306,12 +309,14 @@ mod tests {
         let original = builder.build();
 
         let json = serde_json::to_string(&original).expect("serialize");
-        let restored: DecisionExplanation =
-            serde_json::from_str(&json).expect("deserialize");
+        let restored: DecisionExplanation = serde_json::from_str(&json).expect("deserialize");
 
         assert_eq!(original.decision_id, restored.decision_id);
         assert!((original.confidence - restored.confidence).abs() < f32::EPSILON);
-        assert_eq!(original.reasoning_chain.len(), restored.reasoning_chain.len());
+        assert_eq!(
+            original.reasoning_chain.len(),
+            restored.reasoning_chain.len()
+        );
         assert_eq!(
             original.considered_alternatives.len(),
             restored.considered_alternatives.len()

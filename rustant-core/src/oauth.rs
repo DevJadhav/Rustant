@@ -116,7 +116,8 @@ fn generate_pkce_pair() -> PkcePair {
     let mut rng = rand::thread_rng();
     let verifier: String = (0..43)
         .map(|_| {
-            const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+            const CHARSET: &[u8] =
+                b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
             let idx = rng.gen_range(0..CHARSET.len());
             CHARSET[idx] as char
         })
@@ -226,24 +227,19 @@ async fn load_tls_config() -> Result<axum_server::tls_rustls::RustlsConfig, LlmE
 
     use rcgen::CertifiedKey;
     let subject_alt_names = vec!["localhost".to_string(), "127.0.0.1".to_string()];
-    let CertifiedKey { cert, key_pair } =
-        rcgen::generate_simple_self_signed(subject_alt_names).map_err(|e| {
-            LlmError::OAuthFailed {
-                message: format!("Failed to generate self-signed certificate: {}", e),
-            }
+    let CertifiedKey { cert, key_pair } = rcgen::generate_simple_self_signed(subject_alt_names)
+        .map_err(|e| LlmError::OAuthFailed {
+            message: format!("Failed to generate self-signed certificate: {}", e),
         })?;
 
     let cert_pem = cert.pem();
     let key_pem = key_pair.serialize_pem();
 
-    axum_server::tls_rustls::RustlsConfig::from_pem(
-        cert_pem.into_bytes().into(),
-        key_pem.into_bytes().into(),
-    )
-    .await
-    .map_err(|e| LlmError::OAuthFailed {
-        message: format!("Failed to build TLS config: {}", e),
-    })
+    axum_server::tls_rustls::RustlsConfig::from_pem(cert_pem.into_bytes(), key_pem.into_bytes())
+        .await
+        .map_err(|e| LlmError::OAuthFailed {
+            message: format!("Failed to build TLS config: {}", e),
+        })
 }
 
 /// Start a local callback server on the fixed port.
@@ -273,11 +269,13 @@ async fn start_callback_server(
             message: format!("Invalid bind address: {}", e),
         })?;
 
-        debug!(port = OAUTH_CALLBACK_PORT, "OAuth HTTPS callback server starting");
+        debug!(
+            port = OAUTH_CALLBACK_PORT,
+            "OAuth HTTPS callback server starting"
+        );
 
         tokio::spawn(async move {
-            let server =
-                axum_server::bind_rustls(addr, tls_config).serve(app.into_make_service());
+            let server = axum_server::bind_rustls(addr, tls_config).serve(app.into_make_service());
             let _ = tokio::time::timeout(std::time::Duration::from_secs(120), server).await;
         });
 
@@ -294,13 +292,15 @@ async fn start_callback_server(
                 ),
             })?;
 
-        debug!(port = OAUTH_CALLBACK_PORT, "OAuth HTTP callback server starting");
+        debug!(
+            port = OAUTH_CALLBACK_PORT,
+            "OAuth HTTP callback server starting"
+        );
 
         tokio::spawn(async move {
             let server = axum::serve(listener, app);
-            let _ =
-                tokio::time::timeout(std::time::Duration::from_secs(120), server.into_future())
-                    .await;
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(120), server.into_future())
+                .await;
         });
     }
 
@@ -359,11 +359,10 @@ pub async fn authorize_browser_flow(
     };
 
     // Build authorization URL.
-    let mut auth_url = url::Url::parse(&config.authorization_url).map_err(|e| {
-        LlmError::OAuthFailed {
+    let mut auth_url =
+        url::Url::parse(&config.authorization_url).map_err(|e| LlmError::OAuthFailed {
             message: format!("Invalid authorization URL: {}", e),
-        }
-    })?;
+        })?;
 
     {
         let mut params = auth_url.query_pairs_mut();
@@ -562,18 +561,14 @@ async fn obtain_openai_api_key(
 
     if !status.is_success() {
         return Err(LlmError::OAuthFailed {
-            message: format!(
-                "API key exchange failed (HTTP {}): {}",
-                status, body_text
-            ),
+            message: format!("API key exchange failed (HTTP {}): {}", status, body_text),
         });
     }
 
-    let json: serde_json::Value = serde_json::from_str(&body_text).map_err(|e| {
-        LlmError::OAuthFailed {
+    let json: serde_json::Value =
+        serde_json::from_str(&body_text).map_err(|e| LlmError::OAuthFailed {
             message: format!("Invalid JSON in API key exchange response: {}", e),
-        }
-    })?;
+        })?;
 
     json["access_token"]
         .as_str()
@@ -585,11 +580,10 @@ async fn obtain_openai_api_key(
 
 /// Parse a token endpoint response into an `OAuthToken`.
 fn parse_token_response(body: &str) -> Result<OAuthToken, LlmError> {
-    let json: serde_json::Value = serde_json::from_str(body).map_err(|e| {
-        LlmError::OAuthFailed {
+    let json: serde_json::Value =
+        serde_json::from_str(body).map_err(|e| LlmError::OAuthFailed {
             message: format!("Invalid JSON in token response: {}", e),
-        }
-    })?;
+        })?;
 
     let access_token = json["access_token"]
         .as_str()
@@ -600,14 +594,11 @@ fn parse_token_response(body: &str) -> Result<OAuthToken, LlmError> {
 
     let refresh_token = json["refresh_token"].as_str().map(|s| s.to_string());
     let id_token = json["id_token"].as_str().map(|s| s.to_string());
-    let token_type = json["token_type"]
-        .as_str()
-        .unwrap_or("Bearer")
-        .to_string();
+    let token_type = json["token_type"].as_str().unwrap_or("Bearer").to_string();
 
-    let expires_at = json["expires_in"].as_u64().map(|secs| {
-        Utc::now() + chrono::Duration::seconds(secs as i64)
-    });
+    let expires_at = json["expires_in"]
+        .as_u64()
+        .map(|secs| Utc::now() + chrono::Duration::seconds(secs as i64));
 
     let scopes = json["scope"]
         .as_str()
@@ -636,14 +627,16 @@ fn parse_token_response(body: &str) -> Result<OAuthToken, LlmError> {
 pub async fn authorize_device_code_flow(
     config: &OAuthProviderConfig,
 ) -> Result<OAuthToken, LlmError> {
-    let device_code_url = config.device_code_url.as_deref().ok_or_else(|| {
-        LlmError::OAuthFailed {
-            message: format!(
-                "Provider '{}' does not support device code flow",
-                config.provider_name
-            ),
-        }
-    })?;
+    let device_code_url =
+        config
+            .device_code_url
+            .as_deref()
+            .ok_or_else(|| LlmError::OAuthFailed {
+                message: format!(
+                    "Provider '{}' does not support device code flow",
+                    config.provider_name
+                ),
+            })?;
 
     let client = reqwest::Client::new();
 
@@ -674,7 +667,10 @@ pub async fn authorize_device_code_flow(
 
     if !status.is_success() {
         return Err(LlmError::OAuthFailed {
-            message: format!("Device code request failed (HTTP {}): {}", status, body_text),
+            message: format!(
+                "Device code request failed (HTTP {}): {}",
+                status, body_text
+            ),
         });
     }
 
@@ -737,9 +733,12 @@ pub async fn authorize_device_code_flow(
             })?;
 
         let poll_status = poll_response.status();
-        let poll_body = poll_response.text().await.map_err(|e| LlmError::OAuthFailed {
-            message: format!("Failed to read token poll response: {}", e),
-        })?;
+        let poll_body = poll_response
+            .text()
+            .await
+            .map_err(|e| LlmError::OAuthFailed {
+                message: format!("Failed to read token poll response: {}", e),
+            })?;
 
         if poll_status.is_success() {
             return parse_token_response(&poll_body);
@@ -778,10 +777,7 @@ pub async fn authorize_device_code_flow(
 
         // Non-JSON error response.
         return Err(LlmError::OAuthFailed {
-            message: format!(
-                "Token poll failed (HTTP {}): {}",
-                poll_status, poll_body
-            ),
+            message: format!("Token poll failed (HTTP {}): {}", poll_status, poll_body),
         });
     }
 }
@@ -860,9 +856,11 @@ pub fn store_oauth_token(
     let json = serde_json::to_string(token).map_err(|e| LlmError::OAuthFailed {
         message: format!("Failed to serialize OAuth token: {}", e),
     })?;
-    store.store_key(&key, &json).map_err(|e| LlmError::OAuthFailed {
-        message: format!("Failed to store OAuth token: {}", e),
-    })
+    store
+        .store_key(&key, &json)
+        .map_err(|e| LlmError::OAuthFailed {
+            message: format!("Failed to store OAuth token: {}", e),
+        })
 }
 
 /// Load an OAuth token from the credential store.
@@ -885,10 +883,7 @@ pub fn load_oauth_token(
 }
 
 /// Delete an OAuth token from the credential store.
-pub fn delete_oauth_token(
-    store: &dyn CredentialStore,
-    provider: &str,
-) -> Result<(), LlmError> {
+pub fn delete_oauth_token(store: &dyn CredentialStore, provider: &str) -> Result<(), LlmError> {
     let key = format!("oauth:{}", provider);
     store.delete_key(&key).map_err(|e| LlmError::OAuthFailed {
         message: format!("Failed to delete OAuth token: {}", e),
@@ -944,9 +939,7 @@ pub fn google_oauth_config() -> Option<OAuthProviderConfig> {
         client_secret,
         authorization_url: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
         token_url: "https://oauth2.googleapis.com/token".to_string(),
-        scopes: vec![
-            "https://www.googleapis.com/auth/generative-language".to_string(),
-        ],
+        scopes: vec!["https://www.googleapis.com/auth/generative-language".to_string()],
         audience: None,
         supports_device_code: false,
         device_code_url: None,
@@ -1002,10 +995,7 @@ pub fn discord_oauth_config(client_id: &str, client_secret: Option<String>) -> O
         client_secret,
         authorization_url: "https://discord.com/api/oauth2/authorize".to_string(),
         token_url: "https://discord.com/api/oauth2/token".to_string(),
-        scopes: vec![
-            "bot".to_string(),
-            "messages.read".to_string(),
-        ],
+        scopes: vec!["bot".to_string(), "messages.read".to_string()],
         audience: None,
         supports_device_code: false,
         device_code_url: None,
@@ -1020,7 +1010,11 @@ pub fn discord_oauth_config(client_id: &str, client_secret: Option<String>) -> O
 /// Azure AD tenant ID. Teams bots typically use the client credentials
 /// grant (server-to-server), but this config also supports the authorization
 /// code flow for user-delegated access.
-pub fn teams_oauth_config(client_id: &str, tenant_id: &str, client_secret: Option<String>) -> OAuthProviderConfig {
+pub fn teams_oauth_config(
+    client_id: &str,
+    tenant_id: &str,
+    client_secret: Option<String>,
+) -> OAuthProviderConfig {
     OAuthProviderConfig {
         provider_name: "teams".to_string(),
         client_id: client_id.to_string(),
@@ -1033,9 +1027,7 @@ pub fn teams_oauth_config(client_id: &str, tenant_id: &str, client_secret: Optio
             "https://login.microsoftonline.com/{}/oauth2/v2.0/token",
             tenant_id
         ),
-        scopes: vec![
-            "https://graph.microsoft.com/.default".to_string(),
-        ],
+        scopes: vec!["https://graph.microsoft.com/.default".to_string()],
         audience: None,
         supports_device_code: true,
         device_code_url: Some(format!(
@@ -1080,9 +1072,7 @@ pub fn gmail_oauth_config(client_id: &str, client_secret: Option<String>) -> OAu
         client_secret,
         authorization_url: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
         token_url: "https://oauth2.googleapis.com/token".to_string(),
-        scopes: vec![
-            "https://mail.google.com/".to_string(),
-        ],
+        scopes: vec!["https://mail.google.com/".to_string()],
         audience: None,
         supports_device_code: false,
         device_code_url: None,
@@ -1191,7 +1181,8 @@ pub fn oauth_config_for_provider(provider: &str) -> Option<OAuthProviderConfig> 
         }
         "teams" => {
             let client_id = std::env::var("TEAMS_CLIENT_ID").ok()?;
-            let tenant_id = std::env::var("TEAMS_TENANT_ID").unwrap_or_else(|_| "common".to_string());
+            let tenant_id =
+                std::env::var("TEAMS_TENANT_ID").unwrap_or_else(|_| "common".to_string());
             let client_secret = std::env::var("TEAMS_CLIENT_SECRET").ok();
             Some(teams_oauth_config(&client_id, &tenant_id, client_secret))
         }
@@ -1222,8 +1213,10 @@ pub fn provider_supports_oauth(provider: &str) -> bool {
         "discord" => std::env::var("DISCORD_CLIENT_ID").is_ok(),
         "teams" => std::env::var("TEAMS_CLIENT_ID").is_ok(),
         "whatsapp" => std::env::var("WHATSAPP_APP_ID").is_ok(),
-        "gmail" => std::env::var("GMAIL_OAUTH_CLIENT_ID").is_ok()
-            || std::env::var("GOOGLE_OAUTH_CLIENT_ID").is_ok(),
+        "gmail" => {
+            std::env::var("GMAIL_OAUTH_CLIENT_ID").is_ok()
+                || std::env::var("GOOGLE_OAUTH_CLIENT_ID").is_ok()
+        }
         _ => false,
     }
 }
@@ -1553,7 +1546,9 @@ mod tests {
         let config = slack_oauth_config("slack-client-123", Some("slack-secret".into()));
         assert_eq!(config.provider_name, "slack");
         assert_eq!(config.client_id, "slack-client-123");
-        assert!(config.authorization_url.contains("slack.com/oauth/v2/authorize"));
+        assert!(config
+            .authorization_url
+            .contains("slack.com/oauth/v2/authorize"));
         assert!(config.token_url.contains("slack.com/api/oauth.v2.access"));
         assert!(config.scopes.contains(&"chat:write".to_string()));
         assert!(config.scopes.contains(&"channels:history".to_string()));
@@ -1567,7 +1562,9 @@ mod tests {
         let config = discord_oauth_config("discord-client-456", Some("discord-secret".into()));
         assert_eq!(config.provider_name, "discord");
         assert_eq!(config.client_id, "discord-client-456");
-        assert!(config.authorization_url.contains("discord.com/api/oauth2/authorize"));
+        assert!(config
+            .authorization_url
+            .contains("discord.com/api/oauth2/authorize"));
         assert!(config.token_url.contains("discord.com/api/oauth2/token"));
         assert!(config.scopes.contains(&"bot".to_string()));
         assert!(config.scopes.contains(&"messages.read".to_string()));
@@ -1576,20 +1573,36 @@ mod tests {
 
     #[test]
     fn test_teams_oauth_config() {
-        let config = teams_oauth_config("teams-client-789", "my-tenant-id", Some("teams-secret".into()));
+        let config = teams_oauth_config(
+            "teams-client-789",
+            "my-tenant-id",
+            Some("teams-secret".into()),
+        );
         assert_eq!(config.provider_name, "teams");
         assert_eq!(config.client_id, "teams-client-789");
-        assert!(config.authorization_url.contains("login.microsoftonline.com/my-tenant-id"));
-        assert!(config.token_url.contains("login.microsoftonline.com/my-tenant-id"));
-        assert!(config.scopes.contains(&"https://graph.microsoft.com/.default".to_string()));
+        assert!(config
+            .authorization_url
+            .contains("login.microsoftonline.com/my-tenant-id"));
+        assert!(config
+            .token_url
+            .contains("login.microsoftonline.com/my-tenant-id"));
+        assert!(config
+            .scopes
+            .contains(&"https://graph.microsoft.com/.default".to_string()));
         assert!(config.supports_device_code);
-        assert!(config.device_code_url.as_ref().unwrap().contains("my-tenant-id"));
+        assert!(config
+            .device_code_url
+            .as_ref()
+            .unwrap()
+            .contains("my-tenant-id"));
     }
 
     #[test]
     fn test_teams_oauth_config_common_tenant() {
         let config = teams_oauth_config("teams-client", "common", None);
-        assert!(config.authorization_url.contains("common/oauth2/v2.0/authorize"));
+        assert!(config
+            .authorization_url
+            .contains("common/oauth2/v2.0/authorize"));
         assert!(config.token_url.contains("common/oauth2/v2.0/token"));
     }
 
@@ -1598,10 +1611,18 @@ mod tests {
         let config = whatsapp_oauth_config("meta-app-123", Some("meta-secret".into()));
         assert_eq!(config.provider_name, "whatsapp");
         assert_eq!(config.client_id, "meta-app-123");
-        assert!(config.authorization_url.contains("facebook.com/v18.0/dialog/oauth"));
-        assert!(config.token_url.contains("graph.facebook.com/v18.0/oauth/access_token"));
-        assert!(config.scopes.contains(&"whatsapp_business_messaging".to_string()));
-        assert!(config.scopes.contains(&"whatsapp_business_management".to_string()));
+        assert!(config
+            .authorization_url
+            .contains("facebook.com/v18.0/dialog/oauth"));
+        assert!(config
+            .token_url
+            .contains("graph.facebook.com/v18.0/oauth/access_token"));
+        assert!(config
+            .scopes
+            .contains(&"whatsapp_business_messaging".to_string()));
+        assert!(config
+            .scopes
+            .contains(&"whatsapp_business_management".to_string()));
         assert!(!config.supports_device_code);
     }
 
@@ -1612,22 +1633,32 @@ mod tests {
         assert_eq!(config.client_id, "gmail-client-id");
         assert!(config.authorization_url.contains("accounts.google.com"));
         assert!(config.token_url.contains("oauth2.googleapis.com"));
-        assert!(config.scopes.contains(&"https://mail.google.com/".to_string()));
+        assert!(config
+            .scopes
+            .contains(&"https://mail.google.com/".to_string()));
         // Gmail config should request offline access
-        assert!(config.extra_auth_params.iter().any(|(k, v)| k == "access_type" && v == "offline"));
+        assert!(config
+            .extra_auth_params
+            .iter()
+            .any(|(k, v)| k == "access_type" && v == "offline"));
     }
 
     #[test]
     fn test_xoauth2_token_format() {
         let token = build_xoauth2_token("user@gmail.com", "ya29.access-token");
-        assert_eq!(token, "user=user@gmail.com\x01auth=Bearer ya29.access-token\x01\x01");
+        assert_eq!(
+            token,
+            "user=user@gmail.com\x01auth=Bearer ya29.access-token\x01\x01"
+        );
     }
 
     #[test]
     fn test_xoauth2_token_base64() {
         let b64 = build_xoauth2_token_base64("user@gmail.com", "token123");
         // Should be valid base64
-        let decoded = base64::engine::general_purpose::STANDARD.decode(&b64).unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&b64)
+            .unwrap();
         let decoded_str = String::from_utf8(decoded).unwrap();
         assert!(decoded_str.starts_with("user=user@gmail.com\x01"));
         assert!(decoded_str.contains("auth=Bearer token123"));

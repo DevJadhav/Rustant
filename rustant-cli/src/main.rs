@@ -82,6 +82,16 @@ enum Commands {
         #[command(subcommand)]
         action: CronAction,
     },
+    /// Voice operations (TTS/STT via OpenAI)
+    Voice {
+        #[command(subcommand)]
+        action: VoiceAction,
+    },
+    /// Browser automation operations
+    Browser {
+        #[command(subcommand)]
+        action: BrowserAction,
+    },
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -159,6 +169,33 @@ enum CronAction {
     CancelJob {
         /// Job ID
         job_id: String,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum VoiceAction {
+    /// Synthesize text to speech and display audio stats
+    Speak {
+        /// Text to synthesize
+        text: String,
+        /// Voice name (alloy, echo, fable, onyx, nova, shimmer)
+        #[arg(short, long, default_value = "alloy")]
+        voice: String,
+    },
+    /// TTS→STT roundtrip: synthesize text, then transcribe it back
+    Roundtrip {
+        /// Text to synthesize and roundtrip
+        text: String,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum BrowserAction {
+    /// Test browser automation by navigating to a URL
+    Test {
+        /// URL to navigate to
+        #[arg(default_value = "https://example.com")]
+        url: String,
     },
 }
 

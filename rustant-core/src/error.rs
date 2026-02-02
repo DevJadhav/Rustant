@@ -468,10 +468,7 @@ mod tests {
         let err = NodeError::ConsentDenied {
             capability: "filesystem".into(),
         };
-        assert_eq!(
-            err.to_string(),
-            "Consent denied for capability: filesystem"
-        );
+        assert_eq!(err.to_string(), "Consent denied for capability: filesystem");
     }
 
     #[test]

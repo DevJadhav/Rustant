@@ -3,7 +3,10 @@
 //! Uses the Microsoft Graph API via reqwest for sending and receiving messages.
 //! In tests, a trait abstraction provides mock implementations.
 
-use super::{Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser, MessageId, StreamingMode};
+use super::{
+    Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser,
+    MessageId, StreamingMode,
+};
 use crate::error::{ChannelError, RustantError};
 use crate::oauth::AuthMethod;
 use async_trait::async_trait;
@@ -116,17 +119,22 @@ impl Channel for TeamsChannel {
     }
 
     async fn receive_messages(&self) -> Result<Vec<ChannelMessage>, RustantError> {
-        let msgs = self.http_client.get_messages("default").await.map_err(|e| {
-            RustantError::Channel(ChannelError::ConnectionFailed {
-                name: self.name.clone(),
-                message: e,
-            })
-        })?;
+        let msgs = self
+            .http_client
+            .get_messages("default")
+            .await
+            .map_err(|e| {
+                RustantError::Channel(ChannelError::ConnectionFailed {
+                    name: self.name.clone(),
+                    message: e,
+                })
+            })?;
 
         let messages = msgs
             .into_iter()
             .map(|m| {
-                let sender = ChannelUser::new(&m.from_id, ChannelType::Teams).with_name(&m.from_name);
+                let sender =
+                    ChannelUser::new(&m.from_id, ChannelType::Teams).with_name(&m.from_name);
                 ChannelMessage::text(ChannelType::Teams, &m.channel_id, sender, &m.content)
             })
             .collect();
@@ -210,7 +218,10 @@ impl TeamsHttpClient for RealTeamsHttp {
             .map_err(|e| format!("HTTP error: {e}"))?;
 
         let status = resp.status();
-        let body: serde_json::Value = resp.json().await.map_err(|e| format!("JSON parse error: {e}"))?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("JSON parse error: {e}"))?;
 
         if !status.is_success() {
             let err = body["error"]["message"].as_str().unwrap_or("unknown error");
@@ -235,7 +246,10 @@ impl TeamsHttpClient for RealTeamsHttp {
             .await
             .map_err(|e| format!("HTTP error: {e}"))?;
 
-        let body: serde_json::Value = resp.json().await.map_err(|e| format!("JSON parse error: {e}"))?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("JSON parse error: {e}"))?;
 
         let messages = body["value"]
             .as_array()
@@ -277,7 +291,10 @@ impl TeamsHttpClient for RealTeamsHttp {
             .map_err(|e| format!("HTTP error: {e}"))?;
 
         let status = resp.status();
-        let body: serde_json::Value = resp.json().await.map_err(|e| format!("JSON parse error: {e}"))?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("JSON parse error: {e}"))?;
 
         if !status.is_success() {
             let err = body["error_description"].as_str().unwrap_or("auth failed");
@@ -349,7 +366,10 @@ mod tests {
     #[test]
     fn test_teams_streaming_mode() {
         let ch = TeamsChannel::new(TeamsConfig::default(), Box::new(MockTeamsHttp));
-        assert_eq!(ch.streaming_mode(), StreamingMode::Polling { interval_ms: 1000 });
+        assert_eq!(
+            ch.streaming_mode(),
+            StreamingMode::Polling { interval_ms: 1000 }
+        );
     }
 
     #[test]

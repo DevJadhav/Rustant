@@ -43,10 +43,7 @@ pub enum GatewayEvent {
         message: String,
     },
     /// A task was dispatched to a node.
-    NodeTaskDispatched {
-        node_id: String,
-        task_name: String,
-    },
+    NodeTaskDispatched { node_id: String, task_name: String },
     /// An agent was spawned.
     AgentSpawned { agent_id: String, name: String },
     /// An agent was terminated.
@@ -101,13 +98,9 @@ pub enum ServerMessage {
     /// Pong response to a Ping.
     Pong { timestamp: DateTime<Utc> },
     /// Channel status listing.
-    ChannelStatus {
-        channels: Vec<(String, String)>,
-    },
+    ChannelStatus { channels: Vec<(String, String)> },
     /// Node status listing.
-    NodeStatus {
-        nodes: Vec<(String, String)>,
-    },
+    NodeStatus { nodes: Vec<(String, String)> },
 }
 
 #[cfg(test)]
@@ -290,10 +283,7 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         let restored: GatewayEvent = serde_json::from_str(&json).unwrap();
         match restored {
-            GatewayEvent::NodeTaskDispatched {
-                node_id,
-                task_name,
-            } => {
+            GatewayEvent::NodeTaskDispatched { node_id, task_name } => {
                 assert_eq!(node_id, "node-1");
                 assert_eq!(task_name, "shell");
             }

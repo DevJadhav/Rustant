@@ -15,15 +15,9 @@ pub enum AgentPayload {
         args: HashMap<String, String>,
     },
     /// Result of a completed task.
-    TaskResult {
-        success: bool,
-        output: String,
-    },
+    TaskResult { success: bool, output: String },
     /// Share a fact with another agent.
-    FactShare {
-        key: String,
-        value: String,
-    },
+    FactShare { key: String, value: String },
     /// Query another agent's status.
     StatusQuery,
     /// Response to a status query.
@@ -52,10 +46,7 @@ pub enum AgentPayload {
         context: HashMap<String, String>,
     },
     /// Response to a query.
-    Response {
-        topic: String,
-        answer: String,
-    },
+    Response { topic: String, answer: String },
 }
 
 /// Priority levels for inter-agent messages.
@@ -166,23 +157,23 @@ impl MessageBus {
 
     /// Receive the highest-priority message from an agent's mailbox.
     pub fn receive(&mut self, agent_id: &Uuid) -> Option<AgentEnvelope> {
-        self.mailboxes
-            .get_mut(agent_id)
-            .and_then(|mb| if mb.is_empty() { None } else { Some(mb.remove(0)) })
+        self.mailboxes.get_mut(agent_id).and_then(|mb| {
+            if mb.is_empty() {
+                None
+            } else {
+                Some(mb.remove(0))
+            }
+        })
     }
 
     /// Peek at the highest-priority message without removing it.
     pub fn peek(&self, agent_id: &Uuid) -> Option<&AgentEnvelope> {
-        self.mailboxes
-            .get(agent_id)
-            .and_then(|mb| mb.first())
+        self.mailboxes.get(agent_id).and_then(|mb| mb.first())
     }
 
     /// Number of pending messages for a specific agent.
     pub fn pending_count(&self, agent_id: &Uuid) -> usize {
-        self.mailboxes
-            .get(agent_id)
-            .map_or(0, |mb| mb.len())
+        self.mailboxes.get(agent_id).map_or(0, |mb| mb.len())
     }
 
     /// Total pending messages across all mailboxes.
@@ -225,11 +216,7 @@ mod tests {
         bus.register(sender);
         bus.register(receiver);
 
-        let envelope = AgentEnvelope::new(
-            sender,
-            receiver,
-            AgentPayload::StatusQuery,
-        );
+        let envelope = AgentEnvelope::new(sender, receiver, AgentPayload::StatusQuery);
         bus.send(envelope).unwrap();
 
         assert_eq!(bus.pending_count(&receiver), 1);
@@ -280,8 +267,10 @@ mod tests {
         bus.register(a);
         bus.register(b);
 
-        bus.send(AgentEnvelope::new(a, b, AgentPayload::StatusQuery)).unwrap();
-        bus.send(AgentEnvelope::new(b, a, AgentPayload::Shutdown)).unwrap();
+        bus.send(AgentEnvelope::new(a, b, AgentPayload::StatusQuery))
+            .unwrap();
+        bus.send(AgentEnvelope::new(b, a, AgentPayload::Shutdown))
+            .unwrap();
 
         assert_eq!(bus.pending_count_all(), 2);
     }
@@ -294,7 +283,8 @@ mod tests {
         bus.register(a);
         bus.register(b);
 
-        bus.send(AgentEnvelope::new(a, b, AgentPayload::StatusQuery)).unwrap();
+        bus.send(AgentEnvelope::new(a, b, AgentPayload::StatusQuery))
+            .unwrap();
 
         // Peek should not remove
         let peeked = bus.peek(&b);
@@ -360,9 +350,7 @@ mod tests {
             recoverable: true,
         };
         if let AgentPayload::Error {
-            code,
-            recoverable,
-            ..
+            code, recoverable, ..
         } = &payload
         {
             assert_eq!(code, "E001");
@@ -401,8 +389,8 @@ mod tests {
         let from = Uuid::new_v4();
         let to = Uuid::new_v4();
         let corr = Uuid::new_v4();
-        let envelope = AgentEnvelope::new(from, to, AgentPayload::StatusQuery)
-            .with_correlation(corr);
+        let envelope =
+            AgentEnvelope::new(from, to, AgentPayload::StatusQuery).with_correlation(corr);
         assert_eq!(envelope.correlation_id, Some(corr));
     }
 
@@ -507,8 +495,7 @@ mod tests {
         bus.register(b);
 
         bus.send(
-            AgentEnvelope::new(a, b, AgentPayload::StatusQuery)
-                .with_priority(MessagePriority::Low),
+            AgentEnvelope::new(a, b, AgentPayload::StatusQuery).with_priority(MessagePriority::Low),
         )
         .unwrap();
         bus.send(

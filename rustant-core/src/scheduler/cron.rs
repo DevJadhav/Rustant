@@ -25,7 +25,11 @@ pub struct CronJobConfig {
 }
 
 impl CronJobConfig {
-    pub fn new(name: impl Into<String>, schedule: impl Into<String>, task: impl Into<String>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        schedule: impl Into<String>,
+        task: impl Into<String>,
+    ) -> Self {
         Self {
             name: name.into(),
             schedule: schedule.into(),
@@ -139,18 +143,24 @@ impl CronScheduler {
 
     /// Disable a job by name.
     pub fn disable_job(&mut self, name: &str) -> Result<(), SchedulerError> {
-        let job = self.jobs.get_mut(name).ok_or_else(|| SchedulerError::JobNotFound {
-            name: name.to_string(),
-        })?;
+        let job = self
+            .jobs
+            .get_mut(name)
+            .ok_or_else(|| SchedulerError::JobNotFound {
+                name: name.to_string(),
+            })?;
         job.config.enabled = false;
         Ok(())
     }
 
     /// Enable a job by name.
     pub fn enable_job(&mut self, name: &str) -> Result<(), SchedulerError> {
-        let job = self.jobs.get_mut(name).ok_or_else(|| SchedulerError::JobNotFound {
-            name: name.to_string(),
-        })?;
+        let job = self
+            .jobs
+            .get_mut(name)
+            .ok_or_else(|| SchedulerError::JobNotFound {
+                name: name.to_string(),
+            })?;
         job.config.enabled = true;
         job.calculate_next_run();
         Ok(())
@@ -163,9 +173,12 @@ impl CronScheduler {
 
     /// Mark a job as executed.
     pub fn mark_executed(&mut self, name: &str) -> Result<(), SchedulerError> {
-        let job = self.jobs.get_mut(name).ok_or_else(|| SchedulerError::JobNotFound {
-            name: name.to_string(),
-        })?;
+        let job = self
+            .jobs
+            .get_mut(name)
+            .ok_or_else(|| SchedulerError::JobNotFound {
+                name: name.to_string(),
+            })?;
         job.mark_executed();
         Ok(())
     }

@@ -8,7 +8,13 @@ pub mod security;
 pub mod session;
 pub mod snapshot;
 
+#[cfg(feature = "browser")]
+pub mod chromium;
+
 pub use cdp::{CdpClient, MockCdpClient};
 pub use security::BrowserSecurityGuard;
 pub use session::BrowserSession;
 pub use snapshot::{PageSnapshot, SnapshotMode};
+
+#[cfg(feature = "browser")]
+pub use chromium::ChromiumCdpClient;

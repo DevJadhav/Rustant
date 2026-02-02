@@ -4,7 +4,10 @@
 //! allowing the agent to interact with web-based clients via the same
 //! channel abstraction used for Telegram, Discord, etc.
 
-use super::{Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, MessageId, StreamingMode};
+use super::{
+    Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, MessageId,
+    StreamingMode,
+};
 use crate::error::RustantError;
 use crate::gateway::{GatewayEvent, SharedGateway};
 use async_trait::async_trait;
@@ -145,7 +148,8 @@ mod tests {
         let outbox = ch.outbox.clone();
 
         let sender = ChannelUser::new("web-user", ChannelType::WebChat);
-        let msg = ChannelMessage::text(ChannelType::WebChat, "session-1", sender, "Hello from web!");
+        let msg =
+            ChannelMessage::text(ChannelType::WebChat, "session-1", sender, "Hello from web!");
         let id = ch.send_message(msg).await.unwrap();
         assert!(!id.0.is_empty());
 

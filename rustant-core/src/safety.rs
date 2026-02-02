@@ -99,12 +99,26 @@ pub struct ActionRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ActionDetails {
-    FileRead { path: PathBuf },
-    FileWrite { path: PathBuf, size_bytes: usize },
-    FileDelete { path: PathBuf },
-    ShellCommand { command: String },
-    NetworkRequest { host: String, method: String },
-    GitOperation { operation: String },
+    FileRead {
+        path: PathBuf,
+    },
+    FileWrite {
+        path: PathBuf,
+        size_bytes: usize,
+    },
+    FileDelete {
+        path: PathBuf,
+    },
+    ShellCommand {
+        command: String,
+    },
+    NetworkRequest {
+        host: String,
+        method: String,
+    },
+    GitOperation {
+        operation: String,
+    },
     WorkflowStep {
         workflow: String,
         step_id: String,
@@ -126,7 +140,9 @@ pub enum ActionDetails {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         duration_secs: Option<u64>,
     },
-    Other { info: String },
+    Other {
+        info: String,
+    },
 }
 
 /// An entry in the audit log.
@@ -289,11 +305,7 @@ impl SafetyGuardian {
     ///
     /// Returns `Some(result)` if the output was flagged as suspicious,
     /// or `None` if it is clean (or scanning is disabled).
-    pub fn scan_tool_output(
-        &self,
-        _tool_name: &str,
-        output: &str,
-    ) -> Option<InjectionScanResult> {
+    pub fn scan_tool_output(&self, _tool_name: &str, output: &str) -> Option<InjectionScanResult> {
         if let Some(ref detector) = self.injection_detector {
             if self.config.injection_detection.scan_tool_outputs {
                 let result = detector.scan_tool_output(output);
@@ -1090,10 +1102,8 @@ mod tests {
     #[test]
     fn test_scan_tool_output_allows_clean_content() {
         let guardian = default_guardian();
-        let result = guardian.scan_tool_output(
-            "file_read",
-            "fn main() { println!(\"Hello, world!\"); }",
-        );
+        let result =
+            guardian.scan_tool_output("file_read", "fn main() { println!(\"Hello, world!\"); }");
         assert!(result.is_none());
     }
 
@@ -1140,10 +1150,7 @@ mod tests {
                 path: "src/main.rs".into(),
             },
         );
-        assert_eq!(
-            SafetyGuardian::extract_scannable_text(&read_action),
-            ""
-        );
+        assert_eq!(SafetyGuardian::extract_scannable_text(&read_action), "");
     }
 
     #[test]

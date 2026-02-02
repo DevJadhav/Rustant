@@ -128,14 +128,8 @@ mod tests {
         ctx1.memory.working.set_goal("Goal A");
         ctx2.memory.working.set_goal("Goal B");
 
-        assert_eq!(
-            ctx1.memory.working.current_goal.as_deref(),
-            Some("Goal A")
-        );
-        assert_eq!(
-            ctx2.memory.working.current_goal.as_deref(),
-            Some("Goal B")
-        );
+        assert_eq!(ctx1.memory.working.current_goal.as_deref(), Some("Goal A"));
+        assert_eq!(ctx2.memory.working.current_goal.as_deref(), Some("Goal B"));
         assert_ne!(ctx1.agent_id, ctx2.agent_id);
     }
 
@@ -151,7 +145,10 @@ mod tests {
         let mut ctx = AgentContext::new("test", 10, SafetyConfig::default());
         assert!(ctx.workspace_dir.is_none());
         ctx.workspace_dir = Some(PathBuf::from("/tmp/agent-workspace"));
-        assert_eq!(ctx.workspace_dir.as_deref(), Some(std::path::Path::new("/tmp/agent-workspace")));
+        assert_eq!(
+            ctx.workspace_dir.as_deref(),
+            Some(std::path::Path::new("/tmp/agent-workspace"))
+        );
     }
 
     #[test]

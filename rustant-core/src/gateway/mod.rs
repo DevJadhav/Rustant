@@ -17,7 +17,9 @@ pub use channel_bridge::ChannelBridge;
 pub use connection::ConnectionManager;
 pub use events::{ClientMessage, GatewayEvent, ServerMessage};
 pub use node_bridge::NodeBridge;
-pub use server::{router as gateway_router, run as run_gateway, GatewayServer, SharedGateway, StatusProvider};
+pub use server::{
+    router as gateway_router, run as run_gateway, GatewayServer, SharedGateway, StatusProvider,
+};
 pub use session::{GatewaySession, SessionManager, SessionState};
 
 use serde::{Deserialize, Serialize};

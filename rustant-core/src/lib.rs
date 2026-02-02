@@ -7,94 +7,105 @@
 pub mod agent;
 pub mod audit;
 pub mod brain;
+pub mod browser;
+pub mod channels;
 pub mod config;
 pub mod credentials;
 pub mod error;
 pub mod explanation;
+pub mod gateway;
 pub mod injection;
 pub mod memory;
 pub mod merkle;
+pub mod multi;
+pub mod nodes;
+pub mod oauth;
 pub mod pairing;
 pub mod providers;
 pub mod replay;
 pub mod safety;
 pub mod sandbox;
+pub mod scheduler;
 pub mod search;
 pub mod summarizer;
 pub mod types;
-pub mod gateway;
-pub mod channels;
-pub mod nodes;
-pub mod multi;
-pub mod oauth;
-pub mod workflow;
-pub mod browser;
-pub mod scheduler;
 pub mod voice;
+pub mod workflow;
 
 // Re-export commonly used types at the crate root.
 pub use agent::{Agent, AgentCallback, AgentMessage, NoOpCallback, RegisteredTool, TaskResult};
 pub use brain::{Brain, LlmProvider, MockLlmProvider, TokenCounter};
-pub use config::{AgentConfig, ApprovalMode};
-pub use oauth::AuthMethod;
-pub use credentials::{CredentialError, CredentialStore, InMemoryCredentialStore, KeyringCredentialStore};
-pub use error::{Result, RustantError};
-pub use memory::{MemorySystem, Session, SessionMetadata};
-pub use providers::{create_provider, create_provider_with_auth, CircuitBreaker, CircuitState, FailoverProvider, GeminiProvider, ModelInfo};
-pub use explanation::{DecisionExplanation, DecisionType, ExplanationBuilder, FactorInfluence};
-pub use injection::{InjectionDetector, InjectionScanResult, InjectionType, Severity as InjectionSeverity};
-pub use merkle::{AuditNode, MerkleChain, VerificationResult};
-pub use pairing::{DeviceIdentity, PairingChallenge, PairingManager, PairingResult};
-pub use safety::{ApprovalContext, ReversibilityInfo, SafetyGuardian};
-pub use search::{HybridSearchEngine, SearchConfig, SearchResult};
-pub use gateway::{GatewayConfig, GatewayEvent, ClientMessage, ServerMessage, ChannelBridge, NodeBridge};
-pub use channels::{
-    Channel, ChannelAgentBridge, ChannelCapabilities, ChannelManager, ChannelMessage,
-    ChannelStatus, ChannelType, ChannelUser, MessageContent, MessageId, StreamingMode, ThreadId,
-    IMessageChannel, IMessageConfig, TeamsChannel, TeamsConfig, SmsChannel, SmsConfig,
-    IrcChannel, IrcConfig, WebhookChannel, WebhookConfig,
-};
-pub use error::{ChannelError, NodeError};
-pub use nodes::{
-    Capability, ConsentEntry, ConsentStore, DiscoveredNode, Node, NodeCapability, NodeDiscovery,
-    NodeHealth, NodeId, NodeManager, NodeMessage, NodeResult, NodeTask, Platform, RateLimit,
-};
-pub use multi::{
-    AgentContext, AgentEnvelope, AgentOrchestrator, AgentPayload, AgentRoute, AgentRouter,
-    AgentSpawner, MessageBus, MessagePriority, ResourceLimits, TaskHandler,
-};
-pub use multi::AgentStatus as MultiAgentStatus;
-pub use config::MultiAgentConfig;
-pub use sandbox::SandboxedFs;
-pub use workflow::{
-    WorkflowDefinition, WorkflowExecutor, WorkflowState, WorkflowStatus,
-    parse_workflow, validate_workflow, list_builtin_names, get_builtin,
-};
+#[cfg(feature = "browser")]
+pub use browser::ChromiumCdpClient;
 pub use browser::{
     BrowserSecurityGuard, BrowserSession, CdpClient, MockCdpClient, PageSnapshot, SnapshotMode,
+};
+pub use channels::{
+    Channel, ChannelAgentBridge, ChannelCapabilities, ChannelManager, ChannelMessage,
+    ChannelStatus, ChannelType, ChannelUser, IMessageChannel, IMessageConfig, IrcChannel,
+    IrcConfig, MessageContent, MessageId, SmsChannel, SmsConfig, StreamingMode, TeamsChannel,
+    TeamsConfig, ThreadId, WebhookChannel, WebhookConfig,
+};
+pub use config::MultiAgentConfig;
+pub use config::{AgentConfig, ApprovalMode};
+pub use credentials::{
+    CredentialError, CredentialStore, InMemoryCredentialStore, KeyringCredentialStore,
 };
 pub use error::BrowserError;
 pub use error::SchedulerError;
 pub use error::VoiceError;
+pub use error::{ChannelError, NodeError};
+pub use error::{Result, RustantError};
+pub use explanation::{DecisionExplanation, DecisionType, ExplanationBuilder, FactorInfluence};
+pub use gateway::{
+    ChannelBridge, ClientMessage, GatewayConfig, GatewayEvent, NodeBridge, ServerMessage,
+};
+pub use injection::{
+    InjectionDetector, InjectionScanResult, InjectionType, Severity as InjectionSeverity,
+};
+pub use memory::{MemorySystem, Session, SessionMetadata};
+pub use merkle::{AuditNode, MerkleChain, VerificationResult};
+pub use multi::AgentStatus as MultiAgentStatus;
+pub use multi::{
+    AgentContext, AgentEnvelope, AgentOrchestrator, AgentPayload, AgentRoute, AgentRouter,
+    AgentSpawner, MessageBus, MessagePriority, ResourceLimits, TaskHandler,
+};
+pub use nodes::{
+    Capability, ConsentEntry, ConsentStore, DiscoveredNode, Node, NodeCapability, NodeDiscovery,
+    NodeHealth, NodeId, NodeManager, NodeMessage, NodeResult, NodeTask, Platform, RateLimit,
+};
+pub use oauth::AuthMethod;
+pub use pairing::{DeviceIdentity, PairingChallenge, PairingManager, PairingResult};
+pub use providers::{
+    create_provider, create_provider_with_auth, CircuitBreaker, CircuitState, FailoverProvider,
+    GeminiProvider, ModelInfo,
+};
+pub use safety::{ApprovalContext, ReversibilityInfo, SafetyGuardian};
+pub use sandbox::SandboxedFs;
+pub use scheduler::{
+    BackgroundJob, CronJob, CronJobConfig, CronScheduler, HeartbeatConfig, HeartbeatManager,
+    JobManager, JobStatus, WebhookEndpoint, WebhookHandler,
+};
+pub use search::{HybridSearchEngine, SearchConfig, SearchResult};
+pub use summarizer::{ContextSummarizer, ContextSummary, TokenAlert, TokenCostDisplay};
+pub use types::{
+    AgentState, AgentStatus, Artifact, CompletionRequest, CompletionResponse, Content,
+    CostEstimate, Message, RiskLevel, Role, StreamEvent, TokenUsage, ToolDefinition, ToolOutput,
+};
 pub use voice::{
-    AudioChunk, AudioFormat, MockSttProvider, MockTtsProvider, MockWakeDetector,
-    OpenAiSttProvider, OpenAiTtsProvider, SttProvider, SttWakeDetector,
-    SynthesisRequest, SynthesisResult, TranscriptionResult, TranscriptionSegment,
-    TtsProvider, VadEvent, VoiceActivityDetector, WakeWordDetector, audio_convert,
+    audio_convert, AudioChunk, AudioFormat, MockSttProvider, MockTtsProvider, MockWakeDetector,
+    OpenAiSttProvider, OpenAiTtsProvider, SttProvider, SttWakeDetector, SynthesisRequest,
+    SynthesisResult, TranscriptionResult, TranscriptionSegment, TtsProvider, VadEvent,
+    VoiceActivityDetector, WakeWordDetector,
 };
 #[cfg(feature = "voice")]
 pub use voice::{
     AudioInput, AudioOutput, PorcupineWakeDetector, VoicePipeline, VoicePipelineEvent,
     WhisperLocalProvider,
 };
-pub use scheduler::{
-    BackgroundJob, CronJob, CronJobConfig, CronScheduler, HeartbeatConfig, HeartbeatManager,
-    JobManager, JobStatus, WebhookEndpoint, WebhookHandler,
-};
-pub use summarizer::{ContextSummarizer, ContextSummary, TokenAlert, TokenCostDisplay};
-pub use types::{
-    AgentState, AgentStatus, Artifact, CompletionRequest, CompletionResponse, Content,
-    CostEstimate, Message, RiskLevel, Role, StreamEvent, TokenUsage, ToolDefinition, ToolOutput,
+pub use workflow::{
+    get_builtin, list_builtin_names, parse_workflow, validate_workflow, WorkflowDefinition,
+    WorkflowExecutor, WorkflowState, WorkflowStatus,
 };
 
 #[cfg(test)]

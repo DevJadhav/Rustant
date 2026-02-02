@@ -221,10 +221,12 @@ impl HybridSearchEngine {
     /// Index a fact for both full-text and vector search.
     pub fn index_fact(&mut self, fact_id: &str, content: &str) -> Result<(), SearchError> {
         // Tantivy full-text
-        self.writer.add_document(doc!(
-            self.id_field => fact_id,
-            self.content_field => content,
-        )).map_err(|e| SearchError::IndexError(format!("Failed to add document: {}", e)))?;
+        self.writer
+            .add_document(doc!(
+                self.id_field => fact_id,
+                self.content_field => content,
+            ))
+            .map_err(|e| SearchError::IndexError(format!("Failed to add document: {}", e)))?;
 
         self.writer
             .commit()
@@ -251,9 +253,9 @@ impl HybridSearchEngine {
 
     /// Full-text search only.
     pub fn search_text(&self, query: &str) -> Result<Vec<SearchResult>, SearchError> {
-        self.reader.reload().map_err(|e| {
-            SearchError::IndexError(format!("Failed to reload reader: {}", e))
-        })?;
+        self.reader
+            .reload()
+            .map_err(|e| SearchError::IndexError(format!("Failed to reload reader: {}", e)))?;
 
         let searcher = self.reader.searcher();
         let query_parser = QueryParser::for_index(&self.index, vec![self.content_field]);
@@ -267,9 +269,9 @@ impl HybridSearchEngine {
 
         let mut results = Vec::new();
         for (score, doc_address) in top_docs {
-            let doc: TantivyDocument = searcher.doc(doc_address).map_err(|e| {
-                SearchError::IndexError(format!("Failed to retrieve doc: {}", e))
-            })?;
+            let doc: TantivyDocument = searcher
+                .doc(doc_address)
+                .map_err(|e| SearchError::IndexError(format!("Failed to retrieve doc: {}", e)))?;
 
             let id = doc
                 .get_first(self.id_field)
@@ -498,8 +500,12 @@ mod tests {
     fn test_engine_index_and_count() {
         let config = temp_config();
         let mut engine = HybridSearchEngine::open(config).unwrap();
-        engine.index_fact("fact-1", "Rust is a systems programming language").unwrap();
-        engine.index_fact("fact-2", "Python is great for data science").unwrap();
+        engine
+            .index_fact("fact-1", "Rust is a systems programming language")
+            .unwrap();
+        engine
+            .index_fact("fact-2", "Python is great for data science")
+            .unwrap();
         assert_eq!(engine.indexed_count(), 2);
     }
 
@@ -507,9 +513,15 @@ mod tests {
     fn test_engine_full_text_search() {
         let config = temp_config();
         let mut engine = HybridSearchEngine::open(config).unwrap();
-        engine.index_fact("f1", "The project uses Rust for systems programming").unwrap();
-        engine.index_fact("f2", "Python handles data processing").unwrap();
-        engine.index_fact("f3", "JavaScript runs in the browser").unwrap();
+        engine
+            .index_fact("f1", "The project uses Rust for systems programming")
+            .unwrap();
+        engine
+            .index_fact("f2", "Python handles data processing")
+            .unwrap();
+        engine
+            .index_fact("f3", "JavaScript runs in the browser")
+            .unwrap();
 
         let results = engine.search_text("Rust programming").unwrap();
         assert!(!results.is_empty());
@@ -520,8 +532,12 @@ mod tests {
     fn test_engine_vector_search() {
         let config = temp_config();
         let mut engine = HybridSearchEngine::open(config).unwrap();
-        engine.index_fact("f1", "The project uses Rust for systems programming").unwrap();
-        engine.index_fact("f2", "Python handles data processing scripts").unwrap();
+        engine
+            .index_fact("f1", "The project uses Rust for systems programming")
+            .unwrap();
+        engine
+            .index_fact("f2", "Python handles data processing scripts")
+            .unwrap();
 
         let results = engine.search_vector("systems programming language");
         assert!(!results.is_empty());
@@ -533,9 +549,15 @@ mod tests {
     fn test_engine_hybrid_search() {
         let config = temp_config();
         let mut engine = HybridSearchEngine::open(config).unwrap();
-        engine.index_fact("f1", "Rust systems programming language").unwrap();
-        engine.index_fact("f2", "Python data science and machine learning").unwrap();
-        engine.index_fact("f3", "JavaScript browser frontend development").unwrap();
+        engine
+            .index_fact("f1", "Rust systems programming language")
+            .unwrap();
+        engine
+            .index_fact("f2", "Python data science and machine learning")
+            .unwrap();
+        engine
+            .index_fact("f3", "JavaScript browser frontend development")
+            .unwrap();
 
         let results = engine.search("Rust programming").unwrap();
         assert!(!results.is_empty());

@@ -188,9 +188,7 @@ impl FailoverProvider {
             })
             .collect();
 
-        Self {
-            providers: entries,
-        }
+        Self { providers: entries }
     }
 
     /// Get the primary (first) provider.
@@ -371,12 +369,14 @@ mod tests {
     }
 
     /// A provider that fails N times then succeeds.
+    #[allow(dead_code)]
     struct FailNThenSucceedProvider {
         model: String,
         failures_remaining: std::sync::Mutex<usize>,
     }
 
     impl FailNThenSucceedProvider {
+        #[allow(dead_code)]
         fn new(model: &str, failures: usize) -> Self {
             Self {
                 model: model.to_string(),
@@ -496,7 +496,8 @@ mod tests {
 
     #[test]
     fn test_auth_profile_cooldown() {
-        let mut profile = AuthProfile::new("TEST_KEY").with_cooldown_duration(Duration::from_millis(10));
+        let mut profile =
+            AuthProfile::new("TEST_KEY").with_cooldown_duration(Duration::from_millis(10));
         profile.trigger_cooldown();
         assert!(!profile.is_available());
 
@@ -514,17 +515,13 @@ mod tests {
         let fallback = Arc::new(MockLlmProvider::new());
         fallback.queue_response(MockLlmProvider::text_response("fallback response"));
 
-        let provider = FailoverProvider::new(
-            vec![primary, fallback],
-            3,
-            Duration::from_secs(60),
-        );
+        let provider = FailoverProvider::new(vec![primary, fallback], 3, Duration::from_secs(60));
 
-        let response = provider.complete(CompletionRequest::default()).await.unwrap();
-        assert_eq!(
-            response.message.content.as_text(),
-            Some("primary response")
-        );
+        let response = provider
+            .complete(CompletionRequest::default())
+            .await
+            .unwrap();
+        assert_eq!(response.message.content.as_text(), Some("primary response"));
     }
 
     #[tokio::test]
@@ -535,13 +532,12 @@ mod tests {
         fallback.queue_response(MockLlmProvider::text_response("fallback response"));
         let fallback: Arc<dyn LlmProvider> = fallback;
 
-        let provider = FailoverProvider::new(
-            vec![primary, fallback],
-            3,
-            Duration::from_secs(60),
-        );
+        let provider = FailoverProvider::new(vec![primary, fallback], 3, Duration::from_secs(60));
 
-        let response = provider.complete(CompletionRequest::default()).await.unwrap();
+        let response = provider
+            .complete(CompletionRequest::default())
+            .await
+            .unwrap();
         assert_eq!(
             response.message.content.as_text(),
             Some("fallback response")
@@ -550,10 +546,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_all_providers_fail() {
-        let p1: Arc<dyn LlmProvider> =
-            Arc::new(AlwaysFailProvider::new("p1", "connection"));
-        let p2: Arc<dyn LlmProvider> =
-            Arc::new(AlwaysFailProvider::new("p2", "timeout"));
+        let p1: Arc<dyn LlmProvider> = Arc::new(AlwaysFailProvider::new("p1", "connection"));
+        let p2: Arc<dyn LlmProvider> = Arc::new(AlwaysFailProvider::new("p2", "timeout"));
 
         let provider = FailoverProvider::new(vec![p1, p2], 3, Duration::from_secs(60));
 
@@ -575,16 +569,22 @@ mod tests {
 
         let provider = FailoverProvider::new(
             vec![primary, fallback],
-            1, // open after 1 failure
+            1,                        // open after 1 failure
             Duration::from_secs(600), // long recovery so it stays open
         );
 
         // First call: primary fails, circuit opens, fallback succeeds
-        let r1 = provider.complete(CompletionRequest::default()).await.unwrap();
+        let r1 = provider
+            .complete(CompletionRequest::default())
+            .await
+            .unwrap();
         assert_eq!(r1.message.content.as_text(), Some("fallback"));
 
         // Second call: primary skipped (circuit open), fallback used directly
-        let r2 = provider.complete(CompletionRequest::default()).await.unwrap();
+        let r2 = provider
+            .complete(CompletionRequest::default())
+            .await
+            .unwrap();
         assert_eq!(r2.message.content.as_text(), Some("fallback"));
     }
 
@@ -611,11 +611,7 @@ mod tests {
         fallback.queue_response(MockLlmProvider::text_response("streamed"));
         let fallback: Arc<dyn LlmProvider> = fallback;
 
-        let provider = FailoverProvider::new(
-            vec![primary, fallback],
-            3,
-            Duration::from_secs(60),
-        );
+        let provider = FailoverProvider::new(vec![primary, fallback], 3, Duration::from_secs(60));
 
         let (tx, mut rx) = mpsc::channel(32);
         provider

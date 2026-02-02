@@ -65,14 +65,12 @@ pub async fn resolve_auth(
 
         if crate::oauth::is_token_expired(&token) {
             if let Some(ref rt) = token.refresh_token {
-                let oauth_cfg =
-                    crate::oauth::oauth_config_for_provider(&config.provider).ok_or_else(|| {
-                        LlmError::OAuthFailed {
-                            message: format!(
-                                "OAuth not supported for provider '{}' — cannot refresh token",
-                                config.provider
-                            ),
-                        }
+                let oauth_cfg = crate::oauth::oauth_config_for_provider(&config.provider)
+                    .ok_or_else(|| LlmError::OAuthFailed {
+                        message: format!(
+                            "OAuth not supported for provider '{}' — cannot refresh token",
+                            config.provider
+                        ),
                     })?;
                 let new_token = crate::oauth::refresh_token(&oauth_cfg, rt).await?;
                 crate::oauth::store_oauth_token(cred_store, &config.provider, &new_token)?;
@@ -163,8 +161,8 @@ pub fn create_provider(config: &LlmConfig) -> Result<Arc<dyn LlmProvider>, LlmEr
 
     Ok(Arc::new(FailoverProvider::new(
         providers,
-        5,                          // open circuit after 5 consecutive failures
-        Duration::from_secs(60),    // recovery timeout
+        5,                       // open circuit after 5 consecutive failures
+        Duration::from_secs(60), // recovery timeout
     )))
 }
 

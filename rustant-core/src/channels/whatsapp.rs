@@ -3,7 +3,10 @@
 //! Uses the WhatsApp Business Cloud API via reqwest.
 //! In tests, a trait abstraction provides mock implementations.
 
-use super::{Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser, MessageId, StreamingMode};
+use super::{
+    Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser,
+    MessageId, StreamingMode,
+};
 use crate::error::{ChannelError, RustantError};
 use crate::oauth::AuthMethod;
 use async_trait::async_trait;
@@ -189,7 +192,10 @@ impl WhatsAppHttpClient for RealWhatsAppHttp {
             .map_err(|e| format!("HTTP error: {e}"))?;
 
         let status = resp.status();
-        let body: serde_json::Value = resp.json().await.map_err(|e| format!("JSON parse error: {e}"))?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("JSON parse error: {e}"))?;
 
         if !status.is_success() {
             let err = body["error"]["message"].as_str().unwrap_or("unknown error");
@@ -291,7 +297,10 @@ mod tests {
     #[test]
     fn test_whatsapp_streaming_mode() {
         let ch = WhatsAppChannel::new(WhatsAppConfig::default(), Box::new(MockWhatsAppHttp));
-        assert_eq!(ch.streaming_mode(), StreamingMode::Polling { interval_ms: 5000 });
+        assert_eq!(
+            ch.streaming_mode(),
+            StreamingMode::Polling { interval_ms: 5000 }
+        );
     }
 
     #[tokio::test]

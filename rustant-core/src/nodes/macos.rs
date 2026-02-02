@@ -3,7 +3,10 @@
 //! Uses `tokio::process::Command` for executing local commands.
 //! In tests, a trait abstraction allows mocking without real execution.
 
-use super::{Node, types::{Capability, NodeHealth, NodeId, NodeInfo, NodeResult, NodeTask, Platform}};
+use super::{
+    types::{Capability, NodeHealth, NodeId, NodeInfo, NodeResult, NodeTask, Platform},
+    Node,
+};
 use crate::error::{NodeError, RustantError};
 use async_trait::async_trait;
 use chrono::Utc;
@@ -11,7 +14,12 @@ use chrono::Utc;
 /// Trait for executing local commands, allowing test mocking.
 #[async_trait]
 pub trait LocalExecutor: Send + Sync {
-    async fn execute_command(&self, command: &str, args: &[String], timeout_secs: u64) -> Result<(String, i32), String>;
+    async fn execute_command(
+        &self,
+        command: &str,
+        args: &[String],
+        timeout_secs: u64,
+    ) -> Result<(String, i32), String>;
 }
 
 /// macOS node using local command execution.
@@ -79,7 +87,8 @@ impl Node for MacOsNode {
         }
 
         let start = std::time::Instant::now();
-        let (output, exit_code) = self.executor
+        let (output, exit_code) = self
+            .executor
             .execute_command(&task.command, &task.args, task.timeout_secs)
             .await
             .map_err(|e| {
@@ -105,7 +114,11 @@ impl Node for MacOsNode {
 
     async fn heartbeat(&self) -> Result<NodeHealth, RustantError> {
         // Simple check: try running 'echo ok'
-        match self.executor.execute_command("echo", &["ok".into()], 5).await {
+        match self
+            .executor
+            .execute_command("echo", &["ok".into()], 5)
+            .await
+        {
             Ok((output, 0)) if output.contains("ok") => Ok(NodeHealth::Healthy),
             Ok(_) => Ok(NodeHealth::Degraded),
             Err(_) => Ok(NodeHealth::Unreachable),
@@ -140,7 +153,12 @@ mod tests {
 
     #[async_trait]
     impl LocalExecutor for MockExecutor {
-        async fn execute_command(&self, _cmd: &str, _args: &[String], _timeout: u64) -> Result<(String, i32), String> {
+        async fn execute_command(
+            &self,
+            _cmd: &str,
+            _args: &[String],
+            _timeout: u64,
+        ) -> Result<(String, i32), String> {
             Ok((self.output.clone(), self.exit_code))
         }
     }

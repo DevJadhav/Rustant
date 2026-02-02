@@ -1,6 +1,8 @@
 //! Channel manager — registers, connects, polls, and broadcasts across channels.
 
-use super::{Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, MessageId, StreamingMode};
+use super::{
+    Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, MessageId, StreamingMode,
+};
 use crate::error::{ChannelError, RustantError};
 use std::collections::HashMap;
 
@@ -147,19 +149,27 @@ pub fn build_channel_manager(config: &crate::config::ChannelsConfig) -> ChannelM
     }
 
     if let Some(ref cfg) = config.telegram {
-        mgr.register(Box::new(super::telegram::create_telegram_channel(cfg.clone())));
+        mgr.register(Box::new(super::telegram::create_telegram_channel(
+            cfg.clone(),
+        )));
     }
 
     if let Some(ref cfg) = config.discord {
-        mgr.register(Box::new(super::discord::create_discord_channel(cfg.clone())));
+        mgr.register(Box::new(super::discord::create_discord_channel(
+            cfg.clone(),
+        )));
     }
 
     if let Some(ref cfg) = config.webhook {
-        mgr.register(Box::new(super::webhook::create_webhook_channel(cfg.clone())));
+        mgr.register(Box::new(super::webhook::create_webhook_channel(
+            cfg.clone(),
+        )));
     }
 
     if let Some(ref cfg) = config.whatsapp {
-        mgr.register(Box::new(super::whatsapp::create_whatsapp_channel(cfg.clone())));
+        mgr.register(Box::new(super::whatsapp::create_whatsapp_channel(
+            cfg.clone(),
+        )));
     }
 
     if let Some(ref cfg) = config.sms {
@@ -188,7 +198,9 @@ pub fn build_channel_manager(config: &crate::config::ChannelsConfig) -> ChannelM
 
     #[cfg(target_os = "macos")]
     if let Some(ref cfg) = config.imessage {
-        mgr.register(Box::new(super::imessage::create_imessage_channel(cfg.clone())));
+        mgr.register(Box::new(super::imessage::create_imessage_channel(
+            cfg.clone(),
+        )));
     }
 
     mgr
@@ -292,7 +304,10 @@ mod tests {
     #[test]
     fn test_manager_register() {
         let mut mgr = ChannelManager::new();
-        mgr.register(Box::new(MockChannel::new("telegram", ChannelType::Telegram)));
+        mgr.register(Box::new(MockChannel::new(
+            "telegram",
+            ChannelType::Telegram,
+        )));
         mgr.register(Box::new(MockChannel::new("slack", ChannelType::Slack)));
         assert_eq!(mgr.channel_count(), 2);
         assert!(mgr.channel_names().contains(&"telegram"));

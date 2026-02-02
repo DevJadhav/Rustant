@@ -4,41 +4,41 @@
 //! Each channel implements the `Channel` trait to provide a uniform
 //! interface for sending and receiving messages across platforms.
 
-pub mod types;
-pub mod manager;
-pub mod telegram;
-pub mod discord;
-pub mod slack;
-pub mod webchat;
-pub mod matrix;
-pub mod signal;
-pub mod whatsapp;
-pub mod email;
-pub mod routing;
-pub mod normalize;
-pub mod imessage;
-pub mod teams;
-pub mod sms;
-pub mod irc;
-pub mod webhook;
 pub mod agent_bridge;
+pub mod discord;
+pub mod email;
+pub mod imessage;
+pub mod irc;
+pub mod manager;
+pub mod matrix;
+pub mod normalize;
+pub mod routing;
+pub mod signal;
+pub mod slack;
+pub mod sms;
+pub mod teams;
+pub mod telegram;
+pub mod types;
+pub mod webchat;
+pub mod webhook;
+pub mod whatsapp;
 
 pub use agent_bridge::ChannelAgentBridge;
+pub use imessage::{IMessageChannel, IMessageConfig};
+pub use irc::{IrcChannel, IrcConfig};
 pub use manager::{build_channel_manager, ChannelManager};
 pub use normalize::MessageNormalizer;
 pub use routing::{ChannelRouter, RoutingCondition, RoutingRule};
+pub use sms::{SmsChannel, SmsConfig};
+pub use teams::{TeamsChannel, TeamsConfig};
 pub use types::{
     ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser, MessageContent,
     MessageId, StreamingMode, ThreadId,
 };
-pub use imessage::{IMessageChannel, IMessageConfig};
-pub use teams::{TeamsChannel, TeamsConfig};
-pub use sms::{SmsChannel, SmsConfig};
-pub use irc::{IrcChannel, IrcConfig};
 pub use webhook::{WebhookChannel, WebhookConfig};
 
-use async_trait::async_trait;
 use crate::error::RustantError;
+use async_trait::async_trait;
 
 /// Core trait that all channel implementations must satisfy.
 #[async_trait]
@@ -135,6 +135,9 @@ mod tests {
     #[test]
     fn test_default_streaming_mode() {
         let ch = DefaultTestChannel;
-        assert_eq!(ch.streaming_mode(), StreamingMode::Polling { interval_ms: 5000 });
+        assert_eq!(
+            ch.streaming_mode(),
+            StreamingMode::Polling { interval_ms: 5000 }
+        );
     }
 }

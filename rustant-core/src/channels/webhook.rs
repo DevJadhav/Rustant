@@ -3,7 +3,10 @@
 //! Inbound messages arrive via an HTTP endpoint; outbound messages are
 //! sent via POST to a configured URL. In tests, traits abstract HTTP calls.
 
-use super::{Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser, MessageId, StreamingMode};
+use super::{
+    Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser,
+    MessageId, StreamingMode,
+};
 use crate::error::{ChannelError, RustantError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

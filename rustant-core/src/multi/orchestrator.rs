@@ -192,7 +192,8 @@ impl AgentOrchestrator {
                         },
                     };
 
-                    let mut response = AgentEnvelope::new(agent_id, envelope.from, response_payload);
+                    let mut response =
+                        AgentEnvelope::new(agent_id, envelope.from, response_payload);
                     if let Some(corr) = envelope.correlation_id {
                         response = response.with_correlation(corr);
                     }
@@ -450,7 +451,10 @@ mod tests {
         let r1 = orch.bus_mut().receive(&sender_id).unwrap();
         match &r1.payload {
             AgentPayload::TaskResult { success, .. } => assert!(success),
-            other => panic!("Expected TaskResult, got {:?}", std::mem::discriminant(other)),
+            other => panic!(
+                "Expected TaskResult, got {:?}",
+                std::mem::discriminant(other)
+            ),
         }
 
         // Task 2 — should succeed (count = 2 now)
@@ -468,7 +472,10 @@ mod tests {
         let r2 = orch.bus_mut().receive(&sender_id).unwrap();
         match &r2.payload {
             AgentPayload::TaskResult { success, .. } => assert!(success),
-            other => panic!("Expected TaskResult, got {:?}", std::mem::discriminant(other)),
+            other => panic!(
+                "Expected TaskResult, got {:?}",
+                std::mem::discriminant(other)
+            ),
         }
 
         // Task 3 — should hit resource limit (count = 2, max = 2)
@@ -486,14 +493,15 @@ mod tests {
         let r3 = orch.bus_mut().receive(&sender_id).unwrap();
         match &r3.payload {
             AgentPayload::Error {
-                code,
-                recoverable,
-                ..
+                code, recoverable, ..
             } => {
                 assert_eq!(code, "RESOURCE_LIMIT");
                 assert!(!recoverable);
             }
-            other => panic!("Expected Error for third task, got {:?}", std::mem::discriminant(other)),
+            other => panic!(
+                "Expected Error for third task, got {:?}",
+                std::mem::discriminant(other)
+            ),
         }
     }
 

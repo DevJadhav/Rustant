@@ -4,14 +4,14 @@
 
 use std::sync::Arc;
 
-use crate::config::VoiceConfig;
-use crate::error::VoiceError;
+use super::audio_io::{AudioInput, AudioOutput};
 use super::stt::SttProvider;
 use super::tts::TtsProvider;
 use super::types::{SynthesisRequest, TranscriptionResult};
 use super::vad::VoiceActivityDetector;
 use super::wake::WakeWordDetector;
-use super::audio_io::{AudioInput, AudioOutput};
+use crate::config::VoiceConfig;
+use crate::error::VoiceError;
 
 /// Events emitted by the voice pipeline.
 #[derive(Debug, Clone)]
@@ -103,7 +103,9 @@ mod tests {
         let events = vec![
             VoicePipelineEvent::ListeningStarted,
             VoicePipelineEvent::ListeningStopped,
-            VoicePipelineEvent::WakeWordDetected { word: "test".into() },
+            VoicePipelineEvent::WakeWordDetected {
+                word: "test".into(),
+            },
             VoicePipelineEvent::Error("test error".into()),
         ];
         assert_eq!(events.len(), 4);

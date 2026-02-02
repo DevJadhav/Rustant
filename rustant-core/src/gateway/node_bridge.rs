@@ -41,12 +41,7 @@ impl NodeBridge {
                 }
             }
             if let Some(task_args) = args.get("args") {
-                task = task.with_args(
-                    task_args
-                        .split_whitespace()
-                        .map(String::from)
-                        .collect(),
-                );
+                task = task.with_args(task_args.split_whitespace().map(String::from).collect());
             }
             task
         })

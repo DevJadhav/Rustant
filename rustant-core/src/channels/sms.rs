@@ -3,7 +3,10 @@
 //! Uses the Twilio REST API via reqwest for sending and receiving SMS.
 //! In tests, a trait abstraction provides mock implementations.
 
-use super::{Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser, MessageId, StreamingMode};
+use super::{
+    Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser,
+    MessageId, StreamingMode,
+};
 use crate::error::{ChannelError, RustantError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -184,7 +187,10 @@ impl SmsHttpClient for RealSmsHttp {
             .map_err(|e| format!("HTTP error: {e}"))?;
 
         let status = resp.status();
-        let body: serde_json::Value = resp.json().await.map_err(|e| format!("JSON parse error: {e}"))?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("JSON parse error: {e}"))?;
 
         if !status.is_success() {
             let msg = body["message"].as_str().unwrap_or("unknown error");
@@ -212,7 +218,10 @@ impl SmsHttpClient for RealSmsHttp {
             .await
             .map_err(|e| format!("HTTP error: {e}"))?;
 
-        let body: serde_json::Value = resp.json().await.map_err(|e| format!("JSON parse error: {e}"))?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("JSON parse error: {e}"))?;
 
         let messages = body["messages"]
             .as_array()
@@ -277,7 +286,10 @@ mod tests {
     #[test]
     fn test_sms_streaming_mode() {
         let ch = SmsChannel::new(SmsConfig::default(), Box::new(MockSmsHttp));
-        assert_eq!(ch.streaming_mode(), StreamingMode::Polling { interval_ms: 1000 });
+        assert_eq!(
+            ch.streaming_mode(),
+            StreamingMode::Polling { interval_ms: 1000 }
+        );
     }
 
     #[test]

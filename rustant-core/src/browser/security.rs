@@ -47,10 +47,7 @@ impl BrowserSecurityGuard {
                 .iter()
                 .any(|d| host == d.as_str() || host.ends_with(&format!(".{}", d)))
         {
-            return Err(format!(
-                "URL not in allowlist: {}",
-                url_str
-            ));
+            return Err(format!("URL not in allowlist: {}", url_str));
         }
 
         Ok(())
@@ -194,10 +191,8 @@ mod tests {
 
     #[test]
     fn test_blocklist_takes_priority_over_allowlist() {
-        let guard = BrowserSecurityGuard::new(
-            vec!["evil.com".to_string()],
-            vec!["evil.com".to_string()],
-        );
+        let guard =
+            BrowserSecurityGuard::new(vec!["evil.com".to_string()], vec!["evil.com".to_string()]);
         // Blocklist should win even if domain is in allowlist
         assert!(guard.check_url("https://evil.com").is_err());
         let err = guard.check_url("https://evil.com").unwrap_err();

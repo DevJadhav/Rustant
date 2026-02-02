@@ -337,7 +337,8 @@ mod tests {
     fn test_all_builtins_validate() {
         let names = list_builtin_names();
         for name in &names {
-            let wf = get_builtin(name).unwrap_or_else(|| panic!("Failed to load builtin: {}", name));
+            let wf =
+                get_builtin(name).unwrap_or_else(|| panic!("Failed to load builtin: {}", name));
             validate_workflow(&wf)
                 .unwrap_or_else(|e| panic!("Builtin '{}' failed validation: {}", name, e));
         }

@@ -3,7 +3,10 @@
 //! Communicates with the Signal network through the signal-cli tool
 //! using a subprocess bridge. In tests, a trait abstraction mocks the CLI.
 
-use super::{Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser, MessageId, StreamingMode};
+use super::{
+    Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser,
+    MessageId, StreamingMode,
+};
 use crate::error::{ChannelError, RustantError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -174,14 +177,7 @@ impl RealSignalCliBridge {
 impl SignalCliBridge for RealSignalCliBridge {
     async fn send_message(&self, recipient: &str, text: &str) -> Result<(), String> {
         let output = tokio::process::Command::new(&self.cli_path)
-            .args([
-                "-u",
-                &self.phone_number,
-                "send",
-                "-m",
-                text,
-                recipient,
-            ])
+            .args(["-u", &self.phone_number, "send", "-m", text, recipient])
             .output()
             .await
             .map_err(|e| format!("Failed to run signal-cli: {e}"))?;
@@ -196,7 +192,14 @@ impl SignalCliBridge for RealSignalCliBridge {
 
     async fn receive_messages(&self) -> Result<Vec<SignalIncoming>, String> {
         let output = tokio::process::Command::new(&self.cli_path)
-            .args(["-u", &self.phone_number, "receive", "--json", "--timeout", "5"])
+            .args([
+                "-u",
+                &self.phone_number,
+                "receive",
+                "--json",
+                "--timeout",
+                "5",
+            ])
             .output()
             .await
             .map_err(|e| format!("Failed to run signal-cli: {e}"))?;
@@ -209,10 +212,7 @@ impl SignalCliBridge for RealSignalCliBridge {
                 if let Some(data_msg) = v["envelope"]["dataMessage"].as_object() {
                     if let Some(text) = data_msg.get("message").and_then(|m| m.as_str()) {
                         messages.push(SignalIncoming {
-                            sender: v["envelope"]["source"]
-                                .as_str()
-                                .unwrap_or("")
-                                .to_string(),
+                            sender: v["envelope"]["source"].as_str().unwrap_or("").to_string(),
                             sender_name: v["envelope"]["sourceName"]
                                 .as_str()
                                 .map(|s| s.to_string()),
@@ -241,7 +241,8 @@ impl SignalCliBridge for RealSignalCliBridge {
 
 /// Create a Signal channel with a real signal-cli bridge.
 pub fn create_signal_channel(config: SignalConfig) -> SignalChannel {
-    let bridge = RealSignalCliBridge::new(config.signal_cli_path.clone(), config.phone_number.clone());
+    let bridge =
+        RealSignalCliBridge::new(config.signal_cli_path.clone(), config.phone_number.clone());
     SignalChannel::new(config, Box::new(bridge))
 }
 
@@ -316,7 +317,10 @@ mod tests {
     #[test]
     fn test_signal_capabilities() {
         let ch = SignalChannel::new(
-            SignalConfig { phone_number: "+1".into(), ..Default::default() },
+            SignalConfig {
+                phone_number: "+1".into(),
+                ..Default::default()
+            },
             Box::new(MockSignalBridge::new(true)),
         );
         let caps = ch.capabilities();
@@ -331,6 +335,9 @@ mod tests {
             SignalConfig::default(),
             Box::new(MockSignalBridge::new(true)),
         );
-        assert_eq!(ch.streaming_mode(), StreamingMode::Polling { interval_ms: 5000 });
+        assert_eq!(
+            ch.streaming_mode(),
+            StreamingMode::Polling { interval_ms: 5000 }
+        );
     }
 }

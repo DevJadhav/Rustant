@@ -115,10 +115,7 @@ impl WebhookEndpoint {
 
     /// Process a webhook request: verify + match handlers.
     pub fn process(&self, request: &WebhookRequest) -> Result<WebhookResult, SchedulerError> {
-        let verified = self.verify_signature(
-            &request.body,
-            request.signature.as_deref(),
-        )?;
+        let verified = self.verify_signature(&request.body, request.signature.as_deref())?;
 
         if !verified {
             return Err(SchedulerError::WebhookVerificationFailed {
@@ -130,9 +127,9 @@ impl WebhookEndpoint {
             .handlers
             .iter()
             .filter(|h| match (&h.event_type, &request.event_type) {
-                (None, _) => true,                     // Handler matches all events
+                (None, _) => true, // Handler matches all events
                 (Some(expected), Some(actual)) => expected == actual,
-                (Some(_), None) => false,              // Handler expects event type but none given
+                (Some(_), None) => false, // Handler expects event type but none given
             })
             .map(|h| h.action.clone())
             .collect();
@@ -206,7 +203,10 @@ mod tests {
         let endpoint = make_endpoint_with_secret();
         let body = b"test body content";
         let result = endpoint
-            .verify_signature(body, Some("sha256=0000000000000000000000000000000000000000000000000000000000000000"))
+            .verify_signature(
+                body,
+                Some("sha256=0000000000000000000000000000000000000000000000000000000000000000"),
+            )
             .unwrap();
         assert!(!result);
     }
@@ -277,11 +277,10 @@ mod tests {
 
     #[test]
     fn test_webhook_no_matching_event() {
-        let endpoint = WebhookEndpoint::new("/hooks")
-            .with_handler(WebhookHandler {
-                event_type: Some("push".to_string()),
-                action: "deploy".to_string(),
-            });
+        let endpoint = WebhookEndpoint::new("/hooks").with_handler(WebhookHandler {
+            event_type: Some("push".to_string()),
+            action: "deploy".to_string(),
+        });
 
         let request = WebhookRequest {
             path: "/hooks".to_string(),

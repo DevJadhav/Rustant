@@ -53,9 +53,9 @@ impl BrowserSession {
                 message: "Session is closed".to_string(),
             });
         }
-        self.security.check_url(url).map_err(|msg| BrowserError::UrlBlocked {
-            url: msg,
-        })?;
+        self.security
+            .check_url(url)
+            .map_err(|msg| BrowserError::UrlBlocked { url: msg })?;
         self.client.navigate(url).await
     }
 
@@ -265,8 +265,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_security_guard_gates_navigate() {
-        let security =
-            BrowserSecurityGuard::new(vec!["allowed.com".to_string()], vec![]);
+        let security = BrowserSecurityGuard::new(vec!["allowed.com".to_string()], vec![]);
         let (session, _client) = make_session_with_security(security);
         // Allowed domain succeeds
         assert!(session.navigate("https://allowed.com/page").await.is_ok());

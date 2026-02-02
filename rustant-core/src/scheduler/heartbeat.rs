@@ -143,8 +143,7 @@ impl HeartbeatManager {
 
     /// Mark a task as having just been executed.
     pub fn mark_executed(&mut self, task_name: &str) {
-        self.last_executed
-            .insert(task_name.to_string(), Utc::now());
+        self.last_executed.insert(task_name.to_string(), Utc::now());
     }
 
     /// Mark a task as executed at a specific time (for testing).
@@ -266,7 +265,10 @@ mod tests {
         let now = Utc::now();
         let ready = manager.ready_tasks_at(&now);
         let ready_names: Vec<&str> = ready.iter().map(|t| t.name.as_str()).collect();
-        assert!(ready_names.contains(&"check"), "Cooldown should have expired");
+        assert!(
+            ready_names.contains(&"check"),
+            "Cooldown should have expired"
+        );
     }
 
     #[test]

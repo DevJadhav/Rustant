@@ -191,11 +191,21 @@ impl NodeCapability {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NodeMessage {
     Ping,
-    Pong { uptime_secs: u64 },
-    TaskForward { task: NodeTask, from_node: NodeId },
-    TaskResponse { result: NodeResult, from_node: NodeId },
+    Pong {
+        uptime_secs: u64,
+    },
+    TaskForward {
+        task: NodeTask,
+        from_node: NodeId,
+    },
+    TaskResponse {
+        result: NodeResult,
+        from_node: NodeId,
+    },
     CapabilityQuery,
-    CapabilityResponse { capabilities: Vec<NodeCapability> },
+    CapabilityResponse {
+        capabilities: Vec<NodeCapability>,
+    },
     Shutdown,
 }
 

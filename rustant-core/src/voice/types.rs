@@ -233,7 +233,9 @@ mod tests {
         assert!((chunk.rms_energy() - 0.5).abs() < 0.001);
 
         // Known signal: alternating 1.0 and -1.0 -> RMS = 1.0
-        let alternating: Vec<f32> = (0..100).map(|i| if i % 2 == 0 { 1.0 } else { -1.0 }).collect();
+        let alternating: Vec<f32> = (0..100)
+            .map(|i| if i % 2 == 0 { 1.0 } else { -1.0 })
+            .collect();
         let chunk = AudioChunk::new(alternating, 16000, 1);
         assert!((chunk.rms_energy() - 1.0).abs() < 0.001);
 

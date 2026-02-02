@@ -121,6 +121,9 @@ hound = "3.5"
 cpal = "0.15"
 whisper-rs = "0.14"
 
+# Browser automation (CDP)
+chromiumoxide = "0.8"
+
 # Token counting
 tiktoken-rs = "0.9"
 

@@ -26,12 +26,12 @@ pub struct ModelInfo {
 ///
 /// Expects a JSON body with a `"data"` array of model objects, each with at least an `"id"` field.
 pub fn parse_openai_models_response(body: &Value) -> Result<Vec<ModelInfo>, LlmError> {
-    let data = body
-        .get("data")
-        .and_then(|d| d.as_array())
-        .ok_or_else(|| LlmError::ResponseParse {
-            message: "Missing 'data' array in models response".to_string(),
-        })?;
+    let data =
+        body.get("data")
+            .and_then(|d| d.as_array())
+            .ok_or_else(|| LlmError::ResponseParse {
+                message: "Missing 'data' array in models response".to_string(),
+            })?;
 
     let mut models: Vec<ModelInfo> = data
         .iter()

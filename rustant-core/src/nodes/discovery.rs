@@ -72,7 +72,10 @@ impl MdnsServiceRecord {
 
     /// Build capability CSV from a slice of capabilities.
     pub fn capabilities_to_csv(caps: &[Capability]) -> String {
-        caps.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(",")
+        caps.iter()
+            .map(|c| c.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
     }
 
     /// Convert to a `DiscoveredNode`.
@@ -190,7 +193,11 @@ impl MdnsDiscovery {
 
             if already_known {
                 // Refresh timestamp for existing node.
-                if let Some(existing) = self.found.iter_mut().find(|n| n.node_id.0 == record.node_id) {
+                if let Some(existing) = self
+                    .found
+                    .iter_mut()
+                    .find(|n| n.node_id.0 == record.node_id)
+                {
                     existing.discovered_at = Utc::now();
                     existing.capabilities = discovered.capabilities;
                 }
@@ -269,8 +276,8 @@ impl MdnsTransport for UdpMdnsTransport {
             .await
             .map_err(|e| format!("Failed to bind UDP socket: {e}"))?;
 
-        let payload = serde_json::to_vec(record)
-            .map_err(|e| format!("Failed to serialize record: {e}"))?;
+        let payload =
+            serde_json::to_vec(record).map_err(|e| format!("Failed to serialize record: {e}"))?;
 
         let dest = format!("{}:{}", MDNS_MULTICAST_ADDR, MDNS_PORT);
         socket
@@ -304,8 +311,7 @@ impl MdnsTransport for UdpMdnsTransport {
 
         let mut buf = vec![0u8; 4096];
         let mut records = Vec::new();
-        let deadline = tokio::time::Instant::now()
-            + tokio::time::Duration::from_millis(timeout_ms);
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(timeout_ms);
 
         loop {
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -459,6 +465,7 @@ mod tests {
             }
         }
 
+        #[allow(dead_code)]
         fn registered_record(&self) -> Option<MdnsServiceRecord> {
             self.registered.lock().unwrap().clone()
         }
@@ -664,7 +671,11 @@ mod tests {
 
     #[test]
     fn test_mdns_service_record_capabilities_to_csv() {
-        let caps = vec![Capability::Shell, Capability::FileSystem, Capability::Screenshot];
+        let caps = vec![
+            Capability::Shell,
+            Capability::FileSystem,
+            Capability::Screenshot,
+        ];
         let csv = MdnsServiceRecord::capabilities_to_csv(&caps);
         assert_eq!(csv, "shell,filesystem,screenshot");
     }

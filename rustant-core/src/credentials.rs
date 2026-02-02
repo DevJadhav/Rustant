@@ -70,10 +70,11 @@ impl Default for KeyringCredentialStore {
 impl CredentialStore for KeyringCredentialStore {
     fn store_key(&self, provider: &str, api_key: &str) -> Result<(), CredentialError> {
         let account = Self::account_name(provider);
-        let entry = keyring::Entry::new(&self.service, &account)
-            .map_err(|e| CredentialError::BackendUnavailable {
+        let entry = keyring::Entry::new(&self.service, &account).map_err(|e| {
+            CredentialError::BackendUnavailable {
                 message: e.to_string(),
-            })?;
+            }
+        })?;
         entry
             .set_password(api_key)
             .map_err(|e| CredentialError::StoreFailed {
@@ -83,10 +84,11 @@ impl CredentialStore for KeyringCredentialStore {
 
     fn get_key(&self, provider: &str) -> Result<String, CredentialError> {
         let account = Self::account_name(provider);
-        let entry = keyring::Entry::new(&self.service, &account)
-            .map_err(|e| CredentialError::BackendUnavailable {
+        let entry = keyring::Entry::new(&self.service, &account).map_err(|e| {
+            CredentialError::BackendUnavailable {
                 message: e.to_string(),
-            })?;
+            }
+        })?;
         entry.get_password().map_err(|e| match e {
             keyring::Error::NoEntry => CredentialError::NotFound {
                 service: self.service.clone(),
@@ -100,10 +102,11 @@ impl CredentialStore for KeyringCredentialStore {
 
     fn delete_key(&self, provider: &str) -> Result<(), CredentialError> {
         let account = Self::account_name(provider);
-        let entry = keyring::Entry::new(&self.service, &account)
-            .map_err(|e| CredentialError::BackendUnavailable {
+        let entry = keyring::Entry::new(&self.service, &account).map_err(|e| {
+            CredentialError::BackendUnavailable {
                 message: e.to_string(),
-            })?;
+            }
+        })?;
         entry
             .delete_credential()
             .map_err(|e| CredentialError::DeleteFailed {

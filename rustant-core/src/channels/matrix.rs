@@ -3,7 +3,10 @@
 //! Connects to a Matrix homeserver via the Client-Server API using reqwest.
 //! In tests, a trait abstraction provides mock implementations.
 
-use super::{Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser, MessageId, StreamingMode};
+use super::{
+    Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser,
+    MessageId, StreamingMode,
+};
 use crate::error::{ChannelError, RustantError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -195,7 +198,10 @@ impl MatrixHttpClient for RealMatrixHttp {
             .map_err(|e| format!("HTTP error: {e}"))?;
 
         let status = resp.status();
-        let body: serde_json::Value = resp.json().await.map_err(|e| format!("JSON parse error: {e}"))?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("JSON parse error: {e}"))?;
 
         if !status.is_success() {
             let err = body["error"].as_str().unwrap_or("unknown error");
@@ -222,7 +228,10 @@ impl MatrixHttpClient for RealMatrixHttp {
             .await
             .map_err(|e| format!("HTTP error: {e}"))?;
 
-        let body: serde_json::Value = resp.json().await.map_err(|e| format!("JSON parse error: {e}"))?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("JSON parse error: {e}"))?;
 
         let mut events = Vec::new();
         if let Some(rooms) = body["rooms"]["join"].as_object() {
@@ -232,15 +241,9 @@ impl MatrixHttpClient for RealMatrixHttp {
                         if event["type"].as_str() == Some("m.room.message") {
                             if let Some(event_body) = event["content"]["body"].as_str() {
                                 events.push(MatrixEvent {
-                                    event_id: event["event_id"]
-                                        .as_str()
-                                        .unwrap_or("")
-                                        .to_string(),
+                                    event_id: event["event_id"].as_str().unwrap_or("").to_string(),
                                     room_id: room_id.clone(),
-                                    sender: event["sender"]
-                                        .as_str()
-                                        .unwrap_or("")
-                                        .to_string(),
+                                    sender: event["sender"].as_str().unwrap_or("").to_string(),
                                     body: event_body.to_string(),
                                 });
                             }
@@ -255,10 +258,7 @@ impl MatrixHttpClient for RealMatrixHttp {
 
     async fn login(&self) -> Result<String, String> {
         // When using an access token, verify it with whoami
-        let url = format!(
-            "{}/_matrix/client/v3/account/whoami",
-            self.homeserver_url
-        );
+        let url = format!("{}/_matrix/client/v3/account/whoami", self.homeserver_url);
         let resp = self
             .client
             .get(&url)
@@ -268,7 +268,10 @@ impl MatrixHttpClient for RealMatrixHttp {
             .map_err(|e| format!("HTTP error: {e}"))?;
 
         let status = resp.status();
-        let body: serde_json::Value = resp.json().await.map_err(|e| format!("JSON parse error: {e}"))?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("JSON parse error: {e}"))?;
 
         if !status.is_success() {
             let err = body["error"].as_str().unwrap_or("unauthorized");

@@ -14,7 +14,8 @@ use rustant_core::channels::*;
 #[tokio::test]
 #[ignore = "requires RUSTANT_TEST_SLACK_TOKEN"]
 async fn test_slack_real_auth() {
-    let token = std::env::var("RUSTANT_TEST_SLACK_TOKEN").expect("RUSTANT_TEST_SLACK_TOKEN not set");
+    let token =
+        std::env::var("RUSTANT_TEST_SLACK_TOKEN").expect("RUSTANT_TEST_SLACK_TOKEN not set");
     let config = rustant_core::channels::slack::SlackConfig {
         bot_token: token,
         ..Default::default()
@@ -39,7 +40,11 @@ async fn test_telegram_real_auth() {
     };
     let mut ch = rustant_core::channels::telegram::create_telegram_channel(config);
     let result = ch.connect().await;
-    assert!(result.is_ok(), "Telegram connect failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Telegram connect failed: {:?}",
+        result.err()
+    );
     assert!(ch.is_connected());
     ch.disconnect().await.unwrap();
 }
@@ -67,8 +72,8 @@ async fn test_discord_real_auth() {
 #[tokio::test]
 #[ignore = "requires RUSTANT_TEST_MATRIX_HOMESERVER and RUSTANT_TEST_MATRIX_TOKEN"]
 async fn test_matrix_real_auth() {
-    let homeserver =
-        std::env::var("RUSTANT_TEST_MATRIX_HOMESERVER").expect("RUSTANT_TEST_MATRIX_HOMESERVER not set");
+    let homeserver = std::env::var("RUSTANT_TEST_MATRIX_HOMESERVER")
+        .expect("RUSTANT_TEST_MATRIX_HOMESERVER not set");
     let token =
         std::env::var("RUSTANT_TEST_MATRIX_TOKEN").expect("RUSTANT_TEST_MATRIX_TOKEN not set");
     let config = rustant_core::channels::matrix::MatrixConfig {
@@ -99,7 +104,12 @@ async fn test_webhook_real_send() {
     assert!(ch.is_connected());
 
     let sender = ChannelUser::new("test-bot", ChannelType::Webhook);
-    let msg = ChannelMessage::text(ChannelType::Webhook, "test", sender, "integration test ping");
+    let msg = ChannelMessage::text(
+        ChannelType::Webhook,
+        "test",
+        sender,
+        "integration test ping",
+    );
     let result = ch.send_message(msg).await;
     assert!(result.is_ok(), "Webhook send failed: {:?}", result.err());
     ch.disconnect().await.unwrap();
@@ -110,7 +120,8 @@ async fn test_webhook_real_send() {
 #[tokio::test]
 #[ignore = "requires RUSTANT_TEST_SLACK_TOKEN"]
 async fn test_build_channel_manager_with_slack() {
-    let token = std::env::var("RUSTANT_TEST_SLACK_TOKEN").expect("RUSTANT_TEST_SLACK_TOKEN not set");
+    let token =
+        std::env::var("RUSTANT_TEST_SLACK_TOKEN").expect("RUSTANT_TEST_SLACK_TOKEN not set");
     let channels_config = rustant_core::config::ChannelsConfig {
         slack: Some(rustant_core::channels::slack::SlackConfig {
             bot_token: token,
@@ -125,7 +136,11 @@ async fn test_build_channel_manager_with_slack() {
 
     let results = mgr.connect_all().await;
     assert_eq!(results.len(), 1);
-    assert!(results[0].1.is_ok(), "Slack connect failed: {:?}", results[0].1);
+    assert!(
+        results[0].1.is_ok(),
+        "Slack connect failed: {:?}",
+        results[0].1
+    );
     assert_eq!(mgr.connected_count(), 1);
 
     mgr.disconnect_all().await;
@@ -151,7 +166,8 @@ fn test_oauth_config_factories_all_providers() {
     assert!(discord.authorization_url.contains("discord.com"));
 
     // Teams
-    let teams = oauth::teams_oauth_config("test-client-id", "test-tenant", Some("teams-secret".into()));
+    let teams =
+        oauth::teams_oauth_config("test-client-id", "test-tenant", Some("teams-secret".into()));
     assert_eq!(teams.provider_name, "teams");
     assert!(teams.authorization_url.contains("test-tenant"));
     assert!(teams.token_url.contains("test-tenant"));
@@ -166,7 +182,9 @@ fn test_oauth_config_factories_all_providers() {
     // Gmail
     let gmail = oauth::gmail_oauth_config("test-client-id", Some("gmail-secret".into()));
     assert_eq!(gmail.provider_name, "gmail");
-    assert!(gmail.scopes.contains(&"https://mail.google.com/".to_string()));
+    assert!(gmail
+        .scopes
+        .contains(&"https://mail.google.com/".to_string()));
     assert!(!gmail.extra_auth_params.is_empty());
 }
 
@@ -182,7 +200,9 @@ fn test_xoauth2_token_format() {
     let b64 = oauth::build_xoauth2_token_base64("user@gmail.com", "ya29.token");
     // Decode and verify
     use base64::Engine;
-    let decoded = base64::engine::general_purpose::STANDARD.decode(&b64).unwrap();
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(&b64)
+        .unwrap();
     assert_eq!(String::from_utf8(decoded).unwrap(), raw);
 }
 
@@ -190,7 +210,9 @@ fn test_xoauth2_token_format() {
 
 #[test]
 fn test_gateway_list_channels_nodes_integration() {
-    use rustant_core::gateway::{ClientMessage, GatewayConfig, GatewayServer, ServerMessage, StatusProvider};
+    use rustant_core::gateway::{
+        ClientMessage, GatewayConfig, GatewayServer, ServerMessage, StatusProvider,
+    };
 
     struct TestStatusProvider;
     impl StatusProvider for TestStatusProvider {
@@ -239,11 +261,11 @@ fn test_gateway_list_channels_nodes_integration() {
 
 #[tokio::test]
 async fn test_orchestrator_full_lifecycle() {
-    use rustant_core::multi::{AgentOrchestrator, TaskHandler};
-    use rustant_core::multi::spawner::AgentSpawner;
+    use async_trait::async_trait;
     use rustant_core::multi::messaging::{AgentEnvelope, AgentPayload, MessageBus};
     use rustant_core::multi::routing::AgentRouter;
-    use async_trait::async_trait;
+    use rustant_core::multi::spawner::AgentSpawner;
+    use rustant_core::multi::{AgentOrchestrator, TaskHandler};
     use std::collections::HashMap;
 
     struct EchoHandler;
@@ -298,11 +320,11 @@ async fn test_orchestrator_full_lifecycle() {
 
 #[tokio::test]
 async fn test_orchestrator_resource_limit_enforcement() {
-    use rustant_core::multi::{AgentOrchestrator, TaskHandler};
-    use rustant_core::multi::spawner::AgentSpawner;
+    use async_trait::async_trait;
     use rustant_core::multi::messaging::{AgentEnvelope, AgentPayload, MessageBus};
     use rustant_core::multi::routing::AgentRouter;
-    use async_trait::async_trait;
+    use rustant_core::multi::spawner::AgentSpawner;
+    use rustant_core::multi::{AgentOrchestrator, TaskHandler};
     use std::collections::HashMap;
 
     struct CountHandler;
@@ -388,7 +410,8 @@ fn test_channel_oauth_config_serialization_roundtrip() {
         ..Default::default()
     };
     let json = serde_json::to_string(&discord).unwrap();
-    let restored: rustant_core::channels::discord::DiscordConfig = serde_json::from_str(&json).unwrap();
+    let restored: rustant_core::channels::discord::DiscordConfig =
+        serde_json::from_str(&json).unwrap();
     assert_eq!(restored.auth_method, AuthMethod::OAuth);
 
     // Teams
@@ -410,7 +433,8 @@ fn test_channel_oauth_config_serialization_roundtrip() {
         ..Default::default()
     };
     let json = serde_json::to_string(&whatsapp).unwrap();
-    let restored: rustant_core::channels::whatsapp::WhatsAppConfig = serde_json::from_str(&json).unwrap();
+    let restored: rustant_core::channels::whatsapp::WhatsAppConfig =
+        serde_json::from_str(&json).unwrap();
     assert_eq!(restored.auth_method, AuthMethod::OAuth);
 }
 

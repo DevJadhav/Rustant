@@ -41,8 +41,10 @@ pub fn validate_workflow(workflow: &WorkflowDefinition) -> Result<(), WorkflowEr
     let input_names: HashSet<&str> = workflow.inputs.iter().map(|i| i.name.as_str()).collect();
 
     for (idx, step) in workflow.steps.iter().enumerate() {
-        let earlier_steps: HashSet<&str> =
-            workflow.steps[..idx].iter().map(|s| s.id.as_str()).collect();
+        let earlier_steps: HashSet<&str> = workflow.steps[..idx]
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect();
 
         // Check param templates
         for value in step.params.values() {
@@ -183,7 +185,10 @@ steps:
 "#;
         let wf = parse_workflow(yaml).unwrap();
         let gate = wf.steps[0].gate.as_ref().unwrap();
-        assert_eq!(gate.gate_type, super::super::types::GateType::ApprovalRequired);
+        assert_eq!(
+            gate.gate_type,
+            super::super::types::GateType::ApprovalRequired
+        );
         assert_eq!(gate.message, "Approve this action?");
         assert_eq!(gate.timeout_secs, Some(300));
     }
@@ -257,7 +262,10 @@ steps: []
         let wf = parse_workflow(yaml).unwrap();
         let result = validate_workflow(&wf);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("at least one step"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("at least one step"));
     }
 
     #[test]
@@ -278,7 +286,10 @@ steps:
         let wf = parse_workflow(yaml).unwrap();
         let result = validate_workflow(&wf);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Duplicate step ID"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Duplicate step ID"));
     }
 
     #[test]
@@ -295,10 +306,7 @@ steps:
         let wf = parse_workflow(yaml).unwrap();
         let result = validate_workflow(&wf);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("unknown step"));
+        assert!(result.unwrap_err().to_string().contains("unknown step"));
     }
 
     #[test]

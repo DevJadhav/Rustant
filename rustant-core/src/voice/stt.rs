@@ -7,8 +7,8 @@ use async_trait::async_trait;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-use crate::error::VoiceError;
 use super::types::{AudioChunk, TranscriptionResult};
+use crate::error::VoiceError;
 
 /// Trait for speech-to-text providers.
 #[async_trait]
@@ -171,9 +171,12 @@ impl SttProvider for OpenAiSttProvider {
         }
 
         let json: serde_json::Value =
-            response.json().await.map_err(|e| VoiceError::TranscriptionFailed {
-                message: format!("JSON parse error: {}", e),
-            })?;
+            response
+                .json()
+                .await
+                .map_err(|e| VoiceError::TranscriptionFailed {
+                    message: format!("JSON parse error: {}", e),
+                })?;
 
         let text = json["text"].as_str().unwrap_or("").to_string();
         let language = json["language"].as_str().map(|s| s.to_string());

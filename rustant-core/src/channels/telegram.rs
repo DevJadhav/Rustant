@@ -3,7 +3,10 @@
 //! Uses the Telegram Bot API via reqwest for `getUpdates` / `sendMessage`.
 //! In tests, an `HttpClient` trait abstraction allows mocking.
 
-use super::{Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser, MessageId, StreamingMode};
+use super::{
+    Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser,
+    MessageId, StreamingMode,
+};
 use crate::error::{ChannelError, RustantError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -193,7 +196,10 @@ impl TelegramHttpClient for RealTelegramHttp {
             .map_err(|e| format!("HTTP error: {e}"))?;
 
         let status = resp.status();
-        let body: serde_json::Value = resp.json().await.map_err(|e| format!("JSON parse error: {e}"))?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("JSON parse error: {e}"))?;
 
         if !body["ok"].as_bool().unwrap_or(false) {
             let desc = body["description"].as_str().unwrap_or("unknown error");
@@ -208,10 +214,7 @@ impl TelegramHttpClient for RealTelegramHttp {
     }
 
     async fn get_updates(&self, offset: i64) -> Result<Vec<TelegramUpdate>, String> {
-        let url = format!(
-            "{}/getUpdates?offset={}&timeout=30",
-            self.base_url, offset
-        );
+        let url = format!("{}/getUpdates?offset={}&timeout=30", self.base_url, offset);
         let resp = self
             .client
             .get(&url)
@@ -219,7 +222,10 @@ impl TelegramHttpClient for RealTelegramHttp {
             .await
             .map_err(|e| format!("HTTP error: {e}"))?;
 
-        let body: serde_json::Value = resp.json().await.map_err(|e| format!("JSON parse error: {e}"))?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("JSON parse error: {e}"))?;
 
         if !body["ok"].as_bool().unwrap_or(false) {
             let desc = body["description"].as_str().unwrap_or("unknown error");
@@ -294,7 +300,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_telegram_connect_no_token() {
-        let mut ch = TelegramChannel::new(TelegramConfig::default(), Box::new(MockTelegramHttp::new()));
+        let mut ch =
+            TelegramChannel::new(TelegramConfig::default(), Box::new(MockTelegramHttp::new()));
         let result = ch.connect().await;
         assert!(result.is_err());
     }
@@ -378,6 +385,9 @@ mod tests {
     #[test]
     fn test_telegram_streaming_mode() {
         let ch = TelegramChannel::new(TelegramConfig::default(), Box::new(MockTelegramHttp::new()));
-        assert_eq!(ch.streaming_mode(), StreamingMode::Polling { interval_ms: 30000 });
+        assert_eq!(
+            ch.streaming_mode(),
+            StreamingMode::Polling { interval_ms: 30000 }
+        );
     }
 }

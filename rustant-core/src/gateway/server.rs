@@ -14,8 +14,8 @@ use axum::{
     routing::get,
     Router,
 };
-use futures::SinkExt;
 use chrono::Utc;
+use futures::SinkExt;
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
@@ -136,11 +136,7 @@ impl GatewayServer {
     }
 
     /// Handle a client message and produce a server response.
-    pub fn handle_client_message(
-        &mut self,
-        msg: ClientMessage,
-        conn_id: Uuid,
-    ) -> ServerMessage {
+    pub fn handle_client_message(&mut self, msg: ClientMessage, conn_id: Uuid) -> ServerMessage {
         match msg {
             ClientMessage::Authenticate { token } => {
                 if self.auth.validate(&token) {
@@ -195,13 +191,11 @@ impl GatewayServer {
                     },
                 }
             }
-            ClientMessage::GetStatus => {
-                ServerMessage::StatusResponse {
-                    connected_clients: self.connections.active_count(),
-                    active_tasks: self.sessions.active_count(),
-                    uptime_secs: self.uptime_secs(),
-                }
-            }
+            ClientMessage::GetStatus => ServerMessage::StatusResponse {
+                connected_clients: self.connections.active_count(),
+                active_tasks: self.sessions.active_count(),
+                uptime_secs: self.uptime_secs(),
+            },
             ClientMessage::Ping { timestamp } => ServerMessage::Pong { timestamp },
             ClientMessage::ListChannels => {
                 let channels = self
@@ -232,17 +226,12 @@ pub fn router(shared: SharedGateway) -> Router {
 }
 
 /// WebSocket upgrade handler.
-async fn ws_handler(
-    ws: WebSocketUpgrade,
-    State(gw): State<SharedGateway>,
-) -> impl IntoResponse {
+async fn ws_handler(ws: WebSocketUpgrade, State(gw): State<SharedGateway>) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_socket(socket, gw))
 }
 
 /// Health check endpoint.
-async fn health_handler(
-    State(gw): State<SharedGateway>,
-) -> impl IntoResponse {
+async fn health_handler(State(gw): State<SharedGateway>) -> impl IntoResponse {
     let gw = gw.lock().await;
     let body = serde_json::json!({
         "status": "ok",
@@ -528,10 +517,7 @@ mod tests {
         let conn_id = server.connections_mut().add_connection().unwrap();
         let now = Utc::now();
 
-        let resp = server.handle_client_message(
-            ClientMessage::Ping { timestamp: now },
-            conn_id,
-        );
+        let resp = server.handle_client_message(ClientMessage::Ping { timestamp: now }, conn_id);
         match resp {
             ServerMessage::Pong { timestamp } => {
                 assert_eq!(timestamp, now);
@@ -595,10 +581,7 @@ mod tests {
         server.connections_mut().authenticate(&conn_id);
         let task_id = Uuid::new_v4();
 
-        let resp = server.handle_client_message(
-            ClientMessage::CancelTask { task_id },
-            conn_id,
-        );
+        let resp = server.handle_client_message(ClientMessage::CancelTask { task_id }, conn_id);
         match resp {
             ServerMessage::Event {
                 event:
@@ -719,10 +702,7 @@ mod tests {
         }));
         // Replace the provider
         server.set_status_provider(Box::new(MockStatusProvider {
-            channels: vec![
-                ("b".into(), "y".into()),
-                ("c".into(), "z".into()),
-            ],
+            channels: vec![("b".into(), "y".into()), ("c".into(), "z".into())],
             nodes: vec![],
         }));
         let conn_id = server.connections_mut().add_connection().unwrap();

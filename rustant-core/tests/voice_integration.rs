@@ -4,9 +4,8 @@
 //! They do NOT require the `voice` feature flag or any audio hardware.
 
 use rustant_core::voice::{
-    AudioChunk, MockSttProvider, MockTtsProvider, SttWakeDetector,
-    SynthesisRequest, TranscriptionResult, VoiceActivityDetector,
-    audio_convert,
+    audio_convert, AudioChunk, MockSttProvider, MockTtsProvider, SttWakeDetector, SynthesisRequest,
+    TranscriptionResult, VoiceActivityDetector,
 };
 
 #[tokio::test]
@@ -85,11 +84,7 @@ async fn test_stt_wake_detection_flow() {
         },
     ]);
 
-    let detector = SttWakeDetector::new(
-        Box::new(mock_stt),
-        vec!["hey rustant".to_string()],
-        0.5,
-    );
+    let detector = SttWakeDetector::new(Box::new(mock_stt), vec!["hey rustant".to_string()], 0.5);
 
     let chunk = AudioChunk::silence(16000, 1, 480);
 

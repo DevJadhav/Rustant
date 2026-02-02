@@ -18,11 +18,7 @@ impl ChannelAgentBridge {
 
     /// Route a channel message to the appropriate agent.
     /// Returns the target agent ID.
-    pub fn route_channel_message(
-        &self,
-        msg: &ChannelMessage,
-        default_agent: Uuid,
-    ) -> Uuid {
+    pub fn route_channel_message(&self, msg: &ChannelMessage, default_agent: Uuid) -> Uuid {
         let text = msg.content.as_text().unwrap_or("").to_string();
         let request = RouteRequest::new()
             .with_channel(msg.channel_type)
@@ -167,8 +163,7 @@ mod tests {
             },
         );
 
-        let msg =
-            ChannelAgentBridge::envelope_to_channel_message(&envelope, ChannelType::Telegram);
+        let msg = ChannelAgentBridge::envelope_to_channel_message(&envelope, ChannelType::Telegram);
         assert!(msg.is_some());
         let msg = msg.unwrap();
         assert_eq!(msg.content.as_text(), Some("Done!"));
@@ -181,8 +176,7 @@ mod tests {
         let to = Uuid::new_v4();
         let envelope = AgentEnvelope::new(from, to, AgentPayload::StatusQuery);
 
-        let msg =
-            ChannelAgentBridge::envelope_to_channel_message(&envelope, ChannelType::Slack);
+        let msg = ChannelAgentBridge::envelope_to_channel_message(&envelope, ChannelType::Slack);
         assert!(msg.is_none());
     }
 }

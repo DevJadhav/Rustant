@@ -42,6 +42,10 @@ similar = { workspace = true }
 dialoguer = { workspace = true }
 keyring = { workspace = true }
 
+[features]
+default = []
+browser = ["rustant-core/browser"]
+
 [dev-dependencies]
 tokio-test = "0.4"
 pretty_assertions = "1.4"

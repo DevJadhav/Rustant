@@ -10,7 +10,9 @@ pub mod templates;
 pub mod types;
 
 pub use builtins::{all_builtins, get_builtin, list_builtin_names};
-pub use executor::{ApprovalHandler, AutoApproveHandler, AutoDenyHandler, ToolExecutor, WorkflowExecutor};
+pub use executor::{
+    ApprovalHandler, AutoApproveHandler, AutoDenyHandler, ToolExecutor, WorkflowExecutor,
+};
 pub use parser::{parse_workflow, validate_workflow};
 pub use types::{
     ApprovalDecision, ErrorAction, GateConfig, GateType, WorkflowDefinition, WorkflowInput,

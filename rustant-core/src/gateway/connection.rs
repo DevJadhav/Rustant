@@ -1,7 +1,7 @@
 //! WebSocket connection management.
 
-use std::collections::HashMap;
 use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Metadata about a connected WebSocket client.
@@ -84,7 +84,10 @@ impl ConnectionManager {
 
     /// Number of authenticated connections.
     pub fn authenticated_count(&self) -> usize {
-        self.connections.values().filter(|c| c.authenticated).count()
+        self.connections
+            .values()
+            .filter(|c| c.authenticated)
+            .count()
     }
 
     /// List all connection IDs.

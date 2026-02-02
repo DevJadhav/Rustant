@@ -6,9 +6,9 @@
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::error::VoiceError;
-use super::types::AudioChunk;
 use super::stt::SttProvider;
+use super::types::AudioChunk;
+use crate::error::VoiceError;
 
 /// Trait for wake word detectors.
 #[async_trait]
@@ -79,11 +79,7 @@ pub struct SttWakeDetector {
 
 impl SttWakeDetector {
     /// Create a new STT-based wake word detector.
-    pub fn new(
-        stt: Box<dyn SttProvider>,
-        wake_words: Vec<String>,
-        sensitivity: f32,
-    ) -> Self {
+    pub fn new(stt: Box<dyn SttProvider>, wake_words: Vec<String>, sensitivity: f32) -> Self {
         // Store wake words in lowercase for case-insensitive matching
         let words = wake_words.iter().map(|w| w.to_lowercase()).collect();
         Self {
@@ -161,15 +157,12 @@ impl WakeWordDetector for PorcupineWakeDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::voice::types::TranscriptionResult;
     use crate::voice::stt::MockSttProvider;
+    use crate::voice::types::TranscriptionResult;
 
     #[tokio::test]
     async fn test_mock_wake_triggers_after_n_calls() {
-        let detector = MockWakeDetector::new(
-            vec!["hey rustant".to_string()],
-            3,
-        );
+        let detector = MockWakeDetector::new(vec!["hey rustant".to_string()], 3);
         let chunk = AudioChunk::silence(16000, 1, 480);
 
         // First two calls: no detection
@@ -183,10 +176,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_wake_reset() {
-        let mut detector = MockWakeDetector::new(
-            vec!["hey rustant".to_string()],
-            2,
-        );
+        let mut detector = MockWakeDetector::new(vec!["hey rustant".to_string()], 2);
         let chunk = AudioChunk::silence(16000, 1, 480);
 
         detector.detect(&chunk).await.unwrap();
@@ -211,11 +201,8 @@ mod tests {
             duration_secs: 2.0,
         }]);
 
-        let detector = SttWakeDetector::new(
-            Box::new(mock_stt),
-            vec!["hey rustant".to_string()],
-            0.5,
-        );
+        let detector =
+            SttWakeDetector::new(Box::new(mock_stt), vec!["hey rustant".to_string()], 0.5);
         let chunk = AudioChunk::silence(16000, 1, 480);
 
         let result = detector.detect(&chunk).await.unwrap();
@@ -232,11 +219,8 @@ mod tests {
             duration_secs: 1.0,
         }]);
 
-        let detector = SttWakeDetector::new(
-            Box::new(mock_stt),
-            vec!["hey rustant".to_string()],
-            0.5,
-        );
+        let detector =
+            SttWakeDetector::new(Box::new(mock_stt), vec!["hey rustant".to_string()], 0.5);
         let chunk = AudioChunk::silence(16000, 1, 480);
 
         let result = detector.detect(&chunk).await.unwrap();
@@ -253,11 +237,8 @@ mod tests {
             duration_secs: 1.5,
         }]);
 
-        let detector = SttWakeDetector::new(
-            Box::new(mock_stt),
-            vec!["hey rustant".to_string()],
-            0.5,
-        );
+        let detector =
+            SttWakeDetector::new(Box::new(mock_stt), vec!["hey rustant".to_string()], 0.5);
         let chunk = AudioChunk::silence(16000, 1, 480);
 
         let result = detector.detect(&chunk).await.unwrap();

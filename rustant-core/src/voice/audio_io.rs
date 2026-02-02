@@ -4,8 +4,8 @@
 //! always available. `AudioInput` and `AudioOutput` (cpal-based) require the
 //! `voice` feature.
 
-use crate::error::VoiceError;
 use super::types::AudioChunk;
+use crate::error::VoiceError;
 
 /// Audio conversion utilities — always available (no feature gate).
 pub mod audio_convert {
@@ -82,49 +82,86 @@ pub mod audio_convert {
             })?;
             let i16_samples = f32_to_i16(&chunk.samples);
             for sample in &i16_samples {
-                writer.write_sample(*sample).map_err(|e| {
-                    VoiceError::UnsupportedFormat {
+                writer
+                    .write_sample(*sample)
+                    .map_err(|e| VoiceError::UnsupportedFormat {
                         format: format!("WAV sample write error: {}", e),
-                    }
-                })?;
+                    })?;
             }
-            writer.finalize().map_err(|e| {
-                VoiceError::UnsupportedFormat {
+            writer
+                .finalize()
+                .map_err(|e| VoiceError::UnsupportedFormat {
                     format: format!("WAV finalize error: {}", e),
-                }
-            })?;
+                })?;
         }
         Ok(cursor.into_inner())
     }
 
     /// Decode WAV bytes to an AudioChunk using hound.
+    ///
+    /// Handles WAV files where the data chunk has trailing bytes that aren't
+    /// a multiple of the sample size (common with some API-generated WAVs)
+    /// by fixing the header and truncating the data to a valid boundary.
     pub fn decode_wav(data: &[u8]) -> Result<AudioChunk, VoiceError> {
+        // First try the standard path
         let cursor = std::io::Cursor::new(data);
-        let mut reader = hound::WavReader::new(cursor).map_err(|e| {
-            VoiceError::UnsupportedFormat {
-                format: format!("WAV read error: {}", e),
+        match hound::WavReader::new(cursor) {
+            Ok(mut reader) => decode_wav_reader(&mut reader),
+            Err(hound::Error::FormatError(_)) => {
+                // The WAV has format issues (e.g. data chunk length not a
+                // multiple of sample size, or declared size exceeds actual
+                // data). Fix header and truncate data to valid boundary.
+                let fixed = fix_wav_data(data)?;
+                let cursor = std::io::Cursor::new(&fixed);
+                let mut reader =
+                    hound::WavReader::new(cursor).map_err(|e| VoiceError::UnsupportedFormat {
+                        format: format!("WAV read error after fix: {}", e),
+                    })?;
+                decode_wav_reader(&mut reader)
             }
-        })?;
-        let spec = reader.spec();
+            Err(e) => Err(VoiceError::UnsupportedFormat {
+                format: format!("WAV read error: {}", e),
+            }),
+        }
+    }
 
+    /// Extract samples from a WavReader into an AudioChunk.
+    ///
+    /// Reads samples leniently: if a read error occurs after successfully
+    /// reading some samples, returns what was read (handles truncated files).
+    fn decode_wav_reader<R: std::io::Read>(
+        reader: &mut hound::WavReader<R>,
+    ) -> Result<AudioChunk, VoiceError> {
+        let spec = reader.spec();
         let samples: Vec<f32> = match spec.sample_format {
             hound::SampleFormat::Int => {
                 let max_val = (1i32 << (spec.bits_per_sample - 1)) as f32;
-                reader
-                    .samples::<i32>()
-                    .map(|s| s.map(|v| v as f32 / max_val))
-                    .collect::<std::result::Result<Vec<f32>, _>>()
-                    .map_err(|e| VoiceError::UnsupportedFormat {
-                        format: format!("WAV sample read error: {}", e),
-                    })?
+                let mut out = Vec::new();
+                for s in reader.samples::<i32>() {
+                    match s {
+                        Ok(v) => out.push(v as f32 / max_val),
+                        Err(_) => break, // stop at first read error (truncated data)
+                    }
+                }
+                out
             }
-            hound::SampleFormat::Float => reader
-                .samples::<f32>()
-                .collect::<std::result::Result<Vec<f32>, _>>()
-                .map_err(|e| VoiceError::UnsupportedFormat {
-                    format: format!("WAV float sample read error: {}", e),
-                })?,
+            hound::SampleFormat::Float => {
+                let mut out = Vec::new();
+                for s in reader.samples::<f32>() {
+                    match s {
+                        Ok(v) => out.push(v),
+                        Err(_) => break,
+                    }
+                }
+                out
+            }
         };
+
+        if samples.is_empty() {
+            return Err(VoiceError::UnsupportedFormat {
+                format: "WAV file contains no readable samples".into(),
+            });
+        }
 
         Ok(AudioChunk {
             samples,
@@ -132,6 +169,83 @@ pub mod audio_convert {
             channels: spec.channels,
             timestamp: None,
         })
+    }
+
+    /// Fix a WAV file where the data chunk is malformed.
+    ///
+    /// Adjusts the data chunk length to:
+    /// 1. Not exceed the actual bytes available in the file
+    /// 2. Be a multiple of the sample frame size
+    ///
+    /// Also truncates the file to match the corrected data length.
+    fn fix_wav_data(data: &[u8]) -> Result<Vec<u8>, VoiceError> {
+        if data.len() < 44 {
+            return Err(VoiceError::UnsupportedFormat {
+                format: "WAV too short to contain header".into(),
+            });
+        }
+
+        let mut fixed = data.to_vec();
+        let mut pos = 12; // Skip RIFF header (4 + 4 + 4 bytes)
+
+        let mut bits_per_sample: u16 = 16;
+        let mut num_channels: u16 = 1;
+
+        while pos + 8 <= fixed.len() {
+            let chunk_id = &fixed[pos..pos + 4];
+            let chunk_size = u32::from_le_bytes([
+                fixed[pos + 4],
+                fixed[pos + 5],
+                fixed[pos + 6],
+                fixed[pos + 7],
+            ]) as usize;
+
+            if chunk_id == b"fmt " && chunk_size >= 16 {
+                num_channels = u16::from_le_bytes([fixed[pos + 10], fixed[pos + 11]]);
+                bits_per_sample = u16::from_le_bytes([fixed[pos + 22], fixed[pos + 23]]);
+            }
+
+            if chunk_id == b"data" {
+                let data_start = pos + 8;
+                let bytes_per_sample = (bits_per_sample as usize / 8) * num_channels as usize;
+
+                // Cap at actual available bytes
+                let actual_available = fixed.len().saturating_sub(data_start);
+                let mut new_size = chunk_size.min(actual_available);
+
+                // Align to sample frame boundary
+                if bytes_per_sample > 0 {
+                    new_size -= new_size % bytes_per_sample;
+                }
+
+                // Write corrected data chunk size
+                let new_size_bytes = (new_size as u32).to_le_bytes();
+                fixed[pos + 4] = new_size_bytes[0];
+                fixed[pos + 5] = new_size_bytes[1];
+                fixed[pos + 6] = new_size_bytes[2];
+                fixed[pos + 7] = new_size_bytes[3];
+
+                // Truncate file to end of corrected data chunk
+                fixed.truncate(data_start + new_size);
+
+                // Also fix the RIFF chunk size (total file size - 8)
+                let riff_size = (fixed.len() - 8) as u32;
+                let riff_bytes = riff_size.to_le_bytes();
+                fixed[4] = riff_bytes[0];
+                fixed[5] = riff_bytes[1];
+                fixed[6] = riff_bytes[2];
+                fixed[7] = riff_bytes[3];
+
+                break;
+            }
+
+            pos += 8 + chunk_size;
+            if !chunk_size.is_multiple_of(2) {
+                pos += 1;
+            }
+        }
+
+        Ok(fixed)
     }
 }
 
@@ -230,7 +344,7 @@ mod tests {
         let samples = vec![0.0, 0.5, 1.0, 0.5];
         let resampled = resample(&samples, 8000, 16000);
         assert!(resampled.len() >= 7); // roughly double
-        // First sample should be the same
+                                       // First sample should be the same
         assert!((resampled[0] - 0.0).abs() < 0.01);
         // Values should be interpolated
         assert!(resampled[1] > 0.0 && resampled[1] < 0.5);
@@ -238,11 +352,7 @@ mod tests {
 
     #[test]
     fn test_wav_encode_decode_roundtrip() {
-        let original = AudioChunk::new(
-            vec![0.0, 0.25, 0.5, 0.75, 1.0, 0.75, 0.5, 0.25],
-            16000,
-            1,
-        );
+        let original = AudioChunk::new(vec![0.0, 0.25, 0.5, 0.75, 1.0, 0.75, 0.5, 0.25], 16000, 1);
         let wav_bytes = encode_wav(&original).unwrap();
         assert!(!wav_bytes.is_empty());
         // WAV files start with RIFF header

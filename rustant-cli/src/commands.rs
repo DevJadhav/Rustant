@@ -1,11 +1,13 @@
 //! CLI subcommand handlers.
 
 use crate::AuthAction;
+use crate::BrowserAction;
 use crate::ChannelAction;
 use crate::Commands;
 use crate::ConfigAction;
 use crate::CronAction;
 use crate::SlackCommand;
+use crate::VoiceAction;
 use crate::WorkflowAction;
 use std::path::Path;
 
@@ -18,6 +20,8 @@ pub async fn handle_command(command: Commands, workspace: &Path) -> anyhow::Resu
         Commands::Auth { action } => handle_auth(action, workspace).await,
         Commands::Workflow { action } => handle_workflow(action, workspace).await,
         Commands::Cron { action } => handle_cron(action, workspace).await,
+        Commands::Voice { action } => handle_voice(action).await,
+        Commands::Browser { action } => handle_browser(action, workspace).await,
     }
 }
 
@@ -79,9 +83,7 @@ async fn handle_channel(action: ChannelAction, workspace: &Path) -> anyhow::Resu
             }
             Ok(())
         }
-        ChannelAction::Slack { action } => {
-            return handle_slack(action).await;
-        }
+        ChannelAction::Slack { action } => handle_slack(action).await,
         ChannelAction::Test { name } => {
             let mut mgr = rustant_core::channels::build_channel_manager(&channels_config);
             let names = mgr.channel_names();
@@ -208,7 +210,10 @@ async fn handle_auth(action: AuthAction, workspace: &Path) -> anyhow::Result<()>
             Ok(())
         }
 
-        AuthAction::Login { provider, redirect_uri } => {
+        AuthAction::Login {
+            provider,
+            redirect_uri,
+        } => {
             let provider = provider.to_lowercase();
             let is_channel = CHANNEL_PROVIDERS.contains(&provider.as_str());
 
@@ -248,14 +253,14 @@ async fn handle_auth(action: AuthAction, workspace: &Path) -> anyhow::Result<()>
                 ),
             };
             println!("Redirect URI: {}", effective_redirect);
-            println!("(Make sure this URI is registered in your {} app settings)", provider);
+            println!(
+                "(Make sure this URI is registered in your {} app settings)",
+                provider
+            );
             println!();
             println!("Opening your browser for authentication...");
 
-            let token = oauth::authorize_browser_flow(
-                &oauth_cfg,
-                redirect_uri.as_deref(),
-            )
+            let token = oauth::authorize_browser_flow(&oauth_cfg, redirect_uri.as_deref())
                 .await
                 .map_err(|e| anyhow::anyhow!("OAuth login failed: {}", e))?;
 
@@ -353,38 +358,43 @@ async fn handle_workflow(action: WorkflowAction, _workspace: &Path) -> anyhow::R
             }
             Ok(())
         }
-        WorkflowAction::Show { name } => {
-            match rustant_core::get_builtin(&name) {
-                Some(wf) => {
-                    println!("Workflow: {}", wf.name);
-                    println!("Description: {}", wf.description);
-                    println!("Version: {}", wf.version);
-                    if !wf.inputs.is_empty() {
-                        println!("\nInputs:");
-                        for input in &wf.inputs {
-                            let required = if input.optional { "(optional)" } else { "(required)" };
-                            println!("  {} [{}] {} - {}", input.name, input.input_type, required, input.description);
-                        }
+        WorkflowAction::Show { name } => match rustant_core::get_builtin(&name) {
+            Some(wf) => {
+                println!("Workflow: {}", wf.name);
+                println!("Description: {}", wf.description);
+                println!("Version: {}", wf.version);
+                if !wf.inputs.is_empty() {
+                    println!("\nInputs:");
+                    for input in &wf.inputs {
+                        let required = if input.optional {
+                            "(optional)"
+                        } else {
+                            "(required)"
+                        };
+                        println!(
+                            "  {} [{}] {} - {}",
+                            input.name, input.input_type, required, input.description
+                        );
                     }
-                    println!("\nSteps:");
-                    for (i, step) in wf.steps.iter().enumerate() {
-                        let gate_str = if step.gate.is_some() { " [gated]" } else { "" };
-                        println!("  {}. {} (tool: {}){}", i + 1, step.id, step.tool, gate_str);
-                    }
-                    if !wf.outputs.is_empty() {
-                        println!("\nOutputs:");
-                        for output in &wf.outputs {
-                            println!("  {}", output.name);
-                        }
-                    }
-                    Ok(())
                 }
-                None => {
-                    eprintln!("Workflow '{}' not found", name);
-                    Ok(())
+                println!("\nSteps:");
+                for (i, step) in wf.steps.iter().enumerate() {
+                    let gate_str = if step.gate.is_some() { " [gated]" } else { "" };
+                    println!("  {}. {} (tool: {}){}", i + 1, step.id, step.tool, gate_str);
                 }
+                if !wf.outputs.is_empty() {
+                    println!("\nOutputs:");
+                    for output in &wf.outputs {
+                        println!("  {}", output.name);
+                    }
+                }
+                Ok(())
             }
-        }
+            None => {
+                eprintln!("Workflow '{}' not found", name);
+                Ok(())
+            }
+        },
         WorkflowAction::Run { name, input } => {
             let _wf = rustant_core::get_builtin(&name)
                 .ok_or_else(|| anyhow::anyhow!("Workflow '{}' not found", name))?;
@@ -392,9 +402,15 @@ async fn handle_workflow(action: WorkflowAction, _workspace: &Path) -> anyhow::R
             let mut inputs = std::collections::HashMap::new();
             for kv in &input {
                 if let Some((key, value)) = kv.split_once('=') {
-                    inputs.insert(key.to_string(), serde_json::Value::String(value.to_string()));
+                    inputs.insert(
+                        key.to_string(),
+                        serde_json::Value::String(value.to_string()),
+                    );
                 } else {
-                    return Err(anyhow::anyhow!("Invalid input format '{}', expected key=value", kv));
+                    return Err(anyhow::anyhow!(
+                        "Invalid input format '{}', expected key=value",
+                        kv
+                    ));
                 }
             }
 
@@ -441,7 +457,11 @@ async fn handle_cron(action: CronAction, workspace: &Path) -> anyhow::Result<()>
             } else {
                 println!("Cron jobs ({}):", jobs.len());
                 for job in &jobs {
-                    let enabled = if job.config.enabled { "enabled" } else { "disabled" };
+                    let enabled = if job.config.enabled {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    };
                     let next = job
                         .next_run
                         .map(|t| t.format("%Y-%m-%d %H:%M:%S UTC").to_string())
@@ -454,7 +474,11 @@ async fn handle_cron(action: CronAction, workspace: &Path) -> anyhow::Result<()>
             }
             Ok(())
         }
-        CronAction::Add { name, schedule, task } => {
+        CronAction::Add {
+            name,
+            schedule,
+            task,
+        } => {
             let job_config = rustant_core::CronJobConfig::new(&name, &schedule, &task);
             // Validate the cron expression
             let job = rustant_core::CronJob::new(job_config)?;
@@ -515,9 +539,7 @@ async fn handle_cron(action: CronAction, workspace: &Path) -> anyhow::Result<()>
             Ok(())
         }
         CronAction::Jobs => {
-            let manager = rustant_core::JobManager::new(
-                scheduler_config.max_background_jobs,
-            );
+            let manager = rustant_core::JobManager::new(scheduler_config.max_background_jobs);
             let jobs = manager.list();
             if jobs.is_empty() {
                 println!("No background jobs running.");
@@ -539,9 +561,7 @@ async fn handle_cron(action: CronAction, workspace: &Path) -> anyhow::Result<()>
             let id: uuid::Uuid = job_id
                 .parse()
                 .map_err(|e| anyhow::anyhow!("Invalid job ID '{}': {}", job_id, e))?;
-            let mut manager = rustant_core::JobManager::new(
-                scheduler_config.max_background_jobs,
-            );
+            let mut manager = rustant_core::JobManager::new(scheduler_config.max_background_jobs);
             manager.cancel_job(&id)?;
             println!("Job {} cancelled.", job_id);
             Ok(())
@@ -555,8 +575,12 @@ fn load_slack_client() -> anyhow::Result<rustant_core::channels::slack::RealSlac
     use rustant_core::oauth;
 
     let store = KeyringCredentialStore::new();
-    let token = oauth::load_oauth_token(&store, "slack")
-        .map_err(|e| anyhow::anyhow!("No Slack OAuth token found. Run `rustant auth login slack` first.\n{}", e))?;
+    let token = oauth::load_oauth_token(&store, "slack").map_err(|e| {
+        anyhow::anyhow!(
+            "No Slack OAuth token found. Run `rustant auth login slack` first.\n{}",
+            e
+        )
+    })?;
     Ok(rustant_core::channels::slack::RealSlackHttp::new(
         token.access_token,
     ))
@@ -569,31 +593,44 @@ async fn handle_slack(action: SlackCommand) -> anyhow::Result<()> {
 
     match action {
         SlackCommand::Send { channel, message } => {
-            let ts = http.post_message(&channel, &message).await
+            let ts = http
+                .post_message(&channel, &message)
+                .await
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
             println!("Message sent (ts: {})", ts);
         }
 
         SlackCommand::History { channel, limit } => {
-            let messages = http.conversations_history(&channel, limit).await
+            let messages = http
+                .conversations_history(&channel, limit)
+                .await
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
             if messages.is_empty() {
                 println!("No messages found.");
             } else {
                 for msg in messages.iter().rev() {
-                    let thread = msg.thread_ts.as_deref().map(|t| format!(" [thread:{}]", t)).unwrap_or_default();
+                    let thread = msg
+                        .thread_ts
+                        .as_deref()
+                        .map(|t| format!(" [thread:{}]", t))
+                        .unwrap_or_default();
                     println!("[{}] {}: {}{}", &msg.ts, msg.user, msg.text, thread);
                 }
             }
         }
 
         SlackCommand::Channels => {
-            let channels = http.conversations_list("public_channel,private_channel", 200).await
+            let channels = http
+                .conversations_list("public_channel,private_channel", 200)
+                .await
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
             if channels.is_empty() {
                 println!("No channels found.");
             } else {
-                println!("{:<14} {:<25} {:>5}  {:<6}  {}", "ID", "Name", "Users", "Member", "Topic");
+                println!(
+                    "{:<14} {:<25} {:>5}  {:<6}  Topic",
+                    "ID", "Name", "Users", "Member"
+                );
                 println!("{}", "-".repeat(75));
                 for ch in &channels {
                     let private = if ch.is_private { "priv" } else { "pub" };
@@ -613,18 +650,25 @@ async fn handle_slack(action: SlackCommand) -> anyhow::Result<()> {
         }
 
         SlackCommand::Users => {
-            let users = http.users_list(200).await
+            let users = http
+                .users_list(200)
+                .await
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
             if users.is_empty() {
                 println!("No users found.");
             } else {
-                println!("{:<14} {:<20} {:<25} {:<6} {}", "ID", "Username", "Real Name", "Admin", "Status");
+                println!(
+                    "{:<14} {:<20} {:<25} {:<6} Status",
+                    "ID", "Username", "Real Name", "Admin"
+                );
                 println!("{}", "-".repeat(80));
                 for u in &users {
                     let kind = if u.is_bot { " [bot]" } else { "" };
                     let admin = if u.is_admin { "yes" } else { "" };
                     let status = if !u.status_emoji.is_empty() || !u.status_text.is_empty() {
-                        format!("{} {}", u.status_emoji, u.status_text).trim().to_string()
+                        format!("{} {}", u.status_emoji, u.status_text)
+                            .trim()
+                            .to_string()
                     } else {
                         String::new()
                     };
@@ -638,7 +682,9 @@ async fn handle_slack(action: SlackCommand) -> anyhow::Result<()> {
         }
 
         SlackCommand::Info { channel } => {
-            let info = http.conversations_info(&channel).await
+            let info = http
+                .conversations_info(&channel)
+                .await
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
             println!("Channel: #{}", info.name);
             println!("ID:      {}", info.id);
@@ -653,19 +699,29 @@ async fn handle_slack(action: SlackCommand) -> anyhow::Result<()> {
             }
         }
 
-        SlackCommand::React { channel, timestamp, emoji } => {
-            http.reactions_add(&channel, &timestamp, &emoji).await
+        SlackCommand::React {
+            channel,
+            timestamp,
+            emoji,
+        } => {
+            http.reactions_add(&channel, &timestamp, &emoji)
+                .await
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
             println!("Reaction :{}:  added.", emoji);
         }
 
         SlackCommand::Files { channel } => {
-            let files = http.files_list(channel.as_deref(), 100).await
+            let files = http
+                .files_list(channel.as_deref(), 100)
+                .await
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
             if files.is_empty() {
                 println!("No files found.");
             } else {
-                println!("{:<14} {:<30} {:<8} {:>10} {}", "ID", "Name", "Type", "Size", "User");
+                println!(
+                    "{:<14} {:<30} {:<8} {:>10} User",
+                    "ID", "Name", "Type", "Size"
+                );
                 println!("{}", "-".repeat(75));
                 for f in &files {
                     let size = if f.size >= 1_048_576 {
@@ -680,14 +736,19 @@ async fn handle_slack(action: SlackCommand) -> anyhow::Result<()> {
                     } else {
                         f.name.clone()
                     };
-                    println!("{:<14} {:<30} {:<8} {:>10} {}", f.id, name, f.filetype, size, f.user);
+                    println!(
+                        "{:<14} {:<30} {:<8} {:>10} {}",
+                        f.id, name, f.filetype, size, f.user
+                    );
                 }
                 println!("\nTotal: {} files", files.len());
             }
         }
 
         SlackCommand::Team => {
-            let team = http.team_info().await
+            let team = http
+                .team_info()
+                .await
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
             println!("Workspace: {}", team.name);
             println!("ID:        {}", team.id);
@@ -698,12 +759,17 @@ async fn handle_slack(action: SlackCommand) -> anyhow::Result<()> {
         }
 
         SlackCommand::Groups => {
-            let groups = http.usergroups_list().await
+            let groups = http
+                .usergroups_list()
+                .await
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
             if groups.is_empty() {
                 println!("No user groups found.");
             } else {
-                println!("{:<14} {:<20} {:<15} {:>6}  {}", "ID", "Name", "@Handle", "Users", "Description");
+                println!(
+                    "{:<14} {:<20} {:<15} {:>6}  Description",
+                    "ID", "Name", "@Handle", "Users"
+                );
                 println!("{}", "-".repeat(75));
                 for g in &groups {
                     let desc = if g.description.len() > 25 {
@@ -722,27 +788,196 @@ async fn handle_slack(action: SlackCommand) -> anyhow::Result<()> {
 
         SlackCommand::Dm { user, message } => {
             // Open a DM conversation, then send the message
-            let dm_channel = http.conversations_open(&[user.as_str()]).await
+            let dm_channel = http
+                .conversations_open(&[user.as_str()])
+                .await
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
-            let ts = http.post_message(&dm_channel, &message).await
+            let ts = http
+                .post_message(&dm_channel, &message)
+                .await
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
             println!("DM sent to {} (channel: {}, ts: {})", user, dm_channel, ts);
         }
 
-        SlackCommand::Thread { channel, timestamp, message } => {
-            let ts = http.post_thread_reply(&channel, &timestamp, &message).await
+        SlackCommand::Thread {
+            channel,
+            timestamp,
+            message,
+        } => {
+            let ts = http
+                .post_thread_reply(&channel, &timestamp, &message)
+                .await
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
             println!("Thread reply sent (ts: {})", ts);
         }
 
         SlackCommand::Join { channel } => {
-            http.conversations_join(&channel).await
+            http.conversations_join(&channel)
+                .await
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
             println!("Joined channel {}", channel);
         }
     }
 
     Ok(())
+}
+
+async fn handle_voice(action: VoiceAction) -> anyhow::Result<()> {
+    let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| {
+        anyhow::anyhow!(
+            "OPENAI_API_KEY environment variable not set.\n\
+             Set it with: export OPENAI_API_KEY=sk-..."
+        )
+    })?;
+
+    match action {
+        VoiceAction::Speak { text, voice } => {
+            use rustant_core::voice::{OpenAiTtsProvider, SynthesisRequest, TtsProvider};
+
+            println!("Synthesizing: \"{}\" (voice: {})", text, voice);
+            let tts = OpenAiTtsProvider::new(&api_key);
+            let request = SynthesisRequest::new(&text).with_voice(&voice);
+            let result = tts
+                .synthesize(&request)
+                .await
+                .map_err(|e| anyhow::anyhow!("TTS synthesis failed: {}", e))?;
+
+            println!("  Duration:    {:.2}s", result.duration_secs);
+            println!("  Sample rate: {} Hz", result.audio.sample_rate);
+            println!("  Channels:    {}", result.audio.channels);
+            println!("  Samples:     {}", result.audio.samples.len());
+            println!("  Characters:  {}", result.characters_used);
+
+            // Save WAV to temp file for playback
+            let wav_bytes = rustant_core::voice::audio_convert::encode_wav(&result.audio)
+                .map_err(|e| anyhow::anyhow!("WAV encoding failed: {}", e))?;
+            let out_path = std::env::temp_dir().join("rustant_tts_output.wav");
+            std::fs::write(&out_path, &wav_bytes)?;
+            println!("  WAV saved:   {}", out_path.display());
+
+            Ok(())
+        }
+        VoiceAction::Roundtrip { text } => {
+            use rustant_core::voice::{
+                OpenAiSttProvider, OpenAiTtsProvider, SttProvider, SynthesisRequest, TtsProvider,
+            };
+
+            println!("Original: \"{}\"", text);
+
+            // TTS: text -> audio
+            println!("  [1/2] Synthesizing speech...");
+            let tts = OpenAiTtsProvider::new(&api_key);
+            let request = SynthesisRequest::new(&text);
+            let tts_result = tts
+                .synthesize(&request)
+                .await
+                .map_err(|e| anyhow::anyhow!("TTS synthesis failed: {}", e))?;
+            println!(
+                "  Audio: {:.2}s, {} samples @ {} Hz",
+                tts_result.duration_secs,
+                tts_result.audio.samples.len(),
+                tts_result.audio.sample_rate
+            );
+
+            // STT: audio -> text
+            println!("  [2/2] Transcribing audio...");
+            let stt = OpenAiSttProvider::new(&api_key);
+            let transcription = stt
+                .transcribe(&tts_result.audio)
+                .await
+                .map_err(|e| anyhow::anyhow!("STT transcription failed: {}", e))?;
+            println!("Transcribed: \"{}\"", transcription.text);
+            if let Some(lang) = &transcription.language {
+                println!("  Language:   {}", lang);
+            }
+            println!("  Duration:   {:.2}s", transcription.duration_secs);
+            println!("  Confidence: {:.2}", transcription.confidence);
+
+            Ok(())
+        }
+    }
+}
+
+async fn handle_browser(action: BrowserAction, _workspace: &Path) -> anyhow::Result<()> {
+    match action {
+        BrowserAction::Test { url } => {
+            #[cfg(feature = "browser")]
+            {
+                use rustant_core::browser::{CdpClient, ChromiumCdpClient};
+                use rustant_core::config::BrowserConfig;
+
+                println!("Launching headless Chrome...");
+                let config = BrowserConfig {
+                    enabled: true,
+                    headless: true,
+                    ..Default::default()
+                };
+                let client = ChromiumCdpClient::launch(&config)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to launch Chrome: {}", e))?;
+
+                println!("Navigating to: {}", url);
+                client
+                    .navigate(&url)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Navigation failed: {}", e))?;
+
+                let title = client
+                    .get_title()
+                    .await
+                    .unwrap_or_else(|_| "(unknown)".into());
+                let page_url = client
+                    .get_url()
+                    .await
+                    .unwrap_or_else(|_| "(unknown)".into());
+                let text = client.get_text().await.unwrap_or_default();
+                let text_preview = if text.len() > 200 {
+                    format!("{}...", &text[..200])
+                } else {
+                    text
+                };
+
+                println!("  Title: {}", title);
+                println!("  URL:   {}", page_url);
+                println!(
+                    "  Text preview:\n    {}",
+                    text_preview.replace('\n', "\n    ")
+                );
+
+                // Take screenshot
+                let screenshot = client.screenshot().await;
+                match screenshot {
+                    Ok(bytes) => {
+                        let out_path = std::env::temp_dir().join("rustant_browser_screenshot.png");
+                        std::fs::write(&out_path, &bytes)?;
+                        println!(
+                            "  Screenshot: {} ({} bytes)",
+                            out_path.display(),
+                            bytes.len()
+                        );
+                    }
+                    Err(e) => println!("  Screenshot failed: {}", e),
+                }
+
+                client
+                    .close()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to close browser: {}", e))?;
+                println!("Browser closed.");
+                Ok(())
+            }
+
+            #[cfg(not(feature = "browser"))]
+            {
+                let _ = url;
+                eprintln!(
+                    "Browser feature not enabled.\n\
+                     Recompile with: cargo build --features browser"
+                );
+                Ok(())
+            }
+        }
+    }
 }
 
 #[cfg(test)]

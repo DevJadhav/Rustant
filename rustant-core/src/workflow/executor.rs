@@ -18,11 +18,7 @@ use uuid::Uuid;
 /// This abstracts over the real ToolRegistry for testability.
 #[async_trait]
 pub trait ToolExecutor: Send + Sync {
-    async fn execute_tool(
-        &self,
-        tool_name: &str,
-        args: Value,
-    ) -> Result<Value, String>;
+    async fn execute_tool(&self, tool_name: &str, args: Value) -> Result<Value, String>;
 }
 
 /// Trait for requesting approval from the user for gated steps.
@@ -108,9 +104,7 @@ impl WorkflowExecutor {
         }
 
         // Execute steps
-        let final_state = self
-            .execute_steps(workflow, state)
-            .await?;
+        let final_state = self.execute_steps(workflow, state).await?;
 
         // Update stored state
         {
@@ -153,16 +147,15 @@ impl WorkflowExecutor {
             ApprovalDecision::Approved => {
                 // Execute the current gated step
                 let step = &workflow.steps[state.current_step_index];
-                let ctx = TemplateContext::new(
-                    state.inputs.clone(),
-                    state.step_outputs.clone(),
-                );
+                let ctx = TemplateContext::new(state.inputs.clone(), state.step_outputs.clone());
 
-                let rendered_params = render_value(&serde_json::to_value(&step.params).unwrap(), &ctx)
-                    .map_err(|e| WorkflowError::StepFailed {
-                        step: step.id.clone(),
-                        message: e.to_string(),
-                    })?;
+                let rendered_params =
+                    render_value(&serde_json::to_value(&step.params).unwrap(), &ctx).map_err(
+                        |e| WorkflowError::StepFailed {
+                            step: step.id.clone(),
+                            message: e.to_string(),
+                        },
+                    )?;
 
                 let output = self
                     .tool_executor
@@ -228,10 +221,7 @@ impl WorkflowExecutor {
     ) -> Result<WorkflowState, WorkflowError> {
         while state.current_step_index < workflow.steps.len() {
             let step = &workflow.steps[state.current_step_index];
-            let ctx = TemplateContext::new(
-                state.inputs.clone(),
-                state.step_outputs.clone(),
-            );
+            let ctx = TemplateContext::new(state.inputs.clone(), state.step_outputs.clone());
 
             // Check condition
             if let Some(ref condition) = step.condition {
@@ -246,20 +236,12 @@ impl WorkflowExecutor {
             // Check gate
             if let Some(ref gate) = step.gate {
                 if gate.gate_type == GateType::ApprovalRequired {
-                    let message = step
-                        .gate_message
-                        .as_deref()
-                        .unwrap_or(&gate.message);
+                    let message = step.gate_message.as_deref().unwrap_or(&gate.message);
                     let preview = step.gate_preview.as_deref().or(gate.preview.as_deref());
 
                     let decision = self
                         .approval_handler
-                        .request_approval(
-                            &state.workflow_name,
-                            &step.id,
-                            message,
-                            preview,
-                        )
+                        .request_approval(&state.workflow_name, &step.id, message, preview)
                         .await;
 
                     match decision {
@@ -276,13 +258,13 @@ impl WorkflowExecutor {
             }
 
             // Render params
-            let params_value = serde_json::to_value(&step.params).unwrap_or(Value::Object(Default::default()));
-            let rendered_params = render_value(&params_value, &ctx).map_err(|e| {
-                WorkflowError::StepFailed {
+            let params_value =
+                serde_json::to_value(&step.params).unwrap_or(Value::Object(Default::default()));
+            let rendered_params =
+                render_value(&params_value, &ctx).map_err(|e| WorkflowError::StepFailed {
                     step: step.id.clone(),
                     message: e.to_string(),
-                }
-            })?;
+                })?;
 
             // Execute tool
             let result = self
@@ -296,64 +278,61 @@ impl WorkflowExecutor {
                     state.current_step_index += 1;
                     state.updated_at = chrono::Utc::now();
                 }
-                Err(err) => {
-                    match &step.on_error {
-                        Some(ErrorAction::Skip) => {
-                            state.step_outputs.insert(
-                                step.id.clone(),
-                                Value::String(format!("skipped: {}", err)),
+                Err(err) => match &step.on_error {
+                    Some(ErrorAction::Skip) => {
+                        state
+                            .step_outputs
+                            .insert(step.id.clone(), Value::String(format!("skipped: {}", err)));
+                        state.current_step_index += 1;
+                        state.updated_at = chrono::Utc::now();
+                    }
+                    Some(ErrorAction::Retry { max_retries }) => {
+                        let mut retries = 0;
+                        let mut last_err = err;
+                        while retries < *max_retries {
+                            retries += 1;
+                            let ctx2 = TemplateContext::new(
+                                state.inputs.clone(),
+                                state.step_outputs.clone(),
                             );
-                            state.current_step_index += 1;
-                            state.updated_at = chrono::Utc::now();
-                        }
-                        Some(ErrorAction::Retry { max_retries }) => {
-                            let mut retries = 0;
-                            let mut last_err = err;
-                            while retries < *max_retries {
-                                retries += 1;
-                                let ctx2 = TemplateContext::new(
-                                    state.inputs.clone(),
-                                    state.step_outputs.clone(),
-                                );
-                                let params_value2 = serde_json::to_value(&step.params)
-                                    .unwrap_or(Value::Object(Default::default()));
-                                let rendered2 = render_value(&params_value2, &ctx2)
-                                    .map_err(|e| WorkflowError::StepFailed {
-                                        step: step.id.clone(),
-                                        message: e.to_string(),
-                                    })?;
-                                match self.tool_executor.execute_tool(&step.tool, rendered2).await {
-                                    Ok(output) => {
-                                        state.step_outputs.insert(step.id.clone(), output);
-                                        state.current_step_index += 1;
-                                        state.updated_at = chrono::Utc::now();
-                                        last_err = String::new();
-                                        break;
-                                    }
-                                    Err(e) => {
-                                        last_err = e;
-                                    }
+                            let params_value2 = serde_json::to_value(&step.params)
+                                .unwrap_or(Value::Object(Default::default()));
+                            let rendered2 = render_value(&params_value2, &ctx2).map_err(|e| {
+                                WorkflowError::StepFailed {
+                                    step: step.id.clone(),
+                                    message: e.to_string(),
+                                }
+                            })?;
+                            match self.tool_executor.execute_tool(&step.tool, rendered2).await {
+                                Ok(output) => {
+                                    state.step_outputs.insert(step.id.clone(), output);
+                                    state.current_step_index += 1;
+                                    state.updated_at = chrono::Utc::now();
+                                    last_err = String::new();
+                                    break;
+                                }
+                                Err(e) => {
+                                    last_err = e;
                                 }
                             }
-                            if !last_err.is_empty() {
-                                state.status = WorkflowStatus::Failed;
-                                state.error = Some(format!(
-                                    "Step '{}' failed after {} retries: {}",
-                                    step.id, max_retries, last_err
-                                ));
-                                state.updated_at = chrono::Utc::now();
-                                return Ok(state);
-                            }
                         }
-                        Some(ErrorAction::Fail) | None => {
+                        if !last_err.is_empty() {
                             state.status = WorkflowStatus::Failed;
-                            state.error =
-                                Some(format!("Step '{}' failed: {}", step.id, err));
+                            state.error = Some(format!(
+                                "Step '{}' failed after {} retries: {}",
+                                step.id, max_retries, last_err
+                            ));
                             state.updated_at = chrono::Utc::now();
                             return Ok(state);
                         }
                     }
-                }
+                    Some(ErrorAction::Fail) | None => {
+                        state.status = WorkflowStatus::Failed;
+                        state.error = Some(format!("Step '{}' failed: {}", step.id, err));
+                        state.updated_at = chrono::Utc::now();
+                        return Ok(state);
+                    }
+                },
             }
         }
 
@@ -369,11 +348,9 @@ impl WorkflowExecutor {
         base_path: &PathBuf,
     ) -> Result<(), WorkflowError> {
         let file_path = base_path.join(format!("{}.json", state.run_id));
-        let json = serde_json::to_string_pretty(state).map_err(|e| {
-            WorkflowError::StepFailed {
-                step: "persistence".to_string(),
-                message: e.to_string(),
-            }
+        let json = serde_json::to_string_pretty(state).map_err(|e| WorkflowError::StepFailed {
+            step: "persistence".to_string(),
+            message: e.to_string(),
         })?;
         tokio::fs::create_dir_all(base_path)
             .await
@@ -432,11 +409,7 @@ mod tests {
 
     #[async_trait]
     impl ToolExecutor for MockToolExecutor {
-        async fn execute_tool(
-            &self,
-            _tool_name: &str,
-            _args: Value,
-        ) -> Result<Value, String> {
+        async fn execute_tool(&self, _tool_name: &str, _args: Value) -> Result<Value, String> {
             let mut responses = self.responses.lock().await;
             if responses.is_empty() {
                 Ok(Value::String("default_output".to_string()))
@@ -621,9 +594,7 @@ steps:
     #[tokio::test]
     async fn test_executor_step_failure_with_fail_action() {
         let executor = WorkflowExecutor::new(
-            Arc::new(MockToolExecutor::new(vec![Err(
-                "tool crashed".to_string(),
-            )])),
+            Arc::new(MockToolExecutor::new(vec![Err("tool crashed".to_string())])),
             Arc::new(AutoApproveHandler),
             None,
         );

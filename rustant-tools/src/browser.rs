@@ -743,7 +743,9 @@ impl Tool for BrowserJsEvalTool {
             .evaluate_js(script)
             .await
             .map_err(|e| browser_err("browser_js_eval", e))?;
-        Ok(ToolOutput::text(serde_json::to_string_pretty(&result).unwrap_or_default()))
+        Ok(ToolOutput::text(
+            serde_json::to_string_pretty(&result).unwrap_or_default(),
+        ))
     }
     fn risk_level(&self) -> RiskLevel {
         RiskLevel::Execute
@@ -792,10 +794,7 @@ impl Tool for BrowserWaitTool {
             .wait_for_selector(selector, timeout_ms)
             .await
             .map_err(|e| browser_err("browser_wait", e))?;
-        Ok(ToolOutput::text(format!(
-            "Element '{}' found",
-            selector
-        )))
+        Ok(ToolOutput::text(format!("Element '{}' found", selector)))
     }
     fn risk_level(&self) -> RiskLevel {
         RiskLevel::ReadOnly
@@ -846,7 +845,10 @@ impl Tool for BrowserFileUploadTool {
             .upload_file(selector, path)
             .await
             .map_err(|e| browser_err("browser_file_upload", e))?;
-        Ok(ToolOutput::text(format!("Uploaded '{}' to '{}'", path, selector)))
+        Ok(ToolOutput::text(format!(
+            "Uploaded '{}' to '{}'",
+            path, selector
+        )))
     }
     fn risk_level(&self) -> RiskLevel {
         RiskLevel::Network
@@ -890,7 +892,10 @@ impl Tool for BrowserDownloadTool {
             .click(selector)
             .await
             .map_err(|e| browser_err("browser_download", e))?;
-        Ok(ToolOutput::text(format!("Download triggered via '{}'", selector)))
+        Ok(ToolOutput::text(format!(
+            "Download triggered via '{}'",
+            selector
+        )))
     }
     fn risk_level(&self) -> RiskLevel {
         RiskLevel::Network
@@ -1078,11 +1083,9 @@ mod tests {
         // Base64 of PNG magic bytes
         assert!(!result.content.is_empty());
         // Should be valid base64
-        let decoded = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            &result.content,
-        )
-        .unwrap();
+        let decoded =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &result.content)
+                .unwrap();
         assert_eq!(decoded, vec![0x89, 0x50, 0x4E, 0x47]);
     }
 

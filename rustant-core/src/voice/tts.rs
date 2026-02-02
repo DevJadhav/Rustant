@@ -6,8 +6,8 @@
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::error::VoiceError;
 use super::types::{AudioChunk, SynthesisRequest, SynthesisResult};
+use crate::error::VoiceError;
 
 /// Trait for text-to-speech providers.
 #[async_trait]
@@ -36,10 +36,7 @@ impl MockTtsProvider {
     pub fn new() -> Self {
         Self {
             call_count: AtomicUsize::new(0),
-            voices: vec![
-                "mock-voice-1".to_string(),
-                "mock-voice-2".to_string(),
-            ],
+            voices: vec!["mock-voice-1".to_string(), "mock-voice-2".to_string()],
         }
     }
 
@@ -170,9 +167,12 @@ impl TtsProvider for OpenAiTtsProvider {
             });
         }
 
-        let bytes = response.bytes().await.map_err(|e| VoiceError::SynthesisFailed {
-            message: format!("Failed to read response: {}", e),
-        })?;
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|e| VoiceError::SynthesisFailed {
+                message: format!("Failed to read response: {}", e),
+            })?;
 
         // Decode the WAV response
         let audio = super::audio_io::audio_convert::decode_wav(&bytes)?;

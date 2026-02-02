@@ -142,10 +142,7 @@ pub async fn run_setup(workspace: &Path) -> anyhow::Result<()> {
     // Step 2: Auth method selection (OAuth or API key)
     let supports_oauth = rustant_core::oauth::provider_supports_oauth(&chosen_provider.name);
     let use_oauth = if supports_oauth {
-        let auth_options = vec![
-            "Login with browser (OAuth)",
-            "Enter API key manually",
-        ];
+        let auth_options = vec!["Login with browser (OAuth)", "Enter API key manually"];
         let auth_selection = Select::new()
             .with_prompt("Select authentication method")
             .items(&auth_options)
@@ -169,10 +166,16 @@ pub async fn run_setup(workspace: &Path) -> anyhow::Result<()> {
         auth_method = "oauth";
         let oauth_config = rustant_core::oauth::oauth_config_for_provider(&chosen_provider.name)
             .ok_or_else(|| {
-                anyhow::anyhow!("OAuth not available for provider '{}'", chosen_provider.name)
+                anyhow::anyhow!(
+                    "OAuth not available for provider '{}'",
+                    chosen_provider.name
+                )
             })?;
 
-        println!("\n  Opening browser for {} authentication...", chosen_provider.display_name);
+        println!(
+            "\n  Opening browser for {} authentication...",
+            chosen_provider.display_name
+        );
 
         let token = match rustant_core::oauth::authorize_browser_flow(&oauth_config, None).await {
             Ok(token) => token,
@@ -226,18 +229,14 @@ pub async fn run_setup(workspace: &Path) -> anyhow::Result<()> {
 
     // Step 4: Validate key by fetching models
     println!("\n  Validating credentials and fetching available models...");
-    let models = list_models(
-        &chosen_provider.name,
-        &api_key,
-        base_url.as_deref(),
-    )
-    .await
-    .map_err(|e| {
-        anyhow::anyhow!(
-            "Failed to validate credentials: {}. Please check and try again.",
-            e
-        )
-    })?;
+    let models = list_models(&chosen_provider.name, &api_key, base_url.as_deref())
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to validate credentials: {}. Please check and try again.",
+                e
+            )
+        })?;
 
     if models.is_empty() {
         anyhow::bail!("No models found. Please check your credentials and endpoint.");
@@ -274,10 +273,7 @@ pub async fn run_setup(workspace: &Path) -> anyhow::Result<()> {
     )?;
     println!(
         "  Configuration saved to {}",
-        workspace
-            .join(".rustant")
-            .join("config.toml")
-            .display()
+        workspace.join(".rustant").join("config.toml").display()
     );
     println!(
         "\n  Setup complete! Using {} with model {} ({}).\n",
@@ -409,10 +405,7 @@ mod tests {
         assert_eq!(config.llm.provider, "openai");
         assert_eq!(config.llm.model, "gpt-4o");
         assert_eq!(config.llm.context_window, 128_000);
-        assert_eq!(
-            config.llm.credential_store_key,
-            Some("openai".to_string())
-        );
+        assert_eq!(config.llm.credential_store_key, Some("openai".to_string()));
     }
 
     #[test]
@@ -475,10 +468,7 @@ mod tests {
             toml::from_str(&std::fs::read_to_string(config_path).unwrap()).unwrap();
         assert_eq!(config.llm.provider, "openai");
         assert_eq!(config.llm.model, "gpt-4o");
-        assert_eq!(
-            config.llm.credential_store_key,
-            Some("openai".to_string())
-        );
+        assert_eq!(config.llm.credential_store_key, Some("openai".to_string()));
         assert_eq!(config.llm.context_window, 128_000);
     }
 

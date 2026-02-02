@@ -578,11 +578,13 @@ impl MemoryFlusher {
 
     /// Perform a flush of the memory system to disk.
     pub fn flush(&mut self, memory: &MemorySystem) -> Result<(), MemoryError> {
-        let path = self.config.flush_path.as_ref().ok_or_else(|| {
-            MemoryError::PersistenceError {
-                message: "No flush path configured".to_string(),
-            }
-        })?;
+        let path =
+            self.config
+                .flush_path
+                .as_ref()
+                .ok_or_else(|| MemoryError::PersistenceError {
+                    message: "No flush path configured".to_string(),
+                })?;
 
         memory.save_session(path)?;
         self.mark_flushed();

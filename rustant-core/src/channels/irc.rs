@@ -3,7 +3,10 @@
 //! Connects to an IRC server using a persistent TCP connection.
 //! In tests, a trait abstraction provides mock implementations.
 
-use super::{Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser, MessageId, StreamingMode};
+use super::{
+    Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser,
+    MessageId, StreamingMode,
+};
 use crate::error::{ChannelError, RustantError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -190,7 +193,7 @@ impl RealIrcConnection {
 #[async_trait]
 impl IrcConnection for RealIrcConnection {
     async fn connect(&self) -> Result<(), String> {
-        use tokio::io::{AsyncWriteExt, AsyncBufReadExt};
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
         let addr = format!("{}:{}", self.server, self.port);
         let stream = tokio::net::TcpStream::connect(&addr)
@@ -253,9 +256,7 @@ impl IrcConnection for RealIrcConnection {
         use tokio::io::AsyncWriteExt;
 
         let mut guard = self.writer.lock().await;
-        let writer = guard
-            .as_mut()
-            .ok_or_else(|| "Not connected".to_string())?;
+        let writer = guard.as_mut().ok_or_else(|| "Not connected".to_string())?;
 
         let cmd = format!("PRIVMSG {} :{}\r\n", target, text);
         writer

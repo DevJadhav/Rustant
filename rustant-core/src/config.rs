@@ -13,15 +13,15 @@ use std::path::{Path, PathBuf};
 
 use crate::channels::discord::DiscordConfig;
 use crate::channels::email::EmailConfig;
+use crate::channels::imessage::IMessageConfig;
+use crate::channels::irc::IrcConfig;
 use crate::channels::matrix::MatrixConfig;
 use crate::channels::signal::SignalConfig;
 use crate::channels::slack::SlackConfig;
+use crate::channels::sms::SmsConfig;
+use crate::channels::teams::TeamsConfig;
 use crate::channels::telegram::TelegramConfig;
 use crate::channels::webchat::WebChatConfig;
-use crate::channels::imessage::IMessageConfig;
-use crate::channels::teams::TeamsConfig;
-use crate::channels::sms::SmsConfig;
-use crate::channels::irc::IrcConfig;
 use crate::channels::webhook::WebhookConfig;
 use crate::channels::whatsapp::WhatsAppConfig;
 use crate::gateway::GatewayConfig;
@@ -729,6 +729,7 @@ max_output_bytes = 1048576
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn test_agent_config_with_gateway() {
         let mut config = AgentConfig::default();
         config.gateway = Some(crate::gateway::GatewayConfig::default());
@@ -740,6 +741,7 @@ max_output_bytes = 1048576
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn test_agent_config_with_search() {
         let mut config = AgentConfig::default();
         config.search = Some(crate::search::SearchConfig::default());
@@ -751,6 +753,7 @@ max_output_bytes = 1048576
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn test_agent_config_with_flush() {
         let mut config = AgentConfig::default();
         config.flush = Some(crate::memory::FlushConfig::default());
@@ -780,6 +783,7 @@ max_output_bytes = 1048576
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn test_agent_config_with_multi_agent() {
         let mut config = AgentConfig::default();
         config.multi_agent = Some(MultiAgentConfig::default());
@@ -812,6 +816,7 @@ max_output_bytes = 1048576
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn test_multi_agent_config_with_resource_limits() {
         let mut config = MultiAgentConfig::default();
         config.default_resource_limits = crate::multi::ResourceLimits {
@@ -833,6 +838,7 @@ max_output_bytes = 1048576
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn test_multi_agent_config_with_workspace_base() {
         let mut config = MultiAgentConfig::default();
         config.default_workspace_base = Some("/tmp/rustant-workspaces".into());

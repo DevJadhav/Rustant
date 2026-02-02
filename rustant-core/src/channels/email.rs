@@ -3,7 +3,10 @@
 //! Uses trait abstractions for IMAP reading and SMTP sending.
 //! In tests, mock implementations avoid network calls.
 
-use super::{Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser, MessageId, StreamingMode};
+use super::{
+    Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser,
+    MessageId, StreamingMode,
+};
 use crate::error::{ChannelError, RustantError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -74,11 +77,7 @@ pub struct EmailChannel {
 }
 
 impl EmailChannel {
-    pub fn new(
-        config: EmailConfig,
-        smtp: Box<dyn SmtpSender>,
-        imap: Box<dyn ImapReader>,
-    ) -> Self {
+    pub fn new(config: EmailConfig, smtp: Box<dyn SmtpSender>, imap: Box<dyn ImapReader>) -> Self {
         Self {
             config,
             status: ChannelStatus::Disconnected,
@@ -207,7 +206,13 @@ pub struct RealSmtp {
 }
 
 impl RealSmtp {
-    pub fn new(host: String, port: u16, username: String, password: String, from_address: String) -> Self {
+    pub fn new(
+        host: String,
+        port: u16,
+        username: String,
+        password: String,
+        from_address: String,
+    ) -> Self {
         Self {
             host,
             port,
@@ -222,7 +227,11 @@ impl RealSmtp {
 impl SmtpSender for RealSmtp {
     async fn send_email(&self, to: &str, subject: &str, body: &str) -> Result<String, String> {
         let email = lettre::Message::builder()
-            .from(self.from_address.parse().map_err(|e| format!("Invalid from address: {e}"))?)
+            .from(
+                self.from_address
+                    .parse()
+                    .map_err(|e| format!("Invalid from address: {e}"))?,
+            )
             .to(to.parse().map_err(|e| format!("Invalid to address: {e}"))?)
             .subject(subject)
             .body(body.to_string())
@@ -233,14 +242,18 @@ impl SmtpSender for RealSmtp {
             self.password.clone(),
         );
 
-        let mailer = lettre::AsyncSmtpTransport::<lettre::Tokio1Executor>::starttls_relay(&self.host)
-            .map_err(|e| format!("SMTP relay error: {e}"))?
-            .port(self.port)
-            .credentials(creds)
-            .build();
+        let mailer =
+            lettre::AsyncSmtpTransport::<lettre::Tokio1Executor>::starttls_relay(&self.host)
+                .map_err(|e| format!("SMTP relay error: {e}"))?
+                .port(self.port)
+                .credentials(creds)
+                .build();
 
         use lettre::AsyncTransport;
-        let response = mailer.send(email).await.map_err(|e| format!("SMTP send error: {e}"))?;
+        let response = mailer
+            .send(email)
+            .await
+            .map_err(|e| format!("SMTP send error: {e}"))?;
 
         Ok(format!("{}", response.code()))
     }
@@ -272,8 +285,8 @@ impl ImapReader for RealImap {
             .await
             .map_err(|e| format!("TCP connect error: {e}"))?;
 
-        let native_tls_connector = native_tls::TlsConnector::new()
-            .map_err(|e| format!("TLS connector error: {e}"))?;
+        let native_tls_connector =
+            native_tls::TlsConnector::new().map_err(|e| format!("TLS connector error: {e}"))?;
         let tls_connector = tokio_native_tls::TlsConnector::from(native_tls_connector);
         let tls_stream = tls_connector
             .connect(&self.host, tcp)
@@ -329,11 +342,7 @@ impl ImapReader for RealImap {
                         .find(|l| l.starts_with("Subject:"))
                         .map(|l| l.trim_start_matches("Subject:").trim().to_string())
                         .unwrap_or_default();
-                    let body_text = raw
-                        .split("\r\n\r\n")
-                        .nth(1)
-                        .unwrap_or("")
-                        .to_string();
+                    let body_text = raw.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
 
                     emails.push(IncomingEmail {
                         message_id: format!("imap-{}", msg.message),
@@ -354,8 +363,8 @@ impl ImapReader for RealImap {
             .await
             .map_err(|e| format!("TCP connect error: {e}"))?;
 
-        let native_tls_connector = native_tls::TlsConnector::new()
-            .map_err(|e| format!("TLS connector error: {e}"))?;
+        let native_tls_connector =
+            native_tls::TlsConnector::new().map_err(|e| format!("TLS connector error: {e}"))?;
         let tls_connector = tokio_native_tls::TlsConnector::from(native_tls_connector);
         let tls_stream = tls_connector
             .connect(&self.host, tcp)
@@ -400,7 +409,12 @@ mod tests {
 
     #[async_trait]
     impl SmtpSender for MockSmtp {
-        async fn send_email(&self, _to: &str, _subject: &str, _body: &str) -> Result<String, String> {
+        async fn send_email(
+            &self,
+            _to: &str,
+            _subject: &str,
+            _body: &str,
+        ) -> Result<String, String> {
             Ok("email-id-1".to_string())
         }
     }
@@ -464,12 +478,19 @@ mod tests {
         let msgs = ch.receive_messages().await.unwrap();
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].content.as_text(), Some("hello email"));
-        assert_eq!(msgs[0].metadata.get("subject").map(|s| s.as_str()), Some("Test"));
+        assert_eq!(
+            msgs[0].metadata.get("subject").map(|s| s.as_str()),
+            Some("Test")
+        );
     }
 
     #[test]
     fn test_email_capabilities() {
-        let ch = EmailChannel::new(EmailConfig::default(), Box::new(MockSmtp), Box::new(MockImap));
+        let ch = EmailChannel::new(
+            EmailConfig::default(),
+            Box::new(MockSmtp),
+            Box::new(MockImap),
+        );
         let caps = ch.capabilities();
         assert!(!caps.supports_threads);
         assert!(caps.supports_files);
@@ -478,8 +499,15 @@ mod tests {
 
     #[test]
     fn test_email_streaming_mode() {
-        let ch = EmailChannel::new(EmailConfig::default(), Box::new(MockSmtp), Box::new(MockImap));
-        assert_eq!(ch.streaming_mode(), StreamingMode::Polling { interval_ms: 30000 });
+        let ch = EmailChannel::new(
+            EmailConfig::default(),
+            Box::new(MockSmtp),
+            Box::new(MockImap),
+        );
+        assert_eq!(
+            ch.streaming_mode(),
+            StreamingMode::Polling { interval_ms: 30000 }
+        );
     }
 
     #[tokio::test]

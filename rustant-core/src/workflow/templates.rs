@@ -14,10 +14,7 @@ pub struct TemplateContext {
 }
 
 impl TemplateContext {
-    pub fn new(
-        inputs: HashMap<String, Value>,
-        step_outputs: HashMap<String, Value>,
-    ) -> Self {
+    pub fn new(inputs: HashMap<String, Value>, step_outputs: HashMap<String, Value>) -> Self {
         Self {
             inputs,
             step_outputs,
@@ -33,9 +30,11 @@ pub fn render_string(template: &str, ctx: &TemplateContext) -> Result<String, Wo
     while let Some(start) = rest.find("{{") {
         result.push_str(&rest[..start]);
         let after_open = &rest[start + 2..];
-        let end = after_open.find("}}").ok_or_else(|| WorkflowError::TemplateError {
-            message: format!("Unclosed template expression in: {}", template),
-        })?;
+        let end = after_open
+            .find("}}")
+            .ok_or_else(|| WorkflowError::TemplateError {
+                message: format!("Unclosed template expression in: {}", template),
+            })?;
         let expr = after_open[..end].trim();
         let value = resolve_expression(expr, ctx)?;
         result.push_str(&value_to_string(&value));
@@ -106,9 +105,12 @@ fn resolve_expression(expr: &str, ctx: &TemplateContext) -> Result<Value, Workfl
             let key = parts.get(1).ok_or_else(|| WorkflowError::TemplateError {
                 message: format!("Invalid input reference: {}", expr),
             })?;
-            ctx.inputs.get(*key).cloned().ok_or_else(|| WorkflowError::TemplateError {
-                message: format!("Input '{}' not found", key),
-            })
+            ctx.inputs
+                .get(*key)
+                .cloned()
+                .ok_or_else(|| WorkflowError::TemplateError {
+                    message: format!("Input '{}' not found", key),
+                })
         }
         Some(&"steps") => {
             let step_id = parts.get(1).ok_or_else(|| WorkflowError::TemplateError {
@@ -164,10 +166,7 @@ pub fn extract_references(template: &str) -> Vec<(String, String)> {
 mod tests {
     use super::*;
 
-    fn make_ctx(
-        inputs: Vec<(&str, &str)>,
-        step_outputs: Vec<(&str, &str)>,
-    ) -> TemplateContext {
+    fn make_ctx(inputs: Vec<(&str, &str)>, step_outputs: Vec<(&str, &str)>) -> TemplateContext {
         let inputs_map: HashMap<String, Value> = inputs
             .into_iter()
             .map(|(k, v)| (k.to_string(), Value::String(v.to_string())))
@@ -189,8 +188,7 @@ mod tests {
     #[test]
     fn test_render_step_output_reference() {
         let ctx = make_ctx(vec![], vec![("read_file", "file contents here")]);
-        let result =
-            render_string("Content: {{ steps.read_file.output }}", &ctx).unwrap();
+        let result = render_string("Content: {{ steps.read_file.output }}", &ctx).unwrap();
         assert_eq!(result, "Content: file contents here");
     }
 
@@ -220,10 +218,7 @@ mod tests {
             }
         });
         let rendered = render_value(&value, &ctx).unwrap();
-        assert_eq!(
-            rendered["url"].as_str().unwrap(),
-            "https://example.com"
-        );
+        assert_eq!(rendered["url"].as_str().unwrap(), "https://example.com");
         assert_eq!(
             rendered["headers"]["host"].as_str().unwrap(),
             "https://example.com"
@@ -233,29 +228,25 @@ mod tests {
     #[test]
     fn test_evaluate_condition_true() {
         let ctx = make_ctx(vec![], vec![("check", "pass")]);
-        let result =
-            evaluate_condition("{{ steps.check.output }} == 'pass'", &ctx).unwrap();
+        let result = evaluate_condition("{{ steps.check.output }} == 'pass'", &ctx).unwrap();
         assert!(result);
     }
 
     #[test]
     fn test_evaluate_condition_false() {
         let ctx = make_ctx(vec![], vec![("check", "fail")]);
-        let result =
-            evaluate_condition("{{ steps.check.output }} == 'pass'", &ctx).unwrap();
+        let result = evaluate_condition("{{ steps.check.output }} == 'pass'", &ctx).unwrap();
         assert!(!result);
     }
 
     #[test]
     fn test_evaluate_condition_not_equals() {
         let ctx = make_ctx(vec![], vec![("check", "fail")]);
-        let result =
-            evaluate_condition("{{ steps.check.output }} != 'pass'", &ctx).unwrap();
+        let result = evaluate_condition("{{ steps.check.output }} != 'pass'", &ctx).unwrap();
         assert!(result);
 
         let ctx2 = make_ctx(vec![], vec![("check", "pass")]);
-        let result2 =
-            evaluate_condition("{{ steps.check.output }} != 'pass'", &ctx2).unwrap();
+        let result2 = evaluate_condition("{{ steps.check.output }} != 'pass'", &ctx2).unwrap();
         assert!(!result2);
     }
 }

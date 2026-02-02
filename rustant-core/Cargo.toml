@@ -57,9 +57,13 @@ hound = { workspace = true }
 cpal = { workspace = true, optional = true }
 whisper-rs = { workspace = true, optional = true }
 
+# Optional browser automation (only compiled with "browser" feature)
+chromiumoxide = { workspace = true, optional = true }
+
 [features]
 default = []
 voice = ["dep:cpal", "dep:whisper-rs"]
+browser = ["dep:chromiumoxide"]
 
 [dev-dependencies]
 tokio-test = "0.4"

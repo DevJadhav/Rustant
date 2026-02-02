@@ -137,12 +137,8 @@ pub trait SlackHttpClient: Send + Sync {
     async fn users_info(&self, user_id: &str) -> Result<SlackUserInfo, String>;
 
     // Reactions
-    async fn reactions_add(
-        &self,
-        channel: &str,
-        timestamp: &str,
-        name: &str,
-    ) -> Result<(), String>;
+    async fn reactions_add(&self, channel: &str, timestamp: &str, name: &str)
+        -> Result<(), String>;
     async fn reactions_get(
         &self,
         channel: &str,
@@ -150,8 +146,11 @@ pub trait SlackHttpClient: Send + Sync {
     ) -> Result<Vec<SlackReaction>, String>;
 
     // Files
-    async fn files_list(&self, channel: Option<&str>, limit: usize)
-        -> Result<Vec<SlackFile>, String>;
+    async fn files_list(
+        &self,
+        channel: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<SlackFile>, String>;
 
     // Team / Workspace
     async fn team_info(&self) -> Result<SlackTeamInfo, String>;
@@ -283,10 +282,7 @@ impl SlackChannel {
     }
 
     /// List files, optionally filtered by channel.
-    pub async fn list_files(
-        &self,
-        channel: Option<&str>,
-    ) -> Result<Vec<SlackFile>, RustantError> {
+    pub async fn list_files(&self, channel: Option<&str>) -> Result<Vec<SlackFile>, RustantError> {
         self.http_client
             .files_list(channel, 100)
             .await
@@ -401,10 +397,7 @@ impl Channel for SlackChannel {
     async fn send_message(&self, msg: ChannelMessage) -> Result<MessageId, RustantError> {
         let text = msg.content.as_text().unwrap_or("");
         let channel = if msg.channel_id.is_empty() {
-            self.config
-                .default_channel
-                .as_deref()
-                .unwrap_or("general")
+            self.config.default_channel.as_deref().unwrap_or("general")
         } else {
             &msg.channel_id
         };
@@ -590,8 +583,7 @@ impl SlackHttpClient for RealSlackHttp {
         thread_ts: &str,
         text: &str,
     ) -> Result<String, String> {
-        let body =
-            serde_json::json!({ "channel": channel, "thread_ts": thread_ts, "text": text });
+        let body = serde_json::json!({ "channel": channel, "thread_ts": thread_ts, "text": text });
         let json = self
             .slack_post("https://slack.com/api/chat.postMessage", &body)
             .await?;
@@ -650,10 +642,7 @@ impl SlackHttpClient for RealSlackHttp {
 
     async fn auth_test(&self) -> Result<String, String> {
         let json = self
-            .slack_post(
-                "https://slack.com/api/auth.test",
-                &serde_json::json!({}),
-            )
+            .slack_post("https://slack.com/api/auth.test", &serde_json::json!({}))
             .await?;
         json.get("user_id")
             .and_then(|u| u.as_str())
@@ -748,10 +737,7 @@ impl SlackHttpClient for RealSlackHttp {
                 .get("is_member")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
-            num_members: ch
-                .get("num_members")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0),
+            num_members: ch.get("num_members").and_then(|v| v.as_u64()).unwrap_or(0),
             topic: ch
                 .get("topic")
                 .and_then(|t| t.get("value"))
@@ -795,14 +781,8 @@ impl SlackHttpClient for RealSlackHttp {
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("")
                                 .to_string(),
-                            is_bot: u
-                                .get("is_bot")
-                                .and_then(|v| v.as_bool())
-                                .unwrap_or(false),
-                            is_admin: u
-                                .get("is_admin")
-                                .and_then(|v| v.as_bool())
-                                .unwrap_or(false),
+                            is_bot: u.get("is_bot").and_then(|v| v.as_bool()).unwrap_or(false),
+                            is_admin: u.get("is_admin").and_then(|v| v.as_bool()).unwrap_or(false),
                             email: profile
                                 .get("email")
                                 .and_then(|v| v.as_str())
@@ -854,14 +834,8 @@ impl SlackHttpClient for RealSlackHttp {
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string(),
-            is_bot: u
-                .get("is_bot")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
-            is_admin: u
-                .get("is_admin")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
+            is_bot: u.get("is_bot").and_then(|v| v.as_bool()).unwrap_or(false),
+            is_admin: u.get("is_admin").and_then(|v| v.as_bool()).unwrap_or(false),
             email: profile
                 .get("email")
                 .and_then(|v| v.as_str())
@@ -885,8 +859,7 @@ impl SlackHttpClient for RealSlackHttp {
         timestamp: &str,
         name: &str,
     ) -> Result<(), String> {
-        let body =
-            serde_json::json!({ "channel": channel, "timestamp": timestamp, "name": name });
+        let body = serde_json::json!({ "channel": channel, "timestamp": timestamp, "name": name });
         self.slack_post("https://slack.com/api/reactions.add", &body)
             .await?;
         Ok(())
@@ -972,10 +945,7 @@ impl SlackHttpClient for RealSlackHttp {
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("")
                                 .to_string(),
-                            timestamp: f
-                                .get("timestamp")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(0),
+                            timestamp: f.get("timestamp").and_then(|v| v.as_u64()).unwrap_or(0),
                         })
                     })
                     .collect()
@@ -986,9 +956,7 @@ impl SlackHttpClient for RealSlackHttp {
     }
 
     async fn team_info(&self) -> Result<SlackTeamInfo, String> {
-        let json = self
-            .slack_get("https://slack.com/api/team.info")
-            .await?;
+        let json = self.slack_get("https://slack.com/api/team.info").await?;
 
         let team = json.get("team").ok_or("Missing 'team' in response")?;
         Ok(SlackTeamInfo {
@@ -1043,10 +1011,7 @@ impl SlackHttpClient for RealSlackHttp {
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("")
                                 .to_string(),
-                            user_count: g
-                                .get("user_count")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(0),
+                            user_count: g.get("user_count").and_then(|v| v.as_u64()).unwrap_or(0),
                         })
                     })
                     .collect()

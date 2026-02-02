@@ -103,7 +103,8 @@ impl GeminiProvider {
         let max_tokens = request.max_tokens.unwrap_or(4096);
 
         // Extract system message(s) from the messages list.
-        let (system_text, non_system_messages) = Self::extract_system_instruction(&request.messages);
+        let (system_text, non_system_messages) =
+            Self::extract_system_instruction(&request.messages);
 
         // Convert messages to Gemini format.
         let contents: Vec<Value> = non_system_messages
@@ -128,8 +129,7 @@ impl GeminiProvider {
 
         // Add stop sequences if provided.
         if !request.stop_sequences.is_empty() {
-            body["generationConfig"]["stopSequences"] =
-                serde_json::json!(request.stop_sequences);
+            body["generationConfig"]["stopSequences"] = serde_json::json!(request.stop_sequences);
         }
 
         // Add tools if provided.
@@ -269,19 +269,13 @@ impl GeminiProvider {
 
         let parsed_content = Self::parse_parts(parts)?;
 
-        let finish_reason = candidate["finishReason"]
-            .as_str()
-            .map(|s| s.to_string());
+        let finish_reason = candidate["finishReason"].as_str().map(|s| s.to_string());
 
         // Extract usage metadata.
         let usage_metadata = &body["usageMetadata"];
         let usage = TokenUsage {
-            input_tokens: usage_metadata["promptTokenCount"]
-                .as_u64()
-                .unwrap_or(0) as usize,
-            output_tokens: usage_metadata["candidatesTokenCount"]
-                .as_u64()
-                .unwrap_or(0) as usize,
+            input_tokens: usage_metadata["promptTokenCount"].as_u64().unwrap_or(0) as usize,
+            output_tokens: usage_metadata["candidatesTokenCount"].as_u64().unwrap_or(0) as usize,
         };
 
         let model = body["modelVersion"]
@@ -367,7 +361,10 @@ impl GeminiProvider {
 
     /// Build a request with the appropriate auth header/params.
     fn build_authed_request(&self, url: &str) -> reqwest::RequestBuilder {
-        let builder = self.client.post(url).header("content-type", "application/json");
+        let builder = self
+            .client
+            .post(url)
+            .header("content-type", "application/json");
         match self.auth_mode {
             GeminiAuthMode::ApiKey => builder,
             GeminiAuthMode::Bearer => {
@@ -423,12 +420,9 @@ impl GeminiProvider {
         let usage_metadata = &data["usageMetadata"];
         if usage_metadata.is_object() {
             let usage = TokenUsage {
-                input_tokens: usage_metadata["promptTokenCount"]
-                    .as_u64()
-                    .unwrap_or(0) as usize,
-                output_tokens: usage_metadata["candidatesTokenCount"]
-                    .as_u64()
-                    .unwrap_or(0) as usize,
+                input_tokens: usage_metadata["promptTokenCount"].as_u64().unwrap_or(0) as usize,
+                output_tokens: usage_metadata["candidatesTokenCount"].as_u64().unwrap_or(0)
+                    as usize,
             };
             return Ok(Some(usage));
         }
@@ -654,8 +648,7 @@ mod tests {
     #[test]
     fn test_new_with_key() {
         let config = test_config("UNUSED_ENV_VAR");
-        let provider =
-            GeminiProvider::new_with_key(&config, "explicit-key".to_string()).unwrap();
+        let provider = GeminiProvider::new_with_key(&config, "explicit-key".to_string()).unwrap();
         assert_eq!(provider.api_key, "explicit-key");
     }
 
@@ -856,7 +849,9 @@ mod tests {
                     _ => panic!("Expected Text part"),
                 }
                 match &parts[1] {
-                    Content::ToolCall { name, arguments, .. } => {
+                    Content::ToolCall {
+                        name, arguments, ..
+                    } => {
                         assert_eq!(name, "file_read");
                         assert_eq!(arguments["path"], "/src/main.rs");
                     }
@@ -1179,7 +1174,9 @@ mod tests {
 
         let event = rx.recv().await.unwrap();
         match event {
-            StreamEvent::ToolCallDelta { arguments_delta, .. } => {
+            StreamEvent::ToolCallDelta {
+                arguments_delta, ..
+            } => {
                 assert!(arguments_delta.contains("main.rs"));
             }
             _ => panic!("Expected ToolCallDelta event"),
@@ -1207,7 +1204,9 @@ mod tests {
             }
         });
 
-        let result = GeminiProvider::process_stream_chunk(&data, &tx).await.unwrap();
+        let result = GeminiProvider::process_stream_chunk(&data, &tx)
+            .await
+            .unwrap();
         assert!(result.is_some());
         let usage = result.unwrap();
         assert_eq!(usage.input_tokens, 100);

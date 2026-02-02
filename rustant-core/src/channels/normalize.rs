@@ -14,8 +14,8 @@ impl MessageNormalizer {
         user_name: &str,
         text: &str,
     ) -> ChannelMessage {
-        let sender = ChannelUser::new(user_id.to_string(), ChannelType::Telegram)
-            .with_name(user_name);
+        let sender =
+            ChannelUser::new(user_id.to_string(), ChannelType::Telegram).with_name(user_name);
         let content = if text.starts_with('/') {
             let parts: Vec<&str> = text.splitn(2, ' ').collect();
             let cmd = parts[0].to_string();
@@ -48,8 +48,7 @@ impl MessageNormalizer {
         author_name: &str,
         content: &str,
     ) -> ChannelMessage {
-        let sender = ChannelUser::new(author_id, ChannelType::Discord)
-            .with_name(author_name);
+        let sender = ChannelUser::new(author_id, ChannelType::Discord).with_name(author_name);
         ChannelMessage::text(ChannelType::Discord, channel_id, sender, content)
     }
 
@@ -69,21 +68,14 @@ impl MessageNormalizer {
     }
 
     /// Normalize a raw email into a ChannelMessage.
-    pub fn normalize_email(
-        from: &str,
-        subject: &str,
-        body: &str,
-    ) -> ChannelMessage {
+    pub fn normalize_email(from: &str, subject: &str, body: &str) -> ChannelMessage {
         let sender = ChannelUser::new(from, ChannelType::Email);
         ChannelMessage::text(ChannelType::Email, from, sender, body)
             .with_metadata("subject", subject)
     }
 
     /// Normalize an iMessage incoming message.
-    pub fn normalize_imessage(
-        sender_id: &str,
-        text: &str,
-    ) -> ChannelMessage {
+    pub fn normalize_imessage(sender_id: &str, text: &str) -> ChannelMessage {
         let sender = ChannelUser::new(sender_id, ChannelType::IMessage);
         ChannelMessage::text(ChannelType::IMessage, sender_id, sender, text)
     }
@@ -100,29 +92,19 @@ impl MessageNormalizer {
     }
 
     /// Normalize an SMS message.
-    pub fn normalize_sms(
-        from_number: &str,
-        body: &str,
-    ) -> ChannelMessage {
+    pub fn normalize_sms(from_number: &str, body: &str) -> ChannelMessage {
         let sender = ChannelUser::new(from_number, ChannelType::Sms);
         ChannelMessage::text(ChannelType::Sms, from_number, sender, body)
     }
 
     /// Normalize an IRC PRIVMSG.
-    pub fn normalize_irc(
-        nick: &str,
-        channel: &str,
-        text: &str,
-    ) -> ChannelMessage {
+    pub fn normalize_irc(nick: &str, channel: &str, text: &str) -> ChannelMessage {
         let sender = ChannelUser::new(nick, ChannelType::Irc);
         ChannelMessage::text(ChannelType::Irc, channel, sender, text)
     }
 
     /// Normalize a webhook payload.
-    pub fn normalize_webhook(
-        source: &str,
-        body: &str,
-    ) -> ChannelMessage {
+    pub fn normalize_webhook(source: &str, body: &str) -> ChannelMessage {
         let sender = ChannelUser::new(source, ChannelType::Webhook);
         ChannelMessage::text(ChannelType::Webhook, source, sender, body)
     }
@@ -268,10 +250,14 @@ mod tests {
 
     #[test]
     fn test_normalize_slack_with_thread() {
-        let msg = MessageNormalizer::normalize_slack("general", "U123", "hi slack", Some("1234.5678"));
+        let msg =
+            MessageNormalizer::normalize_slack("general", "U123", "hi slack", Some("1234.5678"));
         assert_eq!(msg.channel_type, ChannelType::Slack);
         assert_eq!(msg.content.as_text(), Some("hi slack"));
-        assert_eq!(msg.metadata.get("thread_ts").map(|s| s.as_str()), Some("1234.5678"));
+        assert_eq!(
+            msg.metadata.get("thread_ts").map(|s| s.as_str()),
+            Some("1234.5678")
+        );
     }
 
     #[test]
@@ -279,7 +265,10 @@ mod tests {
         let msg = MessageNormalizer::normalize_email("alice@ex.com", "Subject Line", "body text");
         assert_eq!(msg.channel_type, ChannelType::Email);
         assert_eq!(msg.content.as_text(), Some("body text"));
-        assert_eq!(msg.metadata.get("subject").map(|s| s.as_str()), Some("Subject Line"));
+        assert_eq!(
+            msg.metadata.get("subject").map(|s| s.as_str()),
+            Some("Subject Line")
+        );
     }
 
     #[test]
@@ -382,11 +371,7 @@ mod tests {
         );
         assert_eq!(msg.channel_type, ChannelType::Telegram);
         match &msg.content {
-            MessageContent::Contact {
-                name,
-                phone,
-                email,
-            } => {
+            MessageContent::Contact { name, phone, email } => {
                 assert_eq!(name, "Jane Doe");
                 assert_eq!(phone.as_deref(), Some("+1234567890"));
                 assert_eq!(email.as_deref(), Some("jane@example.com"));

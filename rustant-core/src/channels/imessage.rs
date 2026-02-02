@@ -3,7 +3,10 @@
 //! Uses `osascript` to send messages via Messages.app and reads from the
 //! Messages SQLite database. macOS-only.
 
-use super::{Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, MessageId, StreamingMode};
+use super::{
+    Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, MessageId,
+    StreamingMode,
+};
 use crate::error::{ChannelError, RustantError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -255,7 +258,10 @@ impl IMessageBridge for RealIMessageBridge {
 
     async fn is_available(&self) -> Result<bool, String> {
         let output = tokio::process::Command::new("osascript")
-            .args(["-e", "tell application \"System Events\" to (name of processes) contains \"Messages\""])
+            .args([
+                "-e",
+                "tell application \"System Events\" to (name of processes) contains \"Messages\"",
+            ])
             .output()
             .await
             .map_err(|e| format!("Failed to check Messages.app: {e}"))?;
@@ -300,14 +306,20 @@ mod tests {
 
     #[test]
     fn test_imessage_channel_creation() {
-        let ch = IMessageChannel::new(IMessageConfig::default(), Box::new(MockIMessageBridge::new(true)));
+        let ch = IMessageChannel::new(
+            IMessageConfig::default(),
+            Box::new(MockIMessageBridge::new(true)),
+        );
         assert_eq!(ch.name(), "imessage");
         assert_eq!(ch.channel_type(), ChannelType::IMessage);
     }
 
     #[test]
     fn test_imessage_capabilities() {
-        let ch = IMessageChannel::new(IMessageConfig::default(), Box::new(MockIMessageBridge::new(true)));
+        let ch = IMessageChannel::new(
+            IMessageConfig::default(),
+            Box::new(MockIMessageBridge::new(true)),
+        );
         let caps = ch.capabilities();
         assert!(caps.supports_reactions);
         assert!(caps.supports_files);
@@ -316,20 +328,32 @@ mod tests {
 
     #[test]
     fn test_imessage_streaming_mode() {
-        let ch = IMessageChannel::new(IMessageConfig::default(), Box::new(MockIMessageBridge::new(true)));
-        assert_eq!(ch.streaming_mode(), StreamingMode::Polling { interval_ms: 5000 });
+        let ch = IMessageChannel::new(
+            IMessageConfig::default(),
+            Box::new(MockIMessageBridge::new(true)),
+        );
+        assert_eq!(
+            ch.streaming_mode(),
+            StreamingMode::Polling { interval_ms: 5000 }
+        );
     }
 
     #[test]
     fn test_imessage_status_disconnected() {
-        let ch = IMessageChannel::new(IMessageConfig::default(), Box::new(MockIMessageBridge::new(true)));
+        let ch = IMessageChannel::new(
+            IMessageConfig::default(),
+            Box::new(MockIMessageBridge::new(true)),
+        );
         assert_eq!(ch.status(), ChannelStatus::Disconnected);
         assert!(!ch.is_connected());
     }
 
     #[tokio::test]
     async fn test_imessage_send_without_connect() {
-        let ch = IMessageChannel::new(IMessageConfig::default(), Box::new(MockIMessageBridge::new(true)));
+        let ch = IMessageChannel::new(
+            IMessageConfig::default(),
+            Box::new(MockIMessageBridge::new(true)),
+        );
         let sender = super::super::ChannelUser::new("me", ChannelType::IMessage);
         let msg = ChannelMessage::text(ChannelType::IMessage, "+1234", sender, "hi");
         let result = ch.send_message(msg).await;

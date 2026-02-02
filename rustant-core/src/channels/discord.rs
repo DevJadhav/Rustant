@@ -4,7 +4,10 @@
 //! the REST API for sending messages. In tests, a trait abstraction
 //! provides mock implementations.
 
-use super::{Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser, MessageId, StreamingMode};
+use super::{
+    Channel, ChannelCapabilities, ChannelMessage, ChannelStatus, ChannelType, ChannelUser,
+    MessageId, StreamingMode,
+};
 use crate::error::{ChannelError, RustantError};
 use crate::oauth::AuthMethod;
 use async_trait::async_trait;
@@ -27,7 +30,11 @@ pub struct DiscordConfig {
 #[async_trait]
 pub trait DiscordHttpClient: Send + Sync {
     async fn send_message(&self, channel_id: &str, text: &str) -> Result<String, String>;
-    async fn get_messages(&self, channel_id: &str, limit: usize) -> Result<Vec<DiscordMessage>, String>;
+    async fn get_messages(
+        &self,
+        channel_id: &str,
+        limit: usize,
+    ) -> Result<Vec<DiscordMessage>, String>;
     async fn connect_gateway(&self) -> Result<(), String>;
     async fn disconnect_gateway(&self) -> Result<(), String>;
 }
@@ -82,15 +89,12 @@ impl Channel for DiscordChannel {
                 name: self.name.clone(),
             }));
         }
-        self.http_client
-            .connect_gateway()
-            .await
-            .map_err(|e| {
-                RustantError::Channel(ChannelError::ConnectionFailed {
-                    name: self.name.clone(),
-                    message: e,
-                })
-            })?;
+        self.http_client.connect_gateway().await.map_err(|e| {
+            RustantError::Channel(ChannelError::ConnectionFailed {
+                name: self.name.clone(),
+                message: e,
+            })
+        })?;
         self.status = ChannelStatus::Connected;
         Ok(())
     }
@@ -138,12 +142,8 @@ impl Channel for DiscordChannel {
             for dm in discord_msgs {
                 let sender = ChannelUser::new(&dm.author_id, ChannelType::Discord)
                     .with_name(&dm.author_name);
-                let msg = ChannelMessage::text(
-                    ChannelType::Discord,
-                    &dm.channel_id,
-                    sender,
-                    &dm.content,
-                );
+                let msg =
+                    ChannelMessage::text(ChannelType::Discord, &dm.channel_id, sender, &dm.content);
                 all_messages.push(msg);
             }
         }
@@ -213,7 +213,10 @@ impl DiscordHttpClient for RealDiscordHttp {
             .map_err(|e| format!("HTTP error: {e}"))?;
 
         let status = resp.status();
-        let body: serde_json::Value = resp.json().await.map_err(|e| format!("JSON parse error: {e}"))?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("JSON parse error: {e}"))?;
 
         if !status.is_success() {
             let msg = body["message"].as_str().unwrap_or("unknown error");
@@ -224,7 +227,11 @@ impl DiscordHttpClient for RealDiscordHttp {
         Ok(id)
     }
 
-    async fn get_messages(&self, channel_id: &str, limit: usize) -> Result<Vec<DiscordMessage>, String> {
+    async fn get_messages(
+        &self,
+        channel_id: &str,
+        limit: usize,
+    ) -> Result<Vec<DiscordMessage>, String> {
         let url = format!(
             "https://discord.com/api/v10/channels/{}/messages?limit={}",
             channel_id, limit
@@ -238,7 +245,10 @@ impl DiscordHttpClient for RealDiscordHttp {
             .map_err(|e| format!("HTTP error: {e}"))?;
 
         let status = resp.status();
-        let body: serde_json::Value = resp.json().await.map_err(|e| format!("JSON parse error: {e}"))?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("JSON parse error: {e}"))?;
 
         if !status.is_success() {
             let msg = body["message"].as_str().unwrap_or("unknown error");
@@ -315,7 +325,11 @@ mod tests {
             Ok("disc-msg-1".to_string())
         }
 
-        async fn get_messages(&self, _channel_id: &str, _limit: usize) -> Result<Vec<DiscordMessage>, String> {
+        async fn get_messages(
+            &self,
+            _channel_id: &str,
+            _limit: usize,
+        ) -> Result<Vec<DiscordMessage>, String> {
             Ok(self.messages.clone())
         }
 
@@ -330,7 +344,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_discord_connect_no_token() {
-        let mut ch = DiscordChannel::new(DiscordConfig::default(), Box::new(MockDiscordHttp::new()));
+        let mut ch =
+            DiscordChannel::new(DiscordConfig::default(), Box::new(MockDiscordHttp::new()));
         assert!(ch.connect().await.is_err());
     }
 

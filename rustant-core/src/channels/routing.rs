@@ -65,7 +65,9 @@ impl ChannelRouter {
     }
 
     fn matches_rule(&self, rule: &RoutingRule, msg: &ChannelMessage) -> bool {
-        rule.conditions.iter().all(|cond| self.matches_condition(cond, msg))
+        rule.conditions
+            .iter()
+            .all(|cond| self.matches_condition(cond, msg))
     }
 
     fn matches_condition(&self, cond: &RoutingCondition, msg: &ChannelMessage) -> bool {

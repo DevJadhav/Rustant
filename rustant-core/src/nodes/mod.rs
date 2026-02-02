@@ -4,23 +4,26 @@
 //! Each node implements the `Node` trait, providing capabilities
 //! like shell execution, AppleScript, screenshots, etc.
 
-pub mod types;
-pub mod manager;
-pub mod macos;
-pub mod linux;
-pub mod discovery;
 pub mod consent;
+pub mod discovery;
+pub mod linux;
+pub mod macos;
+pub mod manager;
+pub mod types;
 
 pub use consent::{ConsentEntry, ConsentStore};
 pub use discovery::{
-    DiscoveredNode, MdnsConfig, MdnsDiscovery, MdnsServiceRecord, MdnsTransport,
-    NodeDiscovery, UdpMdnsTransport, MDNS_MULTICAST_ADDR, MDNS_PORT, RUSTANT_SERVICE_NAME,
+    DiscoveredNode, MdnsConfig, MdnsDiscovery, MdnsServiceRecord, MdnsTransport, NodeDiscovery,
+    UdpMdnsTransport, MDNS_MULTICAST_ADDR, MDNS_PORT, RUSTANT_SERVICE_NAME,
 };
 pub use manager::NodeManager;
-pub use types::{Capability, NodeCapability, NodeHealth, NodeId, NodeInfo, NodeMessage, NodeResult, NodeTask, Platform, RateLimit};
+pub use types::{
+    Capability, NodeCapability, NodeHealth, NodeId, NodeInfo, NodeMessage, NodeResult, NodeTask,
+    Platform, RateLimit,
+};
 
-use async_trait::async_trait;
 use crate::error::RustantError;
+use async_trait::async_trait;
 
 /// Core trait for node implementations.
 #[async_trait]
@@ -69,7 +72,6 @@ pub trait Node: Send + Sync {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use uuid::Uuid;
 
     struct DefaultTestNode {
         id: NodeId,
@@ -155,7 +157,10 @@ mod tests {
     #[tokio::test]
     async fn test_node_default_handle_capability_query() {
         let node = DefaultTestNode::new();
-        let response = node.handle_message(NodeMessage::CapabilityQuery).await.unwrap();
+        let response = node
+            .handle_message(NodeMessage::CapabilityQuery)
+            .await
+            .unwrap();
         match response {
             Some(NodeMessage::CapabilityResponse { capabilities }) => {
                 assert_eq!(capabilities.len(), 2);

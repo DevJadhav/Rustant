@@ -1,6 +1,10 @@
 //! Node manager — registers, finds capable nodes, and executes tasks.
 
-use super::{Node, consent::ConsentStore, types::{Capability, NodeCapability, NodeHealth, NodeId, NodeMessage, NodeResult, NodeTask}};
+use super::{
+    consent::ConsentStore,
+    types::{Capability, NodeCapability, NodeHealth, NodeId, NodeMessage, NodeResult, NodeTask},
+    Node,
+};
 use crate::error::{NodeError, RustantError};
 use std::collections::HashMap;
 
@@ -50,8 +54,7 @@ impl NodeManager {
         self.nodes
             .iter()
             .filter(|(_, node)| {
-                node.capabilities().contains(capability)
-                    && node.health() == NodeHealth::Healthy
+                node.capabilities().contains(capability) && node.health() == NodeHealth::Healthy
             })
             .map(|(id, _)| id)
             .collect()
@@ -103,10 +106,7 @@ impl NodeManager {
     }
 
     /// Broadcast a message to all registered nodes. Returns responses from each node.
-    pub async fn broadcast_message(
-        &self,
-        msg: &NodeMessage,
-    ) -> Vec<(NodeId, Option<NodeMessage>)> {
+    pub async fn broadcast_message(&self, msg: &NodeMessage) -> Vec<(NodeId, Option<NodeMessage>)> {
         let mut results = Vec::new();
         for (id, node) in &self.nodes {
             let response = node.handle_message(msg.clone()).await.unwrap_or(None);
@@ -132,8 +132,8 @@ impl Default for NodeManager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::{NodeInfo, Platform};
+    use super::*;
     use async_trait::async_trait;
     use chrono::Utc;
     struct MockNode {
@@ -166,9 +166,15 @@ mod tests {
 
     #[async_trait]
     impl Node for MockNode {
-        fn node_id(&self) -> &NodeId { &self.id }
-        fn info(&self) -> &NodeInfo { &self.info }
-        fn capabilities(&self) -> &[Capability] { &self.capabilities }
+        fn node_id(&self) -> &NodeId {
+            &self.id
+        }
+        fn info(&self) -> &NodeInfo {
+            &self.info
+        }
+        fn capabilities(&self) -> &[Capability] {
+            &self.capabilities
+        }
         async fn execute(&self, task: NodeTask) -> Result<NodeResult, RustantError> {
             Ok(NodeResult {
                 task_id: task.task_id,
@@ -178,8 +184,12 @@ mod tests {
                 duration_ms: 1,
             })
         }
-        fn health(&self) -> NodeHealth { self.health }
-        async fn heartbeat(&self) -> Result<NodeHealth, RustantError> { Ok(self.health) }
+        fn health(&self) -> NodeHealth {
+            self.health
+        }
+        async fn heartbeat(&self) -> Result<NodeHealth, RustantError> {
+            Ok(self.health)
+        }
     }
 
     #[test]
@@ -207,7 +217,10 @@ mod tests {
     #[test]
     fn test_manager_find_capable() {
         let mut mgr = NodeManager::new();
-        mgr.register_node(Box::new(MockNode::new("n1", vec![Capability::Shell, Capability::FileSystem])));
+        mgr.register_node(Box::new(MockNode::new(
+            "n1",
+            vec![Capability::Shell, Capability::FileSystem],
+        )));
         mgr.register_node(Box::new(MockNode::new("n2", vec![Capability::Shell])));
         mgr.register_node(Box::new(MockNode::new("n3", vec![Capability::Screenshot])));
 
@@ -256,7 +269,7 @@ mod tests {
     fn test_manager_find_with_consent() {
         let mut mgr = NodeManager::new();
         let n1 = NodeId::new("n1");
-        let n2 = NodeId::new("n2");
+        let _n2 = NodeId::new("n2");
         mgr.register_node(Box::new(MockNode::new("n1", vec![Capability::Shell])));
         mgr.register_node(Box::new(MockNode::new("n2", vec![Capability::Shell])));
 
@@ -298,7 +311,10 @@ mod tests {
     #[test]
     fn test_manager_capabilities_map() {
         let mut mgr = NodeManager::new();
-        mgr.register_node(Box::new(MockNode::new("n1", vec![Capability::Shell, Capability::FileSystem])));
+        mgr.register_node(Box::new(MockNode::new(
+            "n1",
+            vec![Capability::Shell, Capability::FileSystem],
+        )));
         mgr.register_node(Box::new(MockNode::new("n2", vec![Capability::Screenshot])));
 
         let map = mgr.node_capabilities_map();

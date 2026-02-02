@@ -135,19 +135,41 @@ pub enum MessageContent {
     /// Plain text content.
     Text { text: String },
     /// An image (URL or base64).
-    Image { url: String, alt_text: Option<String> },
+    Image {
+        url: String,
+        alt_text: Option<String>,
+    },
     /// A file attachment.
-    File { url: String, filename: String, size_bytes: Option<u64> },
+    File {
+        url: String,
+        filename: String,
+        size_bytes: Option<u64>,
+    },
     /// A command (e.g., `/start`, `/help`).
     Command { command: String, args: Vec<String> },
     /// Generic media (audio, video, etc.).
-    Media { url: String, mime_type: String, caption: Option<String> },
+    Media {
+        url: String,
+        mime_type: String,
+        caption: Option<String>,
+    },
     /// A geographic location.
-    Location { latitude: f64, longitude: f64, label: Option<String> },
+    Location {
+        latitude: f64,
+        longitude: f64,
+        label: Option<String>,
+    },
     /// A contact card.
-    Contact { name: String, phone: Option<String>, email: Option<String> },
+    Contact {
+        name: String,
+        phone: Option<String>,
+        email: Option<String>,
+    },
     /// A reaction to another message.
-    Reaction { emoji: String, target_message_id: MessageId },
+    Reaction {
+        emoji: String,
+        target_message_id: MessageId,
+    },
 }
 
 impl MessageContent {
@@ -263,8 +285,7 @@ mod tests {
 
     #[test]
     fn test_channel_user() {
-        let user = ChannelUser::new("user123", ChannelType::Telegram)
-            .with_name("Alice");
+        let user = ChannelUser::new("user123", ChannelType::Telegram).with_name("Alice");
         assert_eq!(user.id, "user123");
         assert_eq!(user.display_name.as_deref(), Some("Alice"));
         assert_eq!(user.channel_type, ChannelType::Telegram);
@@ -291,7 +312,10 @@ mod tests {
         assert_eq!(msg.channel_type, ChannelType::Slack);
         assert_eq!(msg.channel_id, "general");
         assert_eq!(msg.content.as_text(), Some("hello"));
-        assert_eq!(msg.metadata.get("thread_ts").map(|s| s.as_str()), Some("123456.789"));
+        assert_eq!(
+            msg.metadata.get("thread_ts").map(|s| s.as_str()),
+            Some("123456.789")
+        );
         assert!(msg.reply_to.is_none());
     }
 
@@ -376,7 +400,10 @@ mod tests {
         let lp = StreamingMode::LongPolling;
         assert_eq!(lp, StreamingMode::LongPolling);
 
-        assert_eq!(StreamingMode::default(), StreamingMode::Polling { interval_ms: 5000 });
+        assert_eq!(
+            StreamingMode::default(),
+            StreamingMode::Polling { interval_ms: 5000 }
+        );
     }
 
     #[test]
@@ -404,7 +431,12 @@ mod tests {
             mime_type: "audio/mpeg".into(),
             caption: Some("My song".into()),
         };
-        if let MessageContent::Media { url, mime_type, caption } = &content {
+        if let MessageContent::Media {
+            url,
+            mime_type,
+            caption,
+        } = &content
+        {
             assert_eq!(url, "https://example.com/audio.mp3");
             assert_eq!(mime_type, "audio/mpeg");
             assert_eq!(caption.as_deref(), Some("My song"));
@@ -420,7 +452,12 @@ mod tests {
             longitude: -122.4194,
             label: Some("San Francisco".into()),
         };
-        if let MessageContent::Location { latitude, longitude, label } = &content {
+        if let MessageContent::Location {
+            latitude,
+            longitude,
+            label,
+        } = &content
+        {
             assert!((latitude - 37.7749).abs() < f64::EPSILON);
             assert!((longitude - (-122.4194)).abs() < f64::EPSILON);
             assert_eq!(label.as_deref(), Some("San Francisco"));
@@ -448,7 +485,11 @@ mod tests {
             emoji: "👍".into(),
             target_message_id: MessageId::new("msg-42"),
         };
-        if let MessageContent::Reaction { emoji, target_message_id } = &reaction {
+        if let MessageContent::Reaction {
+            emoji,
+            target_message_id,
+        } = &reaction
+        {
             assert_eq!(emoji, "👍");
             assert_eq!(target_message_id, &MessageId::new("msg-42"));
         } else {

@@ -3,8 +3,8 @@
 //! The `CdpClient` trait abstracts all browser interactions, enabling
 //! mock-based testing without a real Chrome instance.
 
-use async_trait::async_trait;
 use crate::error::BrowserError;
+use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -67,11 +67,7 @@ pub trait CdpClient: Send + Sync {
     async fn evaluate_js(&self, script: &str) -> Result<Value, BrowserError>;
 
     /// Wait for an element matching the selector to appear.
-    async fn wait_for_selector(
-        &self,
-        selector: &str,
-        timeout_ms: u64,
-    ) -> Result<(), BrowserError>;
+    async fn wait_for_selector(&self, selector: &str, timeout_ms: u64) -> Result<(), BrowserError>;
 
     /// Get the accessibility / ARIA tree as a string.
     async fn get_aria_tree(&self) -> Result<String, BrowserError>;
@@ -189,7 +185,10 @@ impl MockCdpClient {
     }
 
     fn log_call(&self, method: &str, args: Vec<String>) {
-        self.call_log.lock().unwrap().push((method.to_string(), args));
+        self.call_log
+            .lock()
+            .unwrap()
+            .push((method.to_string(), args));
     }
 
     /// Get the number of calls to a given method.
@@ -309,11 +308,7 @@ impl CdpClient for MockCdpClient {
         }
     }
 
-    async fn wait_for_selector(
-        &self,
-        selector: &str,
-        timeout_ms: u64,
-    ) -> Result<(), BrowserError> {
+    async fn wait_for_selector(&self, selector: &str, timeout_ms: u64) -> Result<(), BrowserError> {
         self.log_call(
             "wait_for_selector",
             vec![selector.to_string(), timeout_ms.to_string()],
@@ -349,10 +344,7 @@ mod tests {
     async fn test_mock_navigate() {
         let client = MockCdpClient::new();
         client.navigate("https://example.com").await.unwrap();
-        assert_eq!(
-            *client.current_url.lock().unwrap(),
-            "https://example.com"
-        );
+        assert_eq!(*client.current_url.lock().unwrap(), "https://example.com");
         assert_eq!(client.call_count("navigate"), 1);
     }
 
@@ -512,10 +504,7 @@ mod tests {
     #[tokio::test]
     async fn test_mock_select_option() {
         let client = MockCdpClient::new();
-        client
-            .select_option("#country", "US")
-            .await
-            .unwrap();
+        client.select_option("#country", "US").await.unwrap();
         assert_eq!(client.call_count("select_option"), 1);
     }
 

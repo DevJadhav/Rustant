@@ -147,11 +147,7 @@ impl JobManager {
     }
 
     /// Fail a job with an error.
-    pub fn fail_job(
-        &mut self,
-        id: &Uuid,
-        error: impl Into<String>,
-    ) -> Result<(), SchedulerError> {
+    pub fn fail_job(&mut self, id: &Uuid, error: impl Into<String>) -> Result<(), SchedulerError> {
         let job = self
             .jobs
             .get_mut(id)

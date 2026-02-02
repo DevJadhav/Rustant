@@ -76,11 +76,7 @@ impl ConsentStore {
     }
 
     /// Grant a one-time consent that can only be used once.
-    pub fn grant_one_time(
-        &mut self,
-        node_id: &NodeId,
-        capability: Capability,
-    ) -> ConsentEntry {
+    pub fn grant_one_time(&mut self, node_id: &NodeId, capability: Capability) -> ConsentEntry {
         let entry = ConsentEntry {
             capability,
             granted_at: Utc::now(),
@@ -108,13 +104,11 @@ impl ConsentStore {
     /// Check whether a capability is consented for a node.
     /// Returns true if any valid entry exists for this capability.
     pub fn is_granted(&self, node_id: &NodeId, capability: &Capability) -> bool {
-        self.entries
-            .get(node_id)
-            .is_some_and(|entries| {
-                entries
-                    .iter()
-                    .any(|e| &e.capability == capability && e.is_valid())
-            })
+        self.entries.get(node_id).is_some_and(|entries| {
+            entries
+                .iter()
+                .any(|e| &e.capability == capability && e.is_valid())
+        })
     }
 
     /// Consume a one-time consent. Returns true if successfully consumed,
@@ -122,7 +116,11 @@ impl ConsentStore {
     pub fn consume_one_time(&mut self, node_id: &NodeId, capability: &Capability) -> bool {
         if let Some(entries) = self.entries.get_mut(node_id) {
             for entry in entries.iter_mut() {
-                if &entry.capability == capability && entry.one_time && !entry.used && entry.is_valid() {
+                if &entry.capability == capability
+                    && entry.one_time
+                    && !entry.used
+                    && entry.is_valid()
+                {
                     entry.used = true;
                     return true;
                 }
