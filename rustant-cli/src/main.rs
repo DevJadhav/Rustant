@@ -72,6 +72,94 @@ enum Commands {
         #[command(subcommand)]
         action: AuthAction,
     },
+    /// Manage workflows
+    Workflow {
+        #[command(subcommand)]
+        action: WorkflowAction,
+    },
+    /// Manage scheduled jobs
+    Cron {
+        #[command(subcommand)]
+        action: CronAction,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum WorkflowAction {
+    /// List available workflow definitions
+    List,
+    /// Show details of a workflow
+    Show {
+        /// Workflow name
+        name: String,
+    },
+    /// Run a workflow
+    Run {
+        /// Workflow name
+        name: String,
+        /// Input parameters as key=value pairs
+        #[arg(short, long)]
+        input: Vec<String>,
+    },
+    /// List active workflow runs
+    Runs,
+    /// Resume a paused workflow run
+    Resume {
+        /// Run ID
+        run_id: String,
+    },
+    /// Cancel a running workflow
+    Cancel {
+        /// Run ID
+        run_id: String,
+    },
+    /// Show status of a workflow run
+    Status {
+        /// Run ID
+        run_id: String,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum CronAction {
+    /// List all scheduled cron jobs
+    List,
+    /// Add a new cron job
+    Add {
+        /// Job name
+        name: String,
+        /// Cron expression (e.g., "0 0 9 * * * *")
+        schedule: String,
+        /// Task to execute
+        task: String,
+    },
+    /// Manually trigger a cron job
+    Run {
+        /// Job name
+        name: String,
+    },
+    /// Disable a cron job
+    Disable {
+        /// Job name
+        name: String,
+    },
+    /// Enable a cron job
+    Enable {
+        /// Job name
+        name: String,
+    },
+    /// Remove a cron job
+    Remove {
+        /// Job name
+        name: String,
+    },
+    /// List background jobs
+    Jobs,
+    /// Cancel a background job
+    CancelJob {
+        /// Job ID
+        job_id: String,
+    },
 }
 
 #[derive(clap::Subcommand, Debug)]

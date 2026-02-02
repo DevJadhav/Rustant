@@ -51,6 +51,186 @@ pub struct AgentConfig {
     /// Optional multi-agent configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multi_agent: Option<MultiAgentConfig>,
+    /// Optional workflow engine configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<WorkflowConfig>,
+    /// Optional browser automation configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<BrowserConfig>,
+    /// Optional scheduler configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scheduler: Option<SchedulerConfig>,
+    /// Optional voice and audio configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice: Option<VoiceConfig>,
+}
+
+/// Configuration for the workflow engine.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowConfig {
+    /// Whether the workflow engine is enabled.
+    pub enabled: bool,
+    /// Directory containing custom workflow definitions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_dir: Option<PathBuf>,
+    /// Maximum concurrent workflow runs.
+    pub max_concurrent_runs: usize,
+    /// Default timeout per step in seconds.
+    pub default_step_timeout_secs: u64,
+    /// Path for persisting workflow state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_persistence_path: Option<PathBuf>,
+}
+
+impl Default for WorkflowConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            workflow_dir: None,
+            max_concurrent_runs: 4,
+            default_step_timeout_secs: 300,
+            state_persistence_path: None,
+        }
+    }
+}
+
+/// Configuration for the browser automation system.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrowserConfig {
+    /// Whether browser automation is enabled.
+    pub enabled: bool,
+    /// Path to the Chrome/Chromium binary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chrome_path: Option<String>,
+    /// Whether to run headless (no visible window).
+    pub headless: bool,
+    /// Default viewport width in pixels.
+    pub default_viewport_width: u32,
+    /// Default viewport height in pixels.
+    pub default_viewport_height: u32,
+    /// Default timeout per operation in seconds.
+    pub default_timeout_secs: u64,
+    /// If non-empty, only these domains are allowed.
+    #[serde(default)]
+    pub allowed_domains: Vec<String>,
+    /// These domains are always blocked.
+    #[serde(default)]
+    pub blocked_domains: Vec<String>,
+    /// Whether to use an isolated browser profile.
+    pub isolate_profile: bool,
+    /// Maximum number of open pages/tabs.
+    pub max_pages: usize,
+}
+
+impl Default for BrowserConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            chrome_path: None,
+            headless: true,
+            default_viewport_width: 1280,
+            default_viewport_height: 720,
+            default_timeout_secs: 30,
+            allowed_domains: Vec::new(),
+            blocked_domains: Vec::new(),
+            isolate_profile: true,
+            max_pages: 5,
+        }
+    }
+}
+
+/// Configuration for the scheduler system.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SchedulerConfig {
+    /// Whether the scheduler is enabled.
+    pub enabled: bool,
+    /// Cron job definitions.
+    #[serde(default)]
+    pub cron_jobs: Vec<crate::scheduler::CronJobConfig>,
+    /// Optional heartbeat configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heartbeat: Option<crate::scheduler::HeartbeatConfig>,
+    /// Optional port for webhook listener.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_port: Option<u16>,
+    /// Maximum number of concurrent background jobs.
+    pub max_background_jobs: usize,
+    /// Path for persisting scheduler state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_path: Option<PathBuf>,
+}
+
+impl Default for SchedulerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            cron_jobs: Vec::new(),
+            heartbeat: None,
+            webhook_port: None,
+            max_background_jobs: 10,
+            state_path: None,
+        }
+    }
+}
+
+/// Configuration for the voice and audio system.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VoiceConfig {
+    /// Whether voice features are enabled.
+    pub enabled: bool,
+    /// STT provider: "openai", "whisper-local", "mock".
+    pub stt_provider: String,
+    /// Whisper model size (for local): "tiny", "base", "small", "medium", "large".
+    pub stt_model: String,
+    /// Language code for STT (e.g., "en").
+    pub stt_language: String,
+    /// TTS provider: "openai", "mock".
+    pub tts_provider: String,
+    /// TTS voice name.
+    pub tts_voice: String,
+    /// TTS speech speed multiplier.
+    pub tts_speed: f32,
+    /// Whether VAD (voice activity detection) is enabled.
+    pub vad_enabled: bool,
+    /// VAD energy threshold (0.0-1.0).
+    pub vad_threshold: f32,
+    /// Wake word phrases (e.g., ["hey rustant"]).
+    #[serde(default)]
+    pub wake_words: Vec<String>,
+    /// Wake word sensitivity (0.0-1.0).
+    pub wake_sensitivity: f32,
+    /// Whether to auto-speak responses.
+    pub auto_speak: bool,
+    /// Maximum listening duration in seconds.
+    pub max_listen_secs: u64,
+    /// Audio input device name (None = system default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_device: Option<String>,
+    /// Audio output device name (None = system default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_device: Option<String>,
+}
+
+impl Default for VoiceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            stt_provider: "openai".to_string(),
+            stt_model: "base".to_string(),
+            stt_language: "en".to_string(),
+            tts_provider: "openai".to_string(),
+            tts_voice: "alloy".to_string(),
+            tts_speed: 1.0,
+            vad_enabled: true,
+            vad_threshold: 0.01,
+            wake_words: vec!["hey rustant".to_string()],
+            wake_sensitivity: 0.5,
+            auto_speak: false,
+            max_listen_secs: 30,
+            input_device: None,
+            output_device: None,
+        }
+    }
 }
 
 /// Configuration for the multi-agent system.

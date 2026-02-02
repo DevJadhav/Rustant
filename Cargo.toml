@@ -25,6 +25,7 @@ futures = "0.3"
 # Serialization & data
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_yaml = "0.9"
 toml = "0.8"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
@@ -44,7 +45,7 @@ directories = "5.0"
 dotenvy = "0.15"
 
 # Networking
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
 
 # Email (SMTP + IMAP)
 lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "builder", "hostname", "pool", "smtp-transport"] }
@@ -111,6 +112,14 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 # TLS certificate generation (self-signed, for local OAuth callbacks)
 rcgen = "0.13"
 rustls = { version = "0.23", features = ["aws_lc_rs"] }
+
+# Cron expression parsing
+cron = "0.13"
+
+# Audio (voice module)
+hound = "3.5"
+cpal = "0.15"
+whisper-rs = "0.14"
 
 # Token counting
 tiktoken-rs = "0.9"

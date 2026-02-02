@@ -27,6 +27,10 @@ pub mod channels;
 pub mod nodes;
 pub mod multi;
 pub mod oauth;
+pub mod workflow;
+pub mod browser;
+pub mod scheduler;
+pub mod voice;
 
 // Re-export commonly used types at the crate root.
 pub use agent::{Agent, AgentCallback, AgentMessage, NoOpCallback, RegisteredTool, TaskResult};
@@ -62,6 +66,31 @@ pub use multi::{
 pub use multi::AgentStatus as MultiAgentStatus;
 pub use config::MultiAgentConfig;
 pub use sandbox::SandboxedFs;
+pub use workflow::{
+    WorkflowDefinition, WorkflowExecutor, WorkflowState, WorkflowStatus,
+    parse_workflow, validate_workflow, list_builtin_names, get_builtin,
+};
+pub use browser::{
+    BrowserSecurityGuard, BrowserSession, CdpClient, MockCdpClient, PageSnapshot, SnapshotMode,
+};
+pub use error::BrowserError;
+pub use error::SchedulerError;
+pub use error::VoiceError;
+pub use voice::{
+    AudioChunk, AudioFormat, MockSttProvider, MockTtsProvider, MockWakeDetector,
+    OpenAiSttProvider, OpenAiTtsProvider, SttProvider, SttWakeDetector,
+    SynthesisRequest, SynthesisResult, TranscriptionResult, TranscriptionSegment,
+    TtsProvider, VadEvent, VoiceActivityDetector, WakeWordDetector, audio_convert,
+};
+#[cfg(feature = "voice")]
+pub use voice::{
+    AudioInput, AudioOutput, PorcupineWakeDetector, VoicePipeline, VoicePipelineEvent,
+    WhisperLocalProvider,
+};
+pub use scheduler::{
+    BackgroundJob, CronJob, CronJobConfig, CronScheduler, HeartbeatConfig, HeartbeatManager,
+    JobManager, JobStatus, WebhookEndpoint, WebhookHandler,
+};
 pub use summarizer::{ContextSummarizer, ContextSummary, TokenAlert, TokenCostDisplay};
 pub use types::{
     AgentState, AgentStatus, Artifact, CompletionRequest, CompletionResponse, Content,
@@ -86,6 +115,36 @@ mod reexport_tests {
         let _sms_cfg = SmsConfig::default();
         let _irc_cfg = IrcConfig::default();
         let _webhook_cfg = WebhookConfig::default();
+    }
+
+    #[test]
+    fn test_lib_new_reexports_browser() {
+        // Verify browser types are accessible from crate root.
+        let _guard = BrowserSecurityGuard::default();
+        let _mode = SnapshotMode::Html;
+        let _mock = MockCdpClient::new();
+    }
+
+    #[test]
+    fn test_lib_new_reexports_scheduler() {
+        // Verify scheduler types are accessible from crate root.
+        let _scheduler = CronScheduler::new();
+        let _config = HeartbeatConfig::default();
+        let _manager = JobManager::new(10);
+        let _status = JobStatus::Pending;
+        let _endpoint = WebhookEndpoint::new("/hooks");
+    }
+
+    #[test]
+    fn test_lib_new_reexports_voice() {
+        // Verify voice types are accessible from crate root.
+        let _vad = VoiceActivityDetector::new(0.01);
+        let _chunk = AudioChunk::silence(16000, 1, 480);
+        let _mock_stt = MockSttProvider::new();
+        let _mock_tts = MockTtsProvider::new();
+        let _format = AudioFormat::Wav;
+        let _req = SynthesisRequest::new("test");
+        let _event = VadEvent::NoChange;
     }
 
     #[test]

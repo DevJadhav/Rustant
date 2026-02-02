@@ -17,6 +17,7 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 async-trait = "0.1"
+base64 = { workspace = true }
 walkdir = "2.5"
 ignore = "0.4"
 globset = "0.4"

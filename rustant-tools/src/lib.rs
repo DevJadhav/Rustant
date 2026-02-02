@@ -3,6 +3,7 @@
 //! Built-in tool implementations for the Rustant agent.
 //! Provides file operations, search, git integration, and shell execution.
 
+pub mod browser;
 pub mod checkpoint;
 pub mod file;
 pub mod git;

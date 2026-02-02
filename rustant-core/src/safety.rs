@@ -105,6 +105,27 @@ pub enum ActionDetails {
     ShellCommand { command: String },
     NetworkRequest { host: String, method: String },
     GitOperation { operation: String },
+    WorkflowStep {
+        workflow: String,
+        step_id: String,
+        tool: String,
+    },
+    BrowserAction {
+        action: String,
+        url: Option<String>,
+        selector: Option<String>,
+    },
+    ScheduledTask {
+        trigger: String,
+        task: String,
+    },
+    VoiceAction {
+        action: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_secs: Option<u64>,
+    },
     Other { info: String },
 }
 

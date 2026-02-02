@@ -4,7 +4,9 @@ use crate::AuthAction;
 use crate::ChannelAction;
 use crate::Commands;
 use crate::ConfigAction;
+use crate::CronAction;
 use crate::SlackCommand;
+use crate::WorkflowAction;
 use std::path::Path;
 
 /// Handle a CLI subcommand.
@@ -14,6 +16,8 @@ pub async fn handle_command(command: Commands, workspace: &Path) -> anyhow::Resu
         Commands::Setup => crate::setup::run_setup(workspace).await,
         Commands::Channel { action } => handle_channel(action, workspace).await,
         Commands::Auth { action } => handle_auth(action, workspace).await,
+        Commands::Workflow { action } => handle_workflow(action, workspace).await,
+        Commands::Cron { action } => handle_cron(action, workspace).await,
     }
 }
 
@@ -332,6 +336,214 @@ async fn handle_auth(action: AuthAction, workspace: &Path) -> anyhow::Result<()>
                 println!("New token expires in {}s.", remaining.num_seconds().max(0));
             }
 
+            Ok(())
+        }
+    }
+}
+
+async fn handle_workflow(action: WorkflowAction, _workspace: &Path) -> anyhow::Result<()> {
+    match action {
+        WorkflowAction::List => {
+            let names = rustant_core::list_builtin_names();
+            println!("Available workflows:");
+            for name in names {
+                if let Some(wf) = rustant_core::get_builtin(name) {
+                    println!("  {} - {}", name, wf.description);
+                }
+            }
+            Ok(())
+        }
+        WorkflowAction::Show { name } => {
+            match rustant_core::get_builtin(&name) {
+                Some(wf) => {
+                    println!("Workflow: {}", wf.name);
+                    println!("Description: {}", wf.description);
+                    println!("Version: {}", wf.version);
+                    if !wf.inputs.is_empty() {
+                        println!("\nInputs:");
+                        for input in &wf.inputs {
+                            let required = if input.optional { "(optional)" } else { "(required)" };
+                            println!("  {} [{}] {} - {}", input.name, input.input_type, required, input.description);
+                        }
+                    }
+                    println!("\nSteps:");
+                    for (i, step) in wf.steps.iter().enumerate() {
+                        let gate_str = if step.gate.is_some() { " [gated]" } else { "" };
+                        println!("  {}. {} (tool: {}){}", i + 1, step.id, step.tool, gate_str);
+                    }
+                    if !wf.outputs.is_empty() {
+                        println!("\nOutputs:");
+                        for output in &wf.outputs {
+                            println!("  {}", output.name);
+                        }
+                    }
+                    Ok(())
+                }
+                None => {
+                    eprintln!("Workflow '{}' not found", name);
+                    Ok(())
+                }
+            }
+        }
+        WorkflowAction::Run { name, input } => {
+            let _wf = rustant_core::get_builtin(&name)
+                .ok_or_else(|| anyhow::anyhow!("Workflow '{}' not found", name))?;
+
+            let mut inputs = std::collections::HashMap::new();
+            for kv in &input {
+                if let Some((key, value)) = kv.split_once('=') {
+                    inputs.insert(key.to_string(), serde_json::Value::String(value.to_string()));
+                } else {
+                    return Err(anyhow::anyhow!("Invalid input format '{}', expected key=value", kv));
+                }
+            }
+
+            println!("Starting workflow '{}'...", name);
+            println!("  (Workflow execution requires an active agent session)");
+            println!("  Inputs: {:?}", inputs);
+            Ok(())
+        }
+        WorkflowAction::Runs => {
+            println!("No active workflow runs.");
+            Ok(())
+        }
+        WorkflowAction::Resume { run_id } => {
+            println!("Resuming workflow run: {}", run_id);
+            Ok(())
+        }
+        WorkflowAction::Cancel { run_id } => {
+            println!("Cancelling workflow run: {}", run_id);
+            Ok(())
+        }
+        WorkflowAction::Status { run_id } => {
+            println!("Checking status of workflow run: {}", run_id);
+            Ok(())
+        }
+    }
+}
+
+async fn handle_cron(action: CronAction, workspace: &Path) -> anyhow::Result<()> {
+    let config = rustant_core::config::load_config(Some(workspace), None)
+        .map_err(|e| anyhow::anyhow!("Failed to load config: {}", e))?;
+    let scheduler_config = config.scheduler.unwrap_or_default();
+
+    match action {
+        CronAction::List => {
+            let mut scheduler = rustant_core::CronScheduler::new();
+            for job_config in &scheduler_config.cron_jobs {
+                // Silently skip invalid expressions
+                let _ = scheduler.add_job(job_config.clone());
+            }
+            let jobs = scheduler.list_jobs();
+            if jobs.is_empty() {
+                println!("No cron jobs configured.");
+                println!("Add jobs via config or: rustant cron add <name> <schedule> <task>");
+            } else {
+                println!("Cron jobs ({}):", jobs.len());
+                for job in &jobs {
+                    let enabled = if job.config.enabled { "enabled" } else { "disabled" };
+                    let next = job
+                        .next_run
+                        .map(|t| t.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                        .unwrap_or_else(|| "N/A".to_string());
+                    println!(
+                        "  {} [{}] schedule=\"{}\" task=\"{}\" next={}",
+                        job.config.name, enabled, job.config.schedule, job.config.task, next
+                    );
+                }
+            }
+            Ok(())
+        }
+        CronAction::Add { name, schedule, task } => {
+            let job_config = rustant_core::CronJobConfig::new(&name, &schedule, &task);
+            // Validate the cron expression
+            let job = rustant_core::CronJob::new(job_config)?;
+            let next = job
+                .next_run
+                .map(|t| t.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                .unwrap_or_else(|| "N/A".to_string());
+            println!("Cron job '{}' added.", name);
+            println!("  Schedule: {}", schedule);
+            println!("  Task: {}", task);
+            println!("  Next run: {}", next);
+            println!("\nNote: Add this job to your config file to persist it across restarts.");
+            Ok(())
+        }
+        CronAction::Run { name } => {
+            let mut scheduler = rustant_core::CronScheduler::new();
+            for job_config in &scheduler_config.cron_jobs {
+                let _ = scheduler.add_job(job_config.clone());
+            }
+            match scheduler.get_job(&name) {
+                Some(job) => {
+                    println!("Manually triggering job '{}'...", name);
+                    println!("  Task: {}", job.config.task);
+                    println!("  (Task execution requires an active agent session)");
+                    Ok(())
+                }
+                None => {
+                    anyhow::bail!("Cron job '{}' not found", name);
+                }
+            }
+        }
+        CronAction::Disable { name } => {
+            let mut scheduler = rustant_core::CronScheduler::new();
+            for job_config in &scheduler_config.cron_jobs {
+                let _ = scheduler.add_job(job_config.clone());
+            }
+            scheduler.disable_job(&name)?;
+            println!("Cron job '{}' disabled.", name);
+            Ok(())
+        }
+        CronAction::Enable { name } => {
+            let mut scheduler = rustant_core::CronScheduler::new();
+            for job_config in &scheduler_config.cron_jobs {
+                let _ = scheduler.add_job(job_config.clone());
+            }
+            scheduler.enable_job(&name)?;
+            println!("Cron job '{}' enabled.", name);
+            Ok(())
+        }
+        CronAction::Remove { name } => {
+            let mut scheduler = rustant_core::CronScheduler::new();
+            for job_config in &scheduler_config.cron_jobs {
+                let _ = scheduler.add_job(job_config.clone());
+            }
+            scheduler.remove_job(&name)?;
+            println!("Cron job '{}' removed.", name);
+            println!("Note: Also remove it from your config file to persist the change.");
+            Ok(())
+        }
+        CronAction::Jobs => {
+            let manager = rustant_core::JobManager::new(
+                scheduler_config.max_background_jobs,
+            );
+            let jobs = manager.list();
+            if jobs.is_empty() {
+                println!("No background jobs running.");
+            } else {
+                println!("Background jobs ({}):", jobs.len());
+                for job in &jobs {
+                    println!(
+                        "  {} [{}] {} (started: {})",
+                        job.id,
+                        job.status,
+                        job.name,
+                        job.started_at.format("%Y-%m-%d %H:%M:%S UTC")
+                    );
+                }
+            }
+            Ok(())
+        }
+        CronAction::CancelJob { job_id } => {
+            let id: uuid::Uuid = job_id
+                .parse()
+                .map_err(|e| anyhow::anyhow!("Invalid job ID '{}': {}", job_id, e))?;
+            let mut manager = rustant_core::JobManager::new(
+                scheduler_config.max_background_jobs,
+            );
+            manager.cancel_job(&id)?;
+            println!("Job {} cancelled.", job_id);
             Ok(())
         }
     }

@@ -4,6 +4,7 @@
 //! covering LLM, tool execution, memory, configuration, and safety domains.
 
 use std::path::PathBuf;
+use uuid::Uuid;
 
 /// Top-level error type for the Rustant core library.
 #[derive(Debug, thiserror::Error)]
@@ -31,6 +32,18 @@ pub enum RustantError {
 
     #[error("Node error: {0}")]
     Node(#[from] NodeError),
+
+    #[error("Workflow error: {0}")]
+    Workflow(#[from] WorkflowError),
+
+    #[error("Browser error: {0}")]
+    Browser(#[from] BrowserError),
+
+    #[error("Scheduler error: {0}")]
+    Scheduler(#[from] SchedulerError),
+
+    #[error("Voice error: {0}")]
+    Voice(#[from] VoiceError),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
@@ -212,6 +225,130 @@ pub enum NodeError {
     DiscoveryFailed { message: String },
 }
 
+/// Errors from the workflow engine.
+#[derive(Debug, thiserror::Error)]
+pub enum WorkflowError {
+    #[error("Workflow parse error: {message}")]
+    ParseError { message: String },
+
+    #[error("Workflow validation failed: {message}")]
+    ValidationFailed { message: String },
+
+    #[error("Workflow step '{step}' failed: {message}")]
+    StepFailed { step: String, message: String },
+
+    #[error("Workflow '{name}' not found")]
+    NotFound { name: String },
+
+    #[error("Workflow run '{run_id}' not found")]
+    RunNotFound { run_id: Uuid },
+
+    #[error("Workflow approval timed out for step '{step}'")]
+    ApprovalTimeout { step: String },
+
+    #[error("Workflow cancelled")]
+    Cancelled,
+
+    #[error("Template render error: {message}")]
+    TemplateError { message: String },
+}
+
+/// Errors from the browser automation system.
+#[derive(Debug, thiserror::Error)]
+pub enum BrowserError {
+    #[error("Navigation failed: {message}")]
+    NavigationFailed { message: String },
+
+    #[error("Element not found: {selector}")]
+    ElementNotFound { selector: String },
+
+    #[error("JavaScript evaluation failed: {message}")]
+    JsEvalFailed { message: String },
+
+    #[error("Screenshot failed: {message}")]
+    ScreenshotFailed { message: String },
+
+    #[error("Browser timeout after {timeout_secs}s")]
+    Timeout { timeout_secs: u64 },
+
+    #[error("URL blocked by security policy: {url}")]
+    UrlBlocked { url: String },
+
+    #[error("Browser session error: {message}")]
+    SessionError { message: String },
+
+    #[error("CDP protocol error: {message}")]
+    CdpError { message: String },
+
+    #[error("Page limit exceeded: maximum {max} pages")]
+    PageLimitExceeded { max: usize },
+
+    #[error("Browser not connected")]
+    NotConnected,
+}
+
+/// Errors from the scheduler system.
+#[derive(Debug, thiserror::Error)]
+pub enum SchedulerError {
+    #[error("Invalid cron expression '{expression}': {message}")]
+    InvalidCronExpression { expression: String, message: String },
+
+    #[error("Job '{name}' not found")]
+    JobNotFound { name: String },
+
+    #[error("Job '{name}' already exists")]
+    JobAlreadyExists { name: String },
+
+    #[error("Job '{name}' is disabled")]
+    JobDisabled { name: String },
+
+    #[error("Maximum background jobs ({max}) exceeded")]
+    MaxJobsExceeded { max: usize },
+
+    #[error("Background job '{id}' not found")]
+    BackgroundJobNotFound { id: Uuid },
+
+    #[error("Webhook verification failed: {message}")]
+    WebhookVerificationFailed { message: String },
+
+    #[error("Scheduler state persistence error: {message}")]
+    PersistenceError { message: String },
+}
+
+/// Errors from the voice and audio system.
+#[derive(Debug, thiserror::Error)]
+pub enum VoiceError {
+    #[error("Audio device error: {message}")]
+    AudioDevice { message: String },
+
+    #[error("STT transcription failed: {message}")]
+    TranscriptionFailed { message: String },
+
+    #[error("TTS synthesis failed: {message}")]
+    SynthesisFailed { message: String },
+
+    #[error("Wake word detection error: {message}")]
+    WakeWordError { message: String },
+
+    #[error("Voice pipeline error: {message}")]
+    PipelineError { message: String },
+
+    #[error("Unsupported audio format: {format}")]
+    UnsupportedFormat { format: String },
+
+    #[error("Voice model not found: {model}")]
+    ModelNotFound { model: String },
+
+    #[error("Voice feature not enabled (compile with --features voice)")]
+    FeatureNotEnabled,
+
+    #[error("Voice session timeout after {timeout_secs}s")]
+    Timeout { timeout_secs: u64 },
+
+    #[error("Voice provider authentication failed: {provider}")]
+    AuthFailed { provider: String },
+}
+
 /// A type alias for results using the top-level `RustantError`.
 pub type Result<T> = std::result::Result<T, RustantError>;
 
@@ -335,6 +472,28 @@ mod tests {
             err.to_string(),
             "Consent denied for capability: filesystem"
         );
+    }
+
+    #[test]
+    fn test_error_display_voice() {
+        let err = RustantError::Voice(VoiceError::TranscriptionFailed {
+            message: "model not loaded".into(),
+        });
+        assert_eq!(
+            err.to_string(),
+            "Voice error: STT transcription failed: model not loaded"
+        );
+
+        let err = VoiceError::FeatureNotEnabled;
+        assert_eq!(
+            err.to_string(),
+            "Voice feature not enabled (compile with --features voice)"
+        );
+
+        let err = VoiceError::AudioDevice {
+            message: "no microphone found".into(),
+        };
+        assert_eq!(err.to_string(), "Audio device error: no microphone found");
     }
 
     #[test]

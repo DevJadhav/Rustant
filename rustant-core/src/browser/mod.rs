@@ -1,0 +1,14 @@
+//! Browser Automation Module for Rustant.
+//!
+//! Provides a trait-based CDP (Chrome DevTools Protocol) abstraction for
+//! browser automation with security guard, snapshot modes, and session management.
+
+pub mod cdp;
+pub mod security;
+pub mod session;
+pub mod snapshot;
+
+pub use cdp::{CdpClient, MockCdpClient};
+pub use security::BrowserSecurityGuard;
+pub use session::BrowserSession;
+pub use snapshot::{PageSnapshot, SnapshotMode};
