@@ -99,13 +99,6 @@ Create `.rustant/config.toml` in your workspace or run:
 cargo run --bin rustant -- config init
 ```
 
-## Development Roadmap
-
-- [x] **Phase 0**: Foundation — Agent loop, core types, tools, CLI (current)
-- [ ] **Phase 1**: Core Experience — Production TUI, git safety, context compression
-- [ ] **Phase 2**: Intelligence — MCP/LSP integration, sandboxing, audit replay
-- [ ] **Phase 3**: Distribution — Cross-platform builds, self-update, plugins
-
 ## License
 
 MIT
