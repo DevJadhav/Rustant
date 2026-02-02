@@ -91,6 +91,78 @@ enum ChannelAction {
         /// Channel name (e.g., slack, telegram, discord)
         name: String,
     },
+    /// Slack-specific operations (uses stored OAuth token)
+    Slack {
+        #[command(subcommand)]
+        action: SlackCommand,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum SlackCommand {
+    /// Send a message to a Slack channel
+    Send {
+        /// Channel name or ID (e.g., general, C04M40V9B61)
+        channel: String,
+        /// Message text
+        message: String,
+    },
+    /// Read recent message history from a channel
+    History {
+        /// Channel name or ID
+        channel: String,
+        /// Number of messages to fetch (default: 10)
+        #[arg(short = 'n', long, default_value = "10")]
+        limit: usize,
+    },
+    /// List all channels in the workspace
+    Channels,
+    /// List all users in the workspace
+    Users,
+    /// Get info about a specific channel
+    Info {
+        /// Channel ID (e.g., C04M40V9B61)
+        channel: String,
+    },
+    /// Add an emoji reaction to a message
+    React {
+        /// Channel ID
+        channel: String,
+        /// Message timestamp (e.g., 1770007692.977549)
+        timestamp: String,
+        /// Emoji name without colons (e.g., thumbsup, rocket)
+        emoji: String,
+    },
+    /// List files shared in the workspace (optionally filtered by channel)
+    Files {
+        /// Optional channel ID to filter files
+        channel: Option<String>,
+    },
+    /// Show workspace/team information
+    Team,
+    /// List user groups (e.g., @engineering)
+    Groups,
+    /// Send a direct message to a user
+    Dm {
+        /// User ID (e.g., U0AC521V7UK)
+        user: String,
+        /// Message text
+        message: String,
+    },
+    /// Reply in a thread
+    Thread {
+        /// Channel ID
+        channel: String,
+        /// Parent message timestamp
+        timestamp: String,
+        /// Reply text
+        message: String,
+    },
+    /// Join a channel
+    Join {
+        /// Channel ID
+        channel: String,
+    },
 }
 
 #[derive(clap::Subcommand, Debug)]

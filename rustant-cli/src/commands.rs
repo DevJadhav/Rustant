@@ -4,6 +4,7 @@ use crate::AuthAction;
 use crate::ChannelAction;
 use crate::Commands;
 use crate::ConfigAction;
+use crate::SlackCommand;
 use std::path::Path;
 
 /// Handle a CLI subcommand.
@@ -73,6 +74,9 @@ async fn handle_channel(action: ChannelAction, workspace: &Path) -> anyhow::Resu
                 }
             }
             Ok(())
+        }
+        ChannelAction::Slack { action } => {
+            return handle_slack(action).await;
         }
         ChannelAction::Test { name } => {
             let mut mgr = rustant_core::channels::build_channel_manager(&channels_config);
@@ -331,6 +335,202 @@ async fn handle_auth(action: AuthAction, workspace: &Path) -> anyhow::Result<()>
             Ok(())
         }
     }
+}
+
+/// Load the Slack OAuth token from the keyring and create a RealSlackHttp client.
+fn load_slack_client() -> anyhow::Result<rustant_core::channels::slack::RealSlackHttp> {
+    use rustant_core::credentials::KeyringCredentialStore;
+    use rustant_core::oauth;
+
+    let store = KeyringCredentialStore::new();
+    let token = oauth::load_oauth_token(&store, "slack")
+        .map_err(|e| anyhow::anyhow!("No Slack OAuth token found. Run `rustant auth login slack` first.\n{}", e))?;
+    Ok(rustant_core::channels::slack::RealSlackHttp::new(
+        token.access_token,
+    ))
+}
+
+async fn handle_slack(action: SlackCommand) -> anyhow::Result<()> {
+    use rustant_core::channels::slack::SlackHttpClient;
+
+    let http = load_slack_client()?;
+
+    match action {
+        SlackCommand::Send { channel, message } => {
+            let ts = http.post_message(&channel, &message).await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            println!("Message sent (ts: {})", ts);
+        }
+
+        SlackCommand::History { channel, limit } => {
+            let messages = http.conversations_history(&channel, limit).await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            if messages.is_empty() {
+                println!("No messages found.");
+            } else {
+                for msg in messages.iter().rev() {
+                    let thread = msg.thread_ts.as_deref().map(|t| format!(" [thread:{}]", t)).unwrap_or_default();
+                    println!("[{}] {}: {}{}", &msg.ts, msg.user, msg.text, thread);
+                }
+            }
+        }
+
+        SlackCommand::Channels => {
+            let channels = http.conversations_list("public_channel,private_channel", 200).await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            if channels.is_empty() {
+                println!("No channels found.");
+            } else {
+                println!("{:<14} {:<25} {:>5}  {:<6}  {}", "ID", "Name", "Users", "Member", "Topic");
+                println!("{}", "-".repeat(75));
+                for ch in &channels {
+                    let private = if ch.is_private { "priv" } else { "pub" };
+                    let member = if ch.is_member { "yes" } else { "no" };
+                    let topic = if ch.topic.len() > 30 {
+                        format!("{}...", &ch.topic[..27])
+                    } else {
+                        ch.topic.clone()
+                    };
+                    println!(
+                        "{:<14} #{:<24} {:>5}  {:<6}  {} {}",
+                        ch.id, ch.name, ch.num_members, member, private, topic
+                    );
+                }
+                println!("\nTotal: {} channels", channels.len());
+            }
+        }
+
+        SlackCommand::Users => {
+            let users = http.users_list(200).await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            if users.is_empty() {
+                println!("No users found.");
+            } else {
+                println!("{:<14} {:<20} {:<25} {:<6} {}", "ID", "Username", "Real Name", "Admin", "Status");
+                println!("{}", "-".repeat(80));
+                for u in &users {
+                    let kind = if u.is_bot { " [bot]" } else { "" };
+                    let admin = if u.is_admin { "yes" } else { "" };
+                    let status = if !u.status_emoji.is_empty() || !u.status_text.is_empty() {
+                        format!("{} {}", u.status_emoji, u.status_text).trim().to_string()
+                    } else {
+                        String::new()
+                    };
+                    println!(
+                        "{:<14} {:<20} {:<25} {:<6} {}{}",
+                        u.id, u.name, u.real_name, admin, status, kind
+                    );
+                }
+                println!("\nTotal: {} users", users.len());
+            }
+        }
+
+        SlackCommand::Info { channel } => {
+            let info = http.conversations_info(&channel).await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            println!("Channel: #{}", info.name);
+            println!("ID:      {}", info.id);
+            println!("Private: {}", info.is_private);
+            println!("Member:  {}", info.is_member);
+            println!("Members: {}", info.num_members);
+            if !info.topic.is_empty() {
+                println!("Topic:   {}", info.topic);
+            }
+            if !info.purpose.is_empty() {
+                println!("Purpose: {}", info.purpose);
+            }
+        }
+
+        SlackCommand::React { channel, timestamp, emoji } => {
+            http.reactions_add(&channel, &timestamp, &emoji).await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            println!("Reaction :{}:  added.", emoji);
+        }
+
+        SlackCommand::Files { channel } => {
+            let files = http.files_list(channel.as_deref(), 100).await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            if files.is_empty() {
+                println!("No files found.");
+            } else {
+                println!("{:<14} {:<30} {:<8} {:>10} {}", "ID", "Name", "Type", "Size", "User");
+                println!("{}", "-".repeat(75));
+                for f in &files {
+                    let size = if f.size >= 1_048_576 {
+                        format!("{:.1} MB", f.size as f64 / 1_048_576.0)
+                    } else if f.size >= 1024 {
+                        format!("{:.1} KB", f.size as f64 / 1024.0)
+                    } else {
+                        format!("{} B", f.size)
+                    };
+                    let name = if f.name.len() > 28 {
+                        format!("{}...", &f.name[..25])
+                    } else {
+                        f.name.clone()
+                    };
+                    println!("{:<14} {:<30} {:<8} {:>10} {}", f.id, name, f.filetype, size, f.user);
+                }
+                println!("\nTotal: {} files", files.len());
+            }
+        }
+
+        SlackCommand::Team => {
+            let team = http.team_info().await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            println!("Workspace: {}", team.name);
+            println!("ID:        {}", team.id);
+            println!("Domain:    {}.slack.com", team.domain);
+            if let Some(icon) = &team.icon_url {
+                println!("Icon:      {}", icon);
+            }
+        }
+
+        SlackCommand::Groups => {
+            let groups = http.usergroups_list().await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            if groups.is_empty() {
+                println!("No user groups found.");
+            } else {
+                println!("{:<14} {:<20} {:<15} {:>6}  {}", "ID", "Name", "@Handle", "Users", "Description");
+                println!("{}", "-".repeat(75));
+                for g in &groups {
+                    let desc = if g.description.len() > 25 {
+                        format!("{}...", &g.description[..22])
+                    } else {
+                        g.description.clone()
+                    };
+                    println!(
+                        "{:<14} {:<20} @{:<14} {:>5}  {}",
+                        g.id, g.name, g.handle, g.user_count, desc
+                    );
+                }
+                println!("\nTotal: {} groups", groups.len());
+            }
+        }
+
+        SlackCommand::Dm { user, message } => {
+            // Open a DM conversation, then send the message
+            let dm_channel = http.conversations_open(&[user.as_str()]).await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            let ts = http.post_message(&dm_channel, &message).await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            println!("DM sent to {} (channel: {}, ts: {})", user, dm_channel, ts);
+        }
+
+        SlackCommand::Thread { channel, timestamp, message } => {
+            let ts = http.post_thread_reply(&channel, &timestamp, &message).await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            println!("Thread reply sent (ts: {})", ts);
+        }
+
+        SlackCommand::Join { channel } => {
+            http.conversations_join(&channel).await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            println!("Joined channel {}", channel);
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
