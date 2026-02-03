@@ -623,26 +623,167 @@ fn handle_audit_command(sub: &str, _arg: &str, agent: &Agent) {
                 agent.safety().audit_log().len()
             );
         }
+        "export" => {
+            let log = agent.safety().audit_log();
+            if log.is_empty() {
+                println!("No audit entries to export.");
+                return;
+            }
+            let format = _arg;
+            match format {
+                "json" => match serde_json::to_string_pretty(&log) {
+                    Ok(json) => println!("{}", json),
+                    Err(e) => println!("Export error: {}", e),
+                },
+                "jsonl" => {
+                    for entry in log {
+                        match serde_json::to_string(entry) {
+                            Ok(line) => println!("{}", line),
+                            Err(e) => println!("Export error: {}", e),
+                        }
+                    }
+                }
+                "csv" | "" | "text" => {
+                    println!("id,timestamp,event_type,tool,details");
+                    for entry in log {
+                        let (event_type, tool, details) = match &entry.event {
+                            rustant_core::safety::AuditEvent::ActionRequested {
+                                tool,
+                                risk_level,
+                                description,
+                            } => (
+                                "requested",
+                                tool.as_str(),
+                                format!("{} - {}", risk_level, description),
+                            ),
+                            rustant_core::safety::AuditEvent::ActionApproved { tool } => {
+                                ("approved", tool.as_str(), String::new())
+                            }
+                            rustant_core::safety::AuditEvent::ActionDenied { tool, reason } => {
+                                ("denied", tool.as_str(), reason.clone())
+                            }
+                            rustant_core::safety::AuditEvent::ActionExecuted {
+                                tool,
+                                success,
+                                duration_ms,
+                            } => {
+                                let detail = format!("success={} {}ms", success, duration_ms);
+                                ("executed", tool.as_str(), detail)
+                            }
+                            rustant_core::safety::AuditEvent::ApprovalRequested {
+                                tool,
+                                context,
+                            } => ("approval_requested", tool.as_str(), context.clone()),
+                            rustant_core::safety::AuditEvent::ApprovalDecision {
+                                tool,
+                                approved,
+                            } => (
+                                "approval_decision",
+                                tool.as_str(),
+                                format!("approved={}", approved),
+                            ),
+                        };
+                        println!(
+                            "{},{},{},{},\"{}\"",
+                            entry.id,
+                            entry.timestamp.format("%Y-%m-%dT%H:%M:%S"),
+                            event_type,
+                            tool,
+                            details.replace('"', "\"\"")
+                        );
+                    }
+                }
+                _ => println!(
+                    "Unknown format '{}'. Supported: json, jsonl, csv, text",
+                    format
+                ),
+            }
+        }
+        "query" => {
+            let tool_name = _arg;
+            if tool_name.is_empty() {
+                println!("Usage: /audit query <tool_name>");
+                return;
+            }
+            let log = agent.safety().audit_log();
+            let matches: Vec<_> = log
+                .iter()
+                .filter(|entry| {
+                    let entry_tool = match &entry.event {
+                        rustant_core::safety::AuditEvent::ActionRequested { tool, .. } => tool,
+                        rustant_core::safety::AuditEvent::ActionApproved { tool } => tool,
+                        rustant_core::safety::AuditEvent::ActionDenied { tool, .. } => tool,
+                        rustant_core::safety::AuditEvent::ActionExecuted { tool, .. } => tool,
+                        rustant_core::safety::AuditEvent::ApprovalRequested { tool, .. } => tool,
+                        rustant_core::safety::AuditEvent::ApprovalDecision { tool, .. } => tool,
+                    };
+                    entry_tool == tool_name
+                })
+                .collect();
+            if matches.is_empty() {
+                println!("No audit entries found for tool '{}'.", tool_name);
+            } else {
+                println!(
+                    "Audit entries for '{}' ({} matches):",
+                    tool_name,
+                    matches.len()
+                );
+                for entry in &matches {
+                    let ts = entry.timestamp.format("%H:%M:%S");
+                    let desc = match &entry.event {
+                        rustant_core::safety::AuditEvent::ActionRequested {
+                            tool,
+                            risk_level,
+                            ..
+                        } => format!("REQUESTED {} ({})", tool, risk_level),
+                        rustant_core::safety::AuditEvent::ActionApproved { tool } => {
+                            format!("APPROVED  {}", tool)
+                        }
+                        rustant_core::safety::AuditEvent::ActionDenied { tool, reason } => {
+                            format!("DENIED    {} ({})", tool, reason)
+                        }
+                        rustant_core::safety::AuditEvent::ActionExecuted {
+                            tool,
+                            success,
+                            duration_ms,
+                        } => {
+                            let status = if *success { "ok" } else { "FAIL" };
+                            format!("EXECUTED  {} [{}] {}ms", tool, status, duration_ms)
+                        }
+                        rustant_core::safety::AuditEvent::ApprovalRequested { tool, .. } => {
+                            format!("APPROVAL? {}", tool)
+                        }
+                        rustant_core::safety::AuditEvent::ApprovalDecision { tool, approved } => {
+                            let decision = if *approved { "yes" } else { "no" };
+                            format!("DECISION  {} -> {}", tool, decision)
+                        }
+                    };
+                    println!("  [{}] {}", ts, desc);
+                }
+            }
+        }
         _ => {
-            println!("Usage: /audit show [n] | /audit verify");
+            println!("Usage: /audit [show [n] | verify | export [fmt] | query <tool>]");
         }
     }
 }
 
 /// Handle `/session` subcommands.
 fn handle_session_command(sub: &str, name: &str, agent: &mut Agent, workspace: &Path) {
-    let sessions_dir = workspace.join(".rustant").join("sessions");
     match sub {
         "save" => {
-            let session_name = if name.is_empty() {
-                chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string()
-            } else {
-                name.to_string()
+            let session_name = if name.is_empty() { None } else { Some(name) };
+            let mut mgr = match rustant_core::SessionManager::new(workspace) {
+                Ok(m) => m,
+                Err(e) => {
+                    println!("Failed to initialize session manager: {}", e);
+                    return;
+                }
             };
-            let _ = std::fs::create_dir_all(&sessions_dir);
-            let path = sessions_dir.join(format!("{}.json", session_name));
-            match agent.memory().save_session(&path) {
-                Ok(()) => println!("Session saved to {}", path.display()),
+            let entry = mgr.start_session(session_name);
+            let total_tokens = agent.brain().total_usage().total();
+            match mgr.save_checkpoint(agent.memory(), total_tokens) {
+                Ok(()) => println!("Session '{}' saved.", entry.name),
                 Err(e) => println!("Failed to save session: {}", e),
             }
         }
@@ -651,42 +792,27 @@ fn handle_session_command(sub: &str, name: &str, agent: &mut Agent, workspace: &
                 println!("Usage: /session load <name>");
                 return;
             }
-            let path = sessions_dir.join(format!("{}.json", name));
-            match rustant_core::memory::MemorySystem::load_session(&path) {
-                Ok(mem) => {
+            let mut mgr = match rustant_core::SessionManager::new(workspace) {
+                Ok(m) => m,
+                Err(e) => {
+                    println!("Failed to initialize session manager: {}", e);
+                    return;
+                }
+            };
+            match mgr.resume_session(name) {
+                Ok((mem, continuation)) => {
                     *agent.memory_mut() = mem;
                     println!("Session '{}' loaded.", name);
+                    if !continuation.is_empty() {
+                        println!("{}", continuation);
+                    }
                 }
                 Err(e) => println!("Failed to load session: {}", e),
             }
         }
         "list" => {
-            if !sessions_dir.exists() {
-                println!("No saved sessions found.");
-                return;
-            }
-            let mut entries: Vec<_> = std::fs::read_dir(&sessions_dir)
-                .into_iter()
-                .flatten()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
-                .collect();
-            if entries.is_empty() {
-                println!("No saved sessions found.");
-                return;
-            }
-            entries.sort_by_key(|e| e.file_name());
-            println!("Saved sessions:");
-            for entry in &entries {
-                let name = entry
-                    .path()
-                    .file_stem()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                println!("  - {} ({} bytes)", name, size);
-            }
+            // Delegate to the same handler as /sessions for consistency.
+            handle_sessions_command(workspace);
         }
         _ => {
             println!("Usage: /session save [name] | /session load <name> | /session list");

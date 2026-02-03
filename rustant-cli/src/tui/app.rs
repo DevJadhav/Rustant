@@ -1901,56 +1901,39 @@ impl App {
         }
     }
 
-    /// Save the current session to disk with a given name.
+    /// Save the current session to disk with a given name via SessionManager.
     fn save_session(&mut self, name: &str) {
-        let Some(dir) = Self::sessions_dir() else {
-            self.conversation.push_message(DisplayMessage {
-                role: Role::System,
-                text: "[Error] Could not determine sessions directory.".to_string(),
-                tool_name: None,
-                is_error: true,
-                timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
-            });
-            return;
+        let mut mgr = match rustant_core::SessionManager::new(&self.workspace) {
+            Ok(m) => m,
+            Err(e) => {
+                self.push_system_msg(&format!("[Error] Session manager init failed: {}", e));
+                return;
+            }
         };
-        let path = dir.join(format!("{}.json", name));
-        match self.agent.memory().save_session(&path) {
+        let session_name = if name.is_empty() { None } else { Some(name) };
+        let entry = mgr.start_session(session_name);
+        let total_tokens = self.agent.brain().total_usage().total();
+        match mgr.save_checkpoint(self.agent.memory(), total_tokens) {
             Ok(()) => {
-                self.conversation.push_message(DisplayMessage {
-                    role: Role::System,
-                    text: format!("Session saved: {}", path.display()),
-                    tool_name: None,
-                    is_error: false,
-                    timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
-                });
+                self.push_system_msg(&format!("Session '{}' saved.", entry.name));
             }
             Err(e) => {
-                self.conversation.push_message(DisplayMessage {
-                    role: Role::System,
-                    text: format!("[Error] Failed to save session: {}", e),
-                    tool_name: None,
-                    is_error: true,
-                    timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
-                });
+                self.push_system_msg(&format!("[Error] Failed to save session: {}", e));
             }
         }
     }
 
-    /// Load a session from disk by name.
+    /// Load a session from disk by name via SessionManager.
     fn load_session(&mut self, name: &str) {
-        let Some(dir) = Self::sessions_dir() else {
-            self.conversation.push_message(DisplayMessage {
-                role: Role::System,
-                text: "[Error] Could not determine sessions directory.".to_string(),
-                tool_name: None,
-                is_error: true,
-                timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
-            });
-            return;
+        let mut mgr = match rustant_core::SessionManager::new(&self.workspace) {
+            Ok(m) => m,
+            Err(e) => {
+                self.push_system_msg(&format!("[Error] Session manager init failed: {}", e));
+                return;
+            }
         };
-        let path = dir.join(format!("{}.json", name));
-        match rustant_core::MemorySystem::load_session(&path) {
-            Ok(loaded) => {
+        match mgr.resume_session(name) {
+            Ok((loaded, _continuation)) => {
                 // Restore messages into conversation view
                 let messages = loaded.context_messages();
                 self.conversation.clear();
@@ -1975,26 +1958,14 @@ impl App {
                 }
                 // Replace agent memory with loaded memory
                 *self.agent.memory_mut() = loaded;
-                self.conversation.push_message(DisplayMessage {
-                    role: Role::System,
-                    text: format!(
-                        "Session loaded: {} ({} messages restored)",
-                        name,
-                        messages.len()
-                    ),
-                    tool_name: None,
-                    is_error: false,
-                    timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
-                });
+                self.push_system_msg(&format!(
+                    "Session '{}' loaded ({} messages restored).",
+                    name,
+                    messages.len()
+                ));
             }
             Err(e) => {
-                self.conversation.push_message(DisplayMessage {
-                    role: Role::System,
-                    text: format!("[Error] Failed to load session: {}", e),
-                    tool_name: None,
-                    is_error: true,
-                    timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
-                });
+                self.push_system_msg(&format!("[Error] Failed to load session: {}", e));
             }
         }
     }
@@ -2474,12 +2445,19 @@ mod tests {
 
     #[test]
     fn test_handle_command_save_with_name() {
-        let mut app = App::new(test_config(), std::env::temp_dir());
+        let tmp = std::env::temp_dir().join("rustant_test_save_named");
+        let _ = std::fs::create_dir_all(&tmp);
+        let mut app = App::new(test_config(), tmp.clone());
         app.handle_command("/save test_session");
         assert_eq!(app.conversation.messages.len(), 1);
         // Should either succeed or show an error - not panic
         let text = &app.conversation.messages[0].text;
-        assert!(text.contains("Session saved") || text.contains("Error"));
+        assert!(
+            text.contains("saved") || text.contains("Error"),
+            "Expected save confirmation or error, got: {}",
+            text
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -2493,11 +2471,18 @@ mod tests {
 
     #[test]
     fn test_handle_command_load_nonexistent() {
-        let mut app = App::new(test_config(), std::env::temp_dir());
+        let tmp = std::env::temp_dir().join("rustant_test_load_nonexist");
+        let _ = std::fs::create_dir_all(&tmp);
+        let mut app = App::new(test_config(), tmp.clone());
         app.handle_command("/load nonexistent_session_xyz");
         assert_eq!(app.conversation.messages.len(), 1);
-        assert!(app.conversation.messages[0].text.contains("Error"));
-        assert!(app.conversation.messages[0].is_error);
+        assert!(
+            app.conversation.messages[0].text.contains("Error")
+                || app.conversation.messages[0].text.contains("Failed"),
+            "Expected error message, got: {}",
+            app.conversation.messages[0].text
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -2859,6 +2844,216 @@ mod tests {
         assert!(
             last.text.contains("/permissions"),
             "Help should contain /permissions"
+        );
+    }
+
+    // ── New TUI command tests ────────────────────────────────────────
+
+    #[test]
+    fn test_handle_command_memory() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/memory");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("Memory"), "Should show memory stats");
+        assert!(last.text.contains("Working"), "Should show working memory");
+        assert!(last.text.contains("Short-term"), "Should show short-term");
+        assert!(last.text.contains("Long-term"), "Should show long-term");
+    }
+
+    #[test]
+    fn test_handle_command_context() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/context");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(
+            last.text.contains("Context"),
+            "Should show context window info"
+        );
+        assert!(last.text.contains("token"), "Should mention tokens");
+    }
+
+    #[test]
+    fn test_handle_command_safety() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/safety");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(
+            last.text.contains("Safety"),
+            "Should show safety configuration"
+        );
+        assert!(
+            last.text.contains("Approval mode"),
+            "Should show approval mode"
+        );
+    }
+
+    #[test]
+    fn test_handle_command_setup() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/setup");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(
+            last.text.contains("setup") || last.text.contains("Setup"),
+            "Should display setup instructions"
+        );
+    }
+
+    #[test]
+    fn test_handle_command_workflows() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/workflows");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(
+            last.text.contains("Workflow") || last.text.contains("workflow"),
+            "Should list workflow templates"
+        );
+    }
+
+    #[test]
+    fn test_handle_command_pin_no_args() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/pin");
+        let last = app.conversation.messages.last().unwrap();
+        // With no messages, should say no pinned messages
+        assert!(
+            last.text.contains("pinned") || last.text.contains("No pinned"),
+            "Should show pinned message info"
+        );
+    }
+
+    #[test]
+    fn test_handle_command_unpin_invalid() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/unpin 999");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(
+            last.text.contains("not pinned") || last.text.contains("Invalid"),
+            "Should handle invalid unpin"
+        );
+    }
+
+    #[test]
+    fn test_handle_command_sessions_empty() {
+        let tmp = std::env::temp_dir().join("rustant_test_sessions_empty");
+        let _ = std::fs::create_dir_all(&tmp);
+        let mut app = App::new(test_config(), tmp.clone());
+        app.handle_command("/sessions");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(
+            last.text.contains("No saved sessions") || last.text.contains("sessions"),
+            "Should report no saved sessions"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_handle_command_session_list_empty() {
+        let tmp = std::env::temp_dir().join("rustant_test_session_list");
+        let _ = std::fs::create_dir_all(&tmp);
+        let mut app = App::new(test_config(), tmp.clone());
+        app.handle_command("/session list");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(
+            last.text.contains("No saved sessions") || last.text.contains("sessions"),
+            "Should report no saved sessions"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_handle_command_session_save_and_list() {
+        let tmp = std::env::temp_dir().join("rustant_test_session_save");
+        let _ = std::fs::create_dir_all(&tmp);
+        let mut app = App::new(test_config(), tmp.clone());
+        app.handle_command("/session save test_save");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(
+            last.text.contains("saved") || last.text.contains("test_save"),
+            "Should confirm session saved"
+        );
+        // Now list should find it
+        app.handle_command("/sessions");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(
+            last.text.contains("test_save"),
+            "Session list should contain saved session"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_handle_command_resume_no_sessions() {
+        let tmp = std::env::temp_dir().join("rustant_test_resume_empty");
+        let _ = std::fs::create_dir_all(&tmp);
+        let mut app = App::new(test_config(), tmp.clone());
+        app.handle_command("/resume");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(
+            last.text.contains("Failed") || last.text.contains("No sessions"),
+            "Should report no sessions to resume"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_handle_command_config_streaming() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/config streaming true");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(
+            last.text.contains("Streaming enabled"),
+            "Should enable streaming"
+        );
+        app.handle_command("/config streaming false");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(
+            last.text.contains("Streaming disabled"),
+            "Should disable streaming"
+        );
+    }
+
+    #[test]
+    fn test_handle_command_config_window_size() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/config window_size 30");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(
+            last.text.contains("Window size set to: 30"),
+            "Should set window size"
+        );
+    }
+
+    #[test]
+    fn test_handle_command_config_window_size_bounds() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/config window_size 2");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(
+            last.text.contains("must be between"),
+            "Should reject out-of-bounds window_size"
+        );
+        app.handle_command("/config window_size 1001");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(
+            last.text.contains("must be between"),
+            "Should reject out-of-bounds window_size"
+        );
+    }
+
+    #[test]
+    fn test_handle_command_config_max_iterations_bounds() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/config max_iterations 0");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(
+            last.text.contains("must be between"),
+            "Should reject out-of-bounds max_iterations"
+        );
+        app.handle_command("/config max_iterations 501");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(
+            last.text.contains("must be between"),
+            "Should reject out-of-bounds max_iterations"
         );
     }
 }

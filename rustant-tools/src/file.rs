@@ -409,7 +409,7 @@ impl Tool for FileSearchTool {
         let file_pattern = args["file_pattern"].as_str();
         let max_results = args["max_results"].as_u64().unwrap_or(50) as usize;
 
-        let target_dir = if search_path == "." {
+        let target_path = if search_path == "." {
             self.workspace.clone()
         } else {
             self.workspace.join(search_path)
@@ -417,49 +417,65 @@ impl Tool for FileSearchTool {
 
         debug!(
             pattern = pattern,
-            path = %target_dir.display(),
+            path = %target_path.display(),
             "Searching files"
         );
 
         let mut results = Vec::new();
-        let pattern_lower = pattern.to_lowercase();
 
-        // Walk files respecting .gitignore
-        let walker = ignore::WalkBuilder::new(&target_dir)
-            .hidden(false)
-            .git_ignore(true)
-            .build();
+        // Strip common regex escape sequences for literal matching.
+        // LLMs often send patterns like `#\[test\]` meaning the literal `#[test]`.
+        let normalized = Self::strip_regex_escapes(pattern);
+        let pattern_lower = normalized.to_lowercase();
 
-        for entry in walker {
+        // Collect files to search: either a single file or a directory walk.
+        let mut files_to_search: Vec<PathBuf> = Vec::new();
+
+        if target_path.is_file() {
+            // Path points to a specific file — search just that file.
+            files_to_search.push(target_path);
+        } else {
+            // Walk directory respecting .gitignore.
+            let walker = ignore::WalkBuilder::new(&target_path)
+                .hidden(false)
+                .git_ignore(true)
+                .build();
+
+            for entry in walker {
+                let entry = match entry {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+
+                // Filter by file pattern if specified
+                if let Some(fp) = file_pattern {
+                    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    if !Self::simple_glob_match(fp, file_name) {
+                        continue;
+                    }
+                }
+
+                files_to_search.push(path.to_path_buf());
+            }
+        }
+
+        for file_path in &files_to_search {
             if results.len() >= max_results {
                 break;
             }
 
-            let entry = match entry {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-
-            let path = entry.path();
-            if !path.is_file() {
-                continue;
-            }
-
-            // Filter by file pattern if specified
-            if let Some(fp) = file_pattern {
-                let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                if !Self::simple_glob_match(fp, file_name) {
-                    continue;
-                }
-            }
-
             // Read and search the file
-            let content = match std::fs::read_to_string(path) {
+            let content = match std::fs::read_to_string(file_path) {
                 Ok(c) => c,
                 Err(_) => continue, // Skip binary or unreadable files
             };
 
-            let relative = path.strip_prefix(&self.workspace).unwrap_or(path);
+            let relative = file_path.strip_prefix(&self.workspace).unwrap_or(file_path);
 
             for (line_num, line) in content.lines().enumerate() {
                 if results.len() >= max_results {
@@ -505,6 +521,44 @@ impl FileSearchTool {
         } else {
             name == pattern
         }
+    }
+
+    /// Strip common regex escape sequences so literal matching works.
+    ///
+    /// LLMs often regex-escape patterns (e.g. `#\[test\]` for `#[test]`).
+    /// Since we do literal substring matching, we strip the backslash
+    /// before regex metacharacters so the search finds the intended text.
+    fn strip_regex_escapes(pattern: &str) -> String {
+        let mut result = String::with_capacity(pattern.len());
+        let mut chars = pattern.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '\\' {
+                if let Some(&next) = chars.peek() {
+                    // Strip backslash before common regex metacharacters.
+                    if matches!(
+                        next,
+                        '[' | ']'
+                            | '('
+                            | ')'
+                            | '{'
+                            | '}'
+                            | '.'
+                            | '*'
+                            | '+'
+                            | '?'
+                            | '^'
+                            | '$'
+                            | '|'
+                            | '\\'
+                    ) {
+                        result.push(chars.next().unwrap());
+                        continue;
+                    }
+                }
+            }
+            result.push(ch);
+        }
+        result
     }
 }
 
@@ -936,6 +990,69 @@ mod tests {
         assert!(FileSearchTool::simple_glob_match("test*", "test_file.rs"));
         assert!(FileSearchTool::simple_glob_match("main.rs", "main.rs"));
         assert!(!FileSearchTool::simple_glob_match("main.rs", "lib.rs"));
+    }
+
+    #[test]
+    fn test_strip_regex_escapes() {
+        // Basic escape stripping
+        assert_eq!(FileSearchTool::strip_regex_escapes(r"#\[test\]"), "#[test]");
+        assert_eq!(FileSearchTool::strip_regex_escapes(r"foo\.bar"), "foo.bar");
+        assert_eq!(FileSearchTool::strip_regex_escapes(r"a\+b\*c"), "a+b*c");
+        assert_eq!(FileSearchTool::strip_regex_escapes(r"\(group\)"), "(group)");
+        assert_eq!(FileSearchTool::strip_regex_escapes(r"\{brace\}"), "{brace}");
+        assert_eq!(FileSearchTool::strip_regex_escapes(r"a\\b"), "a\\b");
+        // No escapes — unchanged
+        assert_eq!(FileSearchTool::strip_regex_escapes("hello"), "hello");
+        assert_eq!(FileSearchTool::strip_regex_escapes("#[test]"), "#[test]");
+        // Trailing backslash — kept as-is
+        assert_eq!(FileSearchTool::strip_regex_escapes("abc\\"), "abc\\");
+        // Backslash before non-metachar — kept as-is
+        assert_eq!(FileSearchTool::strip_regex_escapes(r"\n"), "\\n");
+    }
+
+    #[tokio::test]
+    async fn test_file_search_with_file_path() {
+        let dir = setup_workspace();
+        // Create a file with #[test] annotations
+        std::fs::write(
+            dir.path().join("src/tests.rs"),
+            "#[test]\nfn test_one() {}\n\n#[test]\nfn test_two() {}\n",
+        )
+        .unwrap();
+        let tool = FileSearchTool::new(dir.path().to_path_buf());
+
+        // Search using a file path (not directory) in the path param
+        let result = tool
+            .execute(serde_json::json!({"pattern": "#[test]", "path": "src/tests.rs"}))
+            .await
+            .unwrap();
+        assert!(
+            result.content.contains("Found 2"),
+            "Should find 2 matches when path is a file: {}",
+            result.content
+        );
+    }
+
+    #[tokio::test]
+    async fn test_file_search_regex_escaped_pattern() {
+        let dir = setup_workspace();
+        std::fs::write(
+            dir.path().join("src/tests.rs"),
+            "#[test]\nfn test_one() {}\n\n#[test]\nfn test_two() {}\n",
+        )
+        .unwrap();
+        let tool = FileSearchTool::new(dir.path().to_path_buf());
+
+        // LLM sends regex-escaped pattern `#\[test\]` — should still match
+        let result = tool
+            .execute(serde_json::json!({"pattern": r"#\[test\]", "path": "src"}))
+            .await
+            .unwrap();
+        assert!(
+            result.content.contains("Found 2"),
+            "Regex-escaped pattern should match after stripping: {}",
+            result.content
+        );
     }
 
     // --- FileWriteTool tests ---
