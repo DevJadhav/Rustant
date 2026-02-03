@@ -78,13 +78,11 @@ impl ApprovalContext {
     /// Auto-generate a preview from tool name and action details for destructive tools.
     pub fn with_preview_from_tool(mut self, tool_name: &str, details: &ActionDetails) -> Self {
         let preview = match (tool_name, details) {
-            ("file_write", ActionDetails::FileWrite { path, size_bytes }) => {
-                Some(format!(
-                    "Will write {} bytes to {}",
-                    size_bytes,
-                    path.display()
-                ))
-            }
+            ("file_write", ActionDetails::FileWrite { path, size_bytes }) => Some(format!(
+                "Will write {} bytes to {}",
+                size_bytes,
+                path.display()
+            )),
             ("file_patch", ActionDetails::FileWrite { path, .. }) => {
                 Some(format!("Will patch {}", path.display()))
             }

@@ -374,11 +374,15 @@ impl UserGuidance for RustantError {
             RustantError::Safety(e) => e.suggestion(),
             RustantError::Agent(e) => e.suggestion(),
             RustantError::Channel(e) => e.suggestion(),
+            RustantError::Node(e) => e.suggestion(),
+            RustantError::Workflow(e) => e.suggestion(),
+            RustantError::Browser(e) => e.suggestion(),
+            RustantError::Scheduler(e) => e.suggestion(),
+            RustantError::Voice(e) => e.suggestion(),
             RustantError::Io(_) => Some("Check file permissions and disk space.".into()),
             RustantError::Serialization(_) => {
                 Some("Data may be corrupted. Try /doctor to check.".into())
             }
-            _ => None,
         }
     }
 
@@ -387,6 +391,11 @@ impl UserGuidance for RustantError {
             RustantError::Llm(e) => e.next_steps(),
             RustantError::Tool(e) => e.next_steps(),
             RustantError::Agent(e) => e.next_steps(),
+            RustantError::Node(e) => e.next_steps(),
+            RustantError::Workflow(e) => e.next_steps(),
+            RustantError::Browser(e) => e.next_steps(),
+            RustantError::Scheduler(e) => e.next_steps(),
+            RustantError::Voice(e) => e.next_steps(),
             _ => vec![],
         }
     }
@@ -413,9 +422,10 @@ impl UserGuidance for LlmError {
                 "Context full ({}/{} tokens). Use /compact to free space.",
                 used, limit
             )),
-            LlmError::UnsupportedModel { model } => {
-                Some(format!("Model '{}' is not supported by this provider.", model))
-            }
+            LlmError::UnsupportedModel { model } => Some(format!(
+                "Model '{}' is not supported by this provider.",
+                model
+            )),
             _ => None,
         }
     }
@@ -426,9 +436,9 @@ impl UserGuidance for LlmError {
                 "Run /doctor to verify API key status.".into(),
                 "Run /setup to reconfigure your provider.".into(),
             ],
-            LlmError::RateLimited { .. } => vec![
-                "Wait for the retry or switch models with /config model <name>.".into(),
-            ],
+            LlmError::RateLimited { .. } => {
+                vec!["Wait for the retry or switch models with /config model <name>.".into()]
+            }
             LlmError::Connection { .. } => vec![
                 "Check your internet connection.".into(),
                 "Run /doctor to test LLM connectivity.".into(),
@@ -445,9 +455,10 @@ impl UserGuidance for LlmError {
 impl UserGuidance for ToolError {
     fn suggestion(&self) -> Option<String> {
         match self {
-            ToolError::NotFound { name } => {
-                Some(format!("Tool '{}' is not registered. Use /tools to list available tools.", name))
-            }
+            ToolError::NotFound { name } => Some(format!(
+                "Tool '{}' is not registered. Use /tools to list available tools.",
+                name
+            )),
             ToolError::InvalidArguments { name, reason } => {
                 Some(format!("Invalid arguments for '{}': {}", name, reason))
             }
@@ -456,27 +467,32 @@ impl UserGuidance for ToolError {
                 if message.contains("No such file") || message.contains("not found") {
                     Some("File not found. Use file_list to browse available files.".to_string())
                 } else if message.contains("Permission denied") {
-                    Some(format!("Permission denied for '{name}'. Check file permissions."))
+                    Some(format!(
+                        "Permission denied for '{name}'. Check file permissions."
+                    ))
                 } else {
-                    Some(format!("Tool '{name}' failed. The agent will try to recover."))
+                    Some(format!(
+                        "Tool '{name}' failed. The agent will try to recover."
+                    ))
                 }
             }
             ToolError::Timeout { name, timeout_secs } => Some(format!(
                 "Tool '{}' timed out after {}s. Consider breaking the task into smaller steps.",
                 name, timeout_secs
             )),
-            ToolError::PermissionDenied { name, .. } => {
-                Some(format!("Permission denied for '{}'. Adjust with /permissions.", name))
-            }
+            ToolError::PermissionDenied { name, .. } => Some(format!(
+                "Permission denied for '{}'. Adjust with /permissions.",
+                name
+            )),
             _ => None,
         }
     }
 
     fn next_steps(&self) -> Vec<String> {
         match self {
-            ToolError::Timeout { .. } => vec![
-                "Try a more specific query or smaller file range.".into(),
-            ],
+            ToolError::Timeout { .. } => {
+                vec!["Try a more specific query or smaller file range.".into()]
+            }
             ToolError::NotFound { .. } => vec!["Run /tools to see registered tools.".into()],
             _ => vec![],
         }
@@ -492,9 +508,10 @@ impl UserGuidance for MemoryError {
             MemoryError::CapacityExceeded => {
                 Some("Memory capacity exceeded. Use /compact or start a new session.".into())
             }
-            MemoryError::SessionLoadFailed { message } => {
-                Some(format!("Session load failed: {}. Use /sessions to list available sessions.", message))
-            }
+            MemoryError::SessionLoadFailed { message } => Some(format!(
+                "Session load failed: {}. Use /sessions to list available sessions.",
+                message
+            )),
             _ => None,
         }
     }
@@ -507,9 +524,10 @@ impl UserGuidance for MemoryError {
 impl UserGuidance for ConfigError {
     fn suggestion(&self) -> Option<String> {
         match self {
-            ConfigError::MissingField { field } => {
-                Some(format!("Missing config field '{}'. Run /setup to configure.", field))
-            }
+            ConfigError::MissingField { field } => Some(format!(
+                "Missing config field '{}'. Run /setup to configure.",
+                field
+            )),
             ConfigError::EnvVarMissing { var } => {
                 Some(format!("Set environment variable {} or run /setup.", var))
             }
@@ -528,12 +546,14 @@ impl UserGuidance for SafetyError {
             SafetyError::ApprovalRejected => {
                 Some("Action was denied. The agent will try an alternative approach.".into())
             }
-            SafetyError::PathDenied { path } => {
-                Some(format!("Path '{}' is blocked by safety policy.", path.display()))
-            }
-            SafetyError::CommandDenied { command } => {
-                Some(format!("Command '{}' is not in the allowed list. Adjust in config.", command))
-            }
+            SafetyError::PathDenied { path } => Some(format!(
+                "Path '{}' is blocked by safety policy.",
+                path.display()
+            )),
+            SafetyError::CommandDenied { command } => Some(format!(
+                "Command '{}' is not in the allowed list. Adjust in config.",
+                command
+            )),
             _ => None,
         }
     }
@@ -572,18 +592,196 @@ impl UserGuidance for AgentError {
 impl UserGuidance for ChannelError {
     fn suggestion(&self) -> Option<String> {
         match self {
-            ChannelError::ConnectionFailed { name, .. } => {
-                Some(format!("Channel '{}' connection failed. Check credentials.", name))
-            }
-            ChannelError::AuthFailed { name } => {
-                Some(format!("Channel '{}' auth failed. Re-run channel setup.", name))
-            }
+            ChannelError::ConnectionFailed { name, .. } => Some(format!(
+                "Channel '{}' connection failed. Check credentials.",
+                name
+            )),
+            ChannelError::AuthFailed { name } => Some(format!(
+                "Channel '{}' auth failed. Re-run channel setup.",
+                name
+            )),
             _ => None,
         }
     }
 
     fn next_steps(&self) -> Vec<String> {
         vec![]
+    }
+}
+
+impl UserGuidance for NodeError {
+    fn suggestion(&self) -> Option<String> {
+        match self {
+            NodeError::NoCapableNode { capability } => Some(format!(
+                "No node has the '{}' capability. Check node configuration.",
+                capability
+            )),
+            NodeError::ExecutionFailed { node_id, .. } => Some(format!(
+                "Node '{}' failed. It may be overloaded or misconfigured.",
+                node_id
+            )),
+            NodeError::Unreachable { node_id } => Some(format!(
+                "Node '{}' is unreachable. Check network connectivity.",
+                node_id
+            )),
+            NodeError::ConsentDenied { capability } => Some(format!(
+                "Consent denied for '{}'. Grant permission in node settings.",
+                capability
+            )),
+            NodeError::DiscoveryFailed { .. } => {
+                Some("Node discovery failed. Check gateway configuration.".into())
+            }
+        }
+    }
+
+    fn next_steps(&self) -> Vec<String> {
+        match self {
+            NodeError::Unreachable { .. } => vec![
+                "Verify the node is running and accessible.".into(),
+                "Check firewall and network settings.".into(),
+            ],
+            _ => vec![],
+        }
+    }
+}
+
+impl UserGuidance for WorkflowError {
+    fn suggestion(&self) -> Option<String> {
+        match self {
+            WorkflowError::NotFound { name } => Some(format!(
+                "Workflow '{}' not found. Use /workflows to list available workflows.",
+                name
+            )),
+            WorkflowError::StepFailed { step, .. } => Some(format!(
+                "Workflow step '{}' failed. Check inputs and retry.",
+                step
+            )),
+            WorkflowError::ValidationFailed { message } => Some(format!(
+                "Workflow validation failed: {}. Fix the definition and retry.",
+                message
+            )),
+            WorkflowError::ApprovalTimeout { step } => Some(format!(
+                "Approval timed out for step '{}'. Re-run the workflow.",
+                step
+            )),
+            WorkflowError::Cancelled => Some("Workflow was cancelled.".into()),
+            _ => None,
+        }
+    }
+
+    fn next_steps(&self) -> Vec<String> {
+        match self {
+            WorkflowError::NotFound { .. } => {
+                vec!["Run /workflows to see available workflow templates.".into()]
+            }
+            _ => vec![],
+        }
+    }
+}
+
+impl UserGuidance for BrowserError {
+    fn suggestion(&self) -> Option<String> {
+        match self {
+            BrowserError::NotConnected => {
+                Some("Browser is not connected. Start a browser session first.".into())
+            }
+            BrowserError::Timeout { timeout_secs } => Some(format!(
+                "Browser timed out after {}s. The page may be slow to load.",
+                timeout_secs
+            )),
+            BrowserError::ElementNotFound { selector } => Some(format!(
+                "Element '{}' not found. The page structure may have changed.",
+                selector
+            )),
+            BrowserError::UrlBlocked { url } => {
+                Some(format!("URL '{}' is blocked by security policy.", url))
+            }
+            BrowserError::NavigationFailed { .. } => {
+                Some("Navigation failed. Check the URL and try again.".into())
+            }
+            _ => None,
+        }
+    }
+
+    fn next_steps(&self) -> Vec<String> {
+        match self {
+            BrowserError::NotConnected => {
+                vec!["Run 'rustant browser test' to verify browser connectivity.".into()]
+            }
+            _ => vec![],
+        }
+    }
+}
+
+impl UserGuidance for SchedulerError {
+    fn suggestion(&self) -> Option<String> {
+        match self {
+            SchedulerError::InvalidCronExpression { expression, .. } => Some(format!(
+                "Invalid cron expression '{}'. Use standard cron syntax (e.g., '0 9 * * *').",
+                expression
+            )),
+            SchedulerError::JobNotFound { name } => Some(format!(
+                "Job '{}' not found. Use 'rustant cron list' to see existing jobs.",
+                name
+            )),
+            SchedulerError::JobAlreadyExists { name } => Some(format!(
+                "Job '{}' already exists. Use a different name or remove the existing one.",
+                name
+            )),
+            SchedulerError::MaxJobsExceeded { max } => Some(format!(
+                "Maximum of {} jobs reached. Remove some before adding new ones.",
+                max
+            )),
+            _ => None,
+        }
+    }
+
+    fn next_steps(&self) -> Vec<String> {
+        match self {
+            SchedulerError::JobNotFound { .. } => {
+                vec!["Run 'rustant cron list' to see existing jobs.".into()]
+            }
+            _ => vec![],
+        }
+    }
+}
+
+impl UserGuidance for VoiceError {
+    fn suggestion(&self) -> Option<String> {
+        match self {
+            VoiceError::FeatureNotEnabled => Some(
+                "Voice features require the 'voice' feature flag. Recompile with --features voice."
+                    .into(),
+            ),
+            VoiceError::AudioDevice { .. } => {
+                Some("Audio device error. Check that a microphone/speaker is connected.".into())
+            }
+            VoiceError::AuthFailed { provider } => Some(format!(
+                "Voice provider '{}' auth failed. Check API key.",
+                provider
+            )),
+            VoiceError::ModelNotFound { model } => Some(format!(
+                "Voice model '{}' not found. Check available models.",
+                model
+            )),
+            VoiceError::Timeout { timeout_secs } => Some(format!(
+                "Voice operation timed out after {}s.",
+                timeout_secs
+            )),
+            _ => None,
+        }
+    }
+
+    fn next_steps(&self) -> Vec<String> {
+        match self {
+            VoiceError::FeatureNotEnabled => {
+                vec!["Recompile: cargo build --features voice".into()]
+            }
+            VoiceError::AuthFailed { .. } => {
+                vec!["Run /doctor to verify API key status.".into()]
+            }
+            _ => vec![],
+        }
     }
 }
 
@@ -746,5 +944,66 @@ mod tests {
             retry_after_secs: 60,
         };
         assert_eq!(err.to_string(), "Rate limited by provider, retry after 60s");
+    }
+
+    #[test]
+    fn test_node_error_guidance() {
+        let err = NodeError::Unreachable {
+            node_id: "node-1".into(),
+        };
+        assert!(err.suggestion().is_some());
+        assert!(err.suggestion().unwrap().contains("node-1"));
+        assert!(!err.next_steps().is_empty());
+    }
+
+    #[test]
+    fn test_workflow_error_guidance() {
+        let err = WorkflowError::NotFound {
+            name: "deploy".into(),
+        };
+        assert!(err.suggestion().unwrap().contains("deploy"));
+        assert!(!err.next_steps().is_empty());
+    }
+
+    #[test]
+    fn test_browser_error_guidance() {
+        let err = BrowserError::NotConnected;
+        assert!(err.suggestion().is_some());
+        assert!(!err.next_steps().is_empty());
+    }
+
+    #[test]
+    fn test_scheduler_error_guidance() {
+        let err = SchedulerError::JobNotFound {
+            name: "backup".into(),
+        };
+        assert!(err.suggestion().unwrap().contains("backup"));
+        assert!(!err.next_steps().is_empty());
+    }
+
+    #[test]
+    fn test_voice_error_guidance() {
+        let err = VoiceError::FeatureNotEnabled;
+        assert!(err.suggestion().unwrap().contains("voice"));
+        assert!(!err.next_steps().is_empty());
+    }
+
+    #[test]
+    fn test_rustant_error_dispatches_all_guidance() {
+        // Verify node errors dispatch through RustantError
+        let err = RustantError::Node(NodeError::Unreachable {
+            node_id: "n".into(),
+        });
+        assert!(err.suggestion().is_some());
+        assert!(!err.next_steps().is_empty());
+
+        // Verify voice errors dispatch through RustantError
+        let err = RustantError::Voice(VoiceError::FeatureNotEnabled);
+        assert!(err.suggestion().is_some());
+        assert!(!err.next_steps().is_empty());
+
+        // Verify workflow errors dispatch through RustantError
+        let err = RustantError::Workflow(WorkflowError::NotFound { name: "w".into() });
+        assert!(err.suggestion().is_some());
     }
 }

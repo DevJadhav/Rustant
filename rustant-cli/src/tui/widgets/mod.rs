@@ -7,6 +7,7 @@ pub mod diff_view;
 pub mod explanation_panel;
 pub mod header;
 pub mod input_area;
+pub mod keys_overlay;
 pub mod markdown;
 pub mod progress_bar;
 pub mod sidebar;

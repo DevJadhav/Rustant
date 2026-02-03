@@ -1,5 +1,6 @@
 //! Main TUI application: state, event loop, and top-level draw function.
 
+use crate::repl::extract_tool_detail;
 use crate::tui::callback::{TuiCallback, TuiEvent};
 use crate::tui::event::{map_approval_key, map_global_key, Action, EventHandler};
 use crate::tui::theme::Theme;
@@ -10,6 +11,7 @@ use crate::tui::widgets::diff_view::DiffView;
 use crate::tui::widgets::explanation_panel::{render_explanation_panel, ExplanationPanel};
 use crate::tui::widgets::header::{render_header, HeaderData};
 use crate::tui::widgets::input_area::{InputAction, InputWidget};
+use crate::tui::widgets::keys_overlay::{render_keys_overlay, KeysOverlay};
 use crate::tui::widgets::markdown::SyntaxHighlighter;
 use crate::tui::widgets::progress_bar::{render_progress_bar, ProgressState};
 use crate::tui::widgets::sidebar::{render_sidebar, FileEntry, FileStatus, SidebarData};
@@ -78,6 +80,7 @@ pub struct App {
 
     // Multi-Agent Task Board
     pub task_board: TaskBoard,
+    pub keys_overlay: KeysOverlay,
 
     // App state
     pub should_quit: bool,
@@ -152,6 +155,7 @@ impl App {
             progress: ProgressState::new(),
             progress_rx,
             task_board: TaskBoard::new(),
+            keys_overlay: KeysOverlay::new(),
             should_quit: false,
             is_processing: false,
             vim_mode,
@@ -161,8 +165,52 @@ impl App {
         app.load_history();
         // Try to recover the last auto-saved session
         app.try_recover_session();
+        // Show first-run onboarding if applicable
+        app.show_onboarding_if_needed();
 
         app
+    }
+
+    /// Show onboarding messages in the conversation view on first run.
+    fn show_onboarding_if_needed(&mut self) {
+        let marker = self.workspace.join(".rustant").join(".onboarding_complete");
+        if marker.exists() {
+            return;
+        }
+
+        let info = rustant_core::project_detect::detect_project(&self.workspace);
+        let tasks = rustant_core::project_detect::example_tasks(&info);
+
+        let mut text = String::from("Welcome to Rustant!\n\n");
+
+        if info.project_type != rustant_core::project_detect::ProjectType::Unknown {
+            let framework_note = info
+                .framework
+                .as_ref()
+                .map(|f| format!(" ({} framework)", f))
+                .unwrap_or_default();
+            text.push_str(&format!(
+                "Detected a {}{} project.\n\n",
+                info.project_type, framework_note
+            ));
+        }
+
+        text.push_str("Here are some things you can try:\n");
+        for task in tasks.iter().take(3) {
+            text.push_str(&format!("  {}\n", task));
+        }
+        text.push_str("\nQuick reference:\n");
+        text.push_str("  @  reference files  |  /  commands  |  /tools  list tools\n");
+        text.push_str("  /permissions  adjust safety  |  /context  check memory\n");
+        text.push_str("  F1  keyboard shortcuts  |  Ctrl+E  decision transparency\n");
+
+        self.push_system_msg(&text);
+
+        // Create the marker so the tour doesn't show again
+        let rustant_dir = self.workspace.join(".rustant");
+        if std::fs::create_dir_all(&rustant_dir).is_ok() {
+            let _ = std::fs::write(&marker, "onboarding completed\n");
+        }
     }
 
     /// Run the main event loop.
@@ -295,6 +343,11 @@ impl App {
         if self.task_board.is_visible() {
             render_task_board(frame, frame.area(), &self.task_board, &self.theme);
         }
+
+        // Keyboard Shortcuts overlay
+        if self.keys_overlay.is_visible() {
+            render_keys_overlay(frame, frame.area(), &self.keys_overlay, &self.theme);
+        }
     }
 
     /// Handle a terminal event (keyboard, mouse, resize).
@@ -311,6 +364,10 @@ impl App {
     fn handle_key_event(&mut self, key: KeyEvent) {
         // Escape key: cancel streaming, close popups, or exit vim insert
         if key.code == KeyCode::Esc {
+            if self.keys_overlay.is_visible() {
+                self.keys_overlay.toggle();
+                return;
+            }
             if self.task_board.is_visible() {
                 self.task_board.toggle();
                 return;
@@ -374,6 +431,33 @@ impl App {
         if key.code == KeyCode::Char('t') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.task_board.toggle();
             return;
+        }
+
+        // Ctrl+S: Show trust dashboard
+        if key.code == KeyCode::Char('s') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.handle_command("/trust");
+            return;
+        }
+
+        // F1: Toggle keyboard shortcuts overlay
+        if key.code == KeyCode::F(1) {
+            self.keys_overlay.toggle();
+            return;
+        }
+
+        // Keys overlay navigation when visible
+        if self.keys_overlay.is_visible() {
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.keys_overlay.scroll_up();
+                    return;
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.keys_overlay.scroll_down();
+                    return;
+                }
+                _ => {} // Other keys pass through
+            }
         }
 
         // Task board navigation when visible
@@ -677,7 +761,9 @@ impl App {
                     self.diff_view.show(diff_text);
                 }
             }
-            Action::ShowHelp => {}
+            Action::ShowHelp => {
+                self.keys_overlay.toggle();
+            }
             _ => {}
         }
     }
@@ -1206,6 +1292,92 @@ impl App {
                     }
                 }
             }
+            "/keys" => {
+                self.keys_overlay.toggle();
+            }
+            "/trust" => {
+                let safety = self.agent.safety();
+                let mode = safety.approval_mode();
+                let mode_desc = match format!("{:?}", mode).to_lowercase().as_str() {
+                    "safe" => "Auto-approve read-only, ask for writes/executes",
+                    "cautious" => "Auto-approve reads and reversible writes",
+                    "paranoid" => "Ask for approval on every action",
+                    "yolo" => "Auto-approve everything",
+                    _ => "Custom mode",
+                };
+
+                let log = safety.audit_log();
+                let mut approved: std::collections::HashMap<String, usize> =
+                    std::collections::HashMap::new();
+                let mut denied: std::collections::HashMap<String, usize> =
+                    std::collections::HashMap::new();
+
+                for entry in log {
+                    match &entry.event {
+                        rustant_core::safety::AuditEvent::ActionApproved { tool } => {
+                            *approved.entry(tool.clone()).or_insert(0) += 1;
+                        }
+                        rustant_core::safety::AuditEvent::ActionDenied { tool, .. } => {
+                            *denied.entry(tool.clone()).or_insert(0) += 1;
+                        }
+                        _ => {}
+                    }
+                }
+
+                let mut text = format!(
+                    "Trust Calibration Dashboard\n  Mode: {:?}\n  {}\n",
+                    mode, mode_desc
+                );
+
+                if approved.is_empty() && denied.is_empty() {
+                    text.push_str("\n  No approval history yet.");
+                } else {
+                    text.push_str("\n  Per-tool stats:\n");
+                    let mut all_tools: std::collections::BTreeSet<&str> =
+                        std::collections::BTreeSet::new();
+                    for k in approved.keys() {
+                        all_tools.insert(k.as_str());
+                    }
+                    for k in denied.keys() {
+                        all_tools.insert(k.as_str());
+                    }
+                    for tool in &all_tools {
+                        let a = approved.get(*tool).copied().unwrap_or(0);
+                        let d = denied.get(*tool).copied().unwrap_or(0);
+                        text.push_str(&format!(
+                            "    {:<20} approved: {} | denied: {}\n",
+                            tool, a, d
+                        ));
+                    }
+
+                    // Adaptive suggestions
+                    text.push_str("\n  Suggestions:\n");
+                    let mut has_suggestion = false;
+                    for tool in &all_tools {
+                        let a = approved.get(*tool).copied().unwrap_or(0);
+                        let d = denied.get(*tool).copied().unwrap_or(0);
+                        if a > 10 && d == 0 {
+                            text.push_str(&format!(
+                                "    + {} (approved {}x, 0 denials): consider auto-approve\n",
+                                tool, a
+                            ));
+                            has_suggestion = true;
+                        } else if d > 3 && d > a {
+                            text.push_str(&format!(
+                                "    ! {} (denied {}x vs {}x approved): review safety config\n",
+                                tool, d, a
+                            ));
+                            has_suggestion = true;
+                        }
+                    }
+                    if !has_suggestion {
+                        text.push_str("    No suggestions based on current patterns.\n");
+                    }
+                }
+
+                text.push_str("\n  Change mode: /permissions <safe|cautious|paranoid|yolo>");
+                self.push_system_msg(&text);
+            }
             "/doctor" => {
                 let config = self.agent.config();
                 let tools = self.agent.tool_definitions();
@@ -1662,15 +1834,17 @@ impl App {
                 // Start progress tracking
                 self.progress.tool_started(&name);
 
-                let args_str = args.to_string();
-                let args_preview = if args_str.len() > 100 {
-                    format!("{}...", &args_str[..100])
-                } else {
-                    args_str
-                };
+                let detail = extract_tool_detail(&name, &args).unwrap_or_else(|| {
+                    let args_str = args.to_string();
+                    if args_str.len() > 100 {
+                        format!("{}...", &args_str[..100])
+                    } else {
+                        args_str
+                    }
+                });
                 self.conversation.push_message(DisplayMessage {
                     role: Role::Tool,
-                    text: format!("Executing... {}", args_preview),
+                    text: format!("Executing... {}", detail),
                     tool_name: Some(name),
                     is_error: false,
                     timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
@@ -1827,7 +2001,8 @@ impl App {
                         )
                     }
                 };
-                let is_critical = matches!(event, rustant_core::ContextHealthEvent::Critical { .. });
+                let is_critical =
+                    matches!(event, rustant_core::ContextHealthEvent::Critical { .. });
                 self.conversation.push_message(DisplayMessage {
                     role: Role::System,
                     text,
@@ -1935,11 +2110,31 @@ impl App {
                     });
                 }
                 *self.agent.memory_mut() = loaded;
+
+                // Extract goal from recovered memory for richer notification
+                let goal = self
+                    .agent
+                    .memory()
+                    .working
+                    .current_goal
+                    .as_deref()
+                    .map(|g| {
+                        if g.len() > 80 {
+                            format!("{}...", &g[..80])
+                        } else {
+                            g.to_string()
+                        }
+                    });
+                let goal_line = goal
+                    .map(|g| format!("\n  Last goal: {}", g))
+                    .unwrap_or_default();
+
                 self.conversation.push_message(DisplayMessage {
                     role: Role::System,
                     text: format!(
-                        "[Recovered] Previous session restored ({} messages)",
-                        messages.len()
+                        "[Recovered] Previous session restored\n  Messages: {}{}",
+                        messages.len(),
+                        goal_line
                     ),
                     tool_name: None,
                     is_error: false,
@@ -2211,6 +2406,9 @@ mod tests {
     fn test_app_creation() {
         let config = test_config();
         let workspace = std::env::temp_dir();
+        // Ensure onboarding marker exists so no welcome message pollutes the test
+        let _ = std::fs::create_dir_all(workspace.join(".rustant"));
+        let _ = std::fs::write(workspace.join(".rustant/.onboarding_complete"), "done");
         let app = App::new(config, workspace);
         assert!(!app.should_quit);
         assert!(!app.is_processing);
@@ -2496,7 +2694,8 @@ mod tests {
     #[test]
     fn test_handle_command_save_with_name() {
         let tmp = std::env::temp_dir().join("rustant_test_save_named");
-        let _ = std::fs::create_dir_all(&tmp);
+        let _ = std::fs::create_dir_all(tmp.join(".rustant"));
+        let _ = std::fs::write(tmp.join(".rustant/.onboarding_complete"), "done");
         let mut app = App::new(test_config(), tmp.clone());
         app.handle_command("/save test_session");
         assert_eq!(app.conversation.messages.len(), 1);
@@ -2522,7 +2721,8 @@ mod tests {
     #[test]
     fn test_handle_command_load_nonexistent() {
         let tmp = std::env::temp_dir().join("rustant_test_load_nonexist");
-        let _ = std::fs::create_dir_all(&tmp);
+        let _ = std::fs::create_dir_all(tmp.join(".rustant"));
+        let _ = std::fs::write(tmp.join(".rustant/.onboarding_complete"), "done");
         let mut app = App::new(test_config(), tmp.clone());
         app.handle_command("/load nonexistent_session_xyz");
         assert_eq!(app.conversation.messages.len(), 1);

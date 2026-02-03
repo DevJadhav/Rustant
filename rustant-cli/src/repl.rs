@@ -18,11 +18,10 @@ use std::sync::Arc;
 /// - Git tools show the operation or commit message
 pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> Option<String> {
     match tool_name {
-        "file_read" | "file_list" | "file_search" | "file_write" | "file_patch" => {
-            args.get("path")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-        }
+        "file_read" | "file_list" | "file_search" | "file_write" | "file_patch" => args
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
         "shell_exec" => args.get("command").and_then(|v| v.as_str()).map(|s| {
             if s.len() > 60 {
                 format!("{}...", &s[..60])
@@ -31,26 +30,20 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
             }
         }),
         "git_status" | "git_diff" => Some("workspace".to_string()),
-        "git_commit" => args
-            .get("message")
-            .and_then(|v| v.as_str())
-            .map(|s| {
-                if s.len() > 50 {
-                    format!("\"{}...\"", &s[..50])
-                } else {
-                    format!("\"{}\"", s)
-                }
-            }),
-        "web_search" => args
-            .get("query")
-            .and_then(|v| v.as_str())
-            .map(|s| {
-                if s.len() > 50 {
-                    format!("\"{}...\"", &s[..50])
-                } else {
-                    format!("\"{}\"", s)
-                }
-            }),
+        "git_commit" => args.get("message").and_then(|v| v.as_str()).map(|s| {
+            if s.len() > 50 {
+                format!("\"{}...\"", &s[..50])
+            } else {
+                format!("\"{}\"", s)
+            }
+        }),
+        "web_search" => args.get("query").and_then(|v| v.as_str()).map(|s| {
+            if s.len() > 50 {
+                format!("\"{}...\"", &s[..50])
+            } else {
+                format!("\"{}\"", s)
+            }
+        }),
         "web_fetch" | "document_read" => args
             .get("url")
             .and_then(|v| v.as_str())
@@ -59,16 +52,13 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
             .get("file")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
-        "codebase_search" => args
-            .get("query")
-            .and_then(|v| v.as_str())
-            .map(|s| {
-                if s.len() > 50 {
-                    format!("\"{}...\"", &s[..50])
-                } else {
-                    format!("\"{}\"", s)
-                }
-            }),
+        "codebase_search" => args.get("query").and_then(|v| v.as_str()).map(|s| {
+            if s.len() > 50 {
+                format!("\"{}...\"", &s[..50])
+            } else {
+                format!("\"{}\"", s)
+            }
+        }),
         _ => None,
     }
 }
@@ -281,7 +271,9 @@ fn print_contextual_hints(agent: &Agent) {
     let context_window = agent.brain().context_window();
     let ctx = mem.context_breakdown(context_window);
     if ctx.usage_ratio() > 0.7 {
-        hints.push("Tip: Context is >70% full. Use /pin to protect important messages before compression.");
+        hints.push(
+            "Tip: Context is >70% full. Use /pin to protect important messages before compression.",
+        );
     }
 
     if !hints.is_empty() {
@@ -331,8 +323,17 @@ fn show_onboarding(workspace: &Path) {
     println!("    \x1b[36m@\x1b[0m reference files  |  \x1b[36m/\x1b[0m commands  |  \x1b[36m/tools\x1b[0m list tools");
     println!("    \x1b[36m/permissions\x1b[0m adjust safety  |  \x1b[36m/context\x1b[0m check memory usage");
     println!();
-    println!("  I'll ask for approval before modifying files. Adjust with \x1b[36m/permissions\x1b[0m.");
+    println!(
+        "  I'll ask for approval before modifying files. Adjust with \x1b[36m/permissions\x1b[0m."
+    );
     println!();
+    println!("  \x1b[2mPress Enter to continue, or type 'skip' to dismiss.\x1b[0m");
+
+    let mut input = String::new();
+    let _ = std::io::stdin().read_line(&mut input);
+    if input.trim().eq_ignore_ascii_case("skip") {
+        println!("  Tour dismissed. Run \x1b[36m/help\x1b[0m anytime for commands.\n");
+    }
 
     // Create the marker so the tour doesn't show again
     let rustant_dir = workspace.join(".rustant");
@@ -444,9 +445,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                                 } else {
                                     Some(save_input)
                                 };
-                                if let Ok(mut mgr) =
-                                    rustant_core::SessionManager::new(&workspace)
-                                {
+                                if let Ok(mut mgr) = rustant_core::SessionManager::new(&workspace) {
                                     let entry = mgr.start_session(session_name);
                                     let total_tokens = agent.brain().total_usage().total();
                                     match mgr.save_checkpoint(agent.memory(), total_tokens) {
@@ -471,7 +470,10 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                         match registry.help_for(arg1) {
                             Some(help) => println!("\n{}", help),
                             None => {
-                                println!("No help found for '{}'. Try /help for all commands.", arg1);
+                                println!(
+                                    "No help found for '{}'. Try /help for all commands.",
+                                    arg1
+                                );
                                 if let Some(suggestion) = registry.suggest(&format!("/{}", arg1)) {
                                     println!("Did you mean: {} ?", suggestion);
                                 }
@@ -1590,6 +1592,36 @@ async fn handle_doctor_command(agent: &Agent, workspace: &Path) {
     let has_git = workspace.join(".git").exists();
     if has_git {
         println!("  Git repo:      \x1b[32myes\x1b[0m");
+
+        // Check git user.email
+        let email_ok = std::process::Command::new("git")
+            .args(["config", "user.email"])
+            .current_dir(workspace)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if email_ok {
+            println!("  Git email:     \x1b[32mconfigured\x1b[0m");
+        } else {
+            println!("  Git email:     \x1b[31mnot set\x1b[0m");
+            issues.push("Git user.email is not configured. Run: git config --global user.email \"you@example.com\"");
+        }
+
+        // Check git user.name
+        let name_ok = std::process::Command::new("git")
+            .args(["config", "user.name"])
+            .current_dir(workspace)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if name_ok {
+            println!("  Git name:      \x1b[32mconfigured\x1b[0m");
+        } else {
+            println!("  Git name:      \x1b[31mnot set\x1b[0m");
+            issues.push(
+                "Git user.name is not configured. Run: git config --global user.name \"Your Name\"",
+            );
+        }
     } else {
         println!("  Git repo:      \x1b[33mno\x1b[0m");
         warnings.push("No git repo found. Checkpoint/undo features require git init.");
@@ -1603,7 +1635,9 @@ async fn handle_doctor_command(agent: &Agent, workspace: &Path) {
             println!("  .rustant dir:  \x1b[32mwritable\x1b[0m");
         } else {
             println!("  .rustant dir:  \x1b[31mnot writable\x1b[0m");
-            issues.push("The .rustant directory is not writable. Sessions and config cannot be saved.");
+            issues.push(
+                "The .rustant directory is not writable. Sessions and config cannot be saved.",
+            );
         }
     } else {
         println!("  .rustant dir:  \x1b[33mmissing\x1b[0m (will be created on first use)");
@@ -1641,7 +1675,11 @@ async fn handle_doctor_command(agent: &Agent, workspace: &Path) {
     let expected_min_tools = 10;
     println!("  Registered:    {} tools", tools.len());
     if tools.len() < expected_min_tools {
-        println!("  Status:        \x1b[33mfewer than expected ({} < {})\x1b[0m", tools.len(), expected_min_tools);
+        println!(
+            "  Status:        \x1b[33mfewer than expected ({} < {})\x1b[0m",
+            tools.len(),
+            expected_min_tools
+        );
         warnings.push("Fewer tools than expected are registered.");
     } else {
         println!("  Status:        \x1b[32mok\x1b[0m");
@@ -1656,10 +1694,7 @@ async fn handle_doctor_command(agent: &Agent, workspace: &Path) {
         mem.short_term.total_messages_seen()
     );
     println!("  Facts stored:  {}", mem.long_term.facts.len());
-    println!(
-        "  Pinned:        {}",
-        mem.short_term.pinned_count()
-    );
+    println!("  Pinned:        {}", mem.short_term.pinned_count());
     let has_summary = mem.short_term.summary().is_some();
     if has_summary {
         println!("  Compression:   \x1b[33mactive (older context summarized)\x1b[0m");
@@ -1808,10 +1843,52 @@ fn handle_trust_command(agent: &Agent) {
         for tool in &all_tools {
             let a = approved.get(*tool).copied().unwrap_or(0);
             let d = denied.get(*tool).copied().unwrap_or(0);
+            println!("    {:<20} approved: {} | denied: {}", tool, a, d);
+        }
+
+        // Adaptive suggestions
+        println!();
+        println!("  Suggestions:");
+        let mut has_suggestions = false;
+
+        for tool in &all_tools {
+            let a = approved.get(*tool).copied().unwrap_or(0);
+            let d = denied.get(*tool).copied().unwrap_or(0);
+            if a > 10 && d == 0 {
+                println!(
+                    "    \x1b[32m+\x1b[0m {} approved {}x with 0 denials — consider auto-approving in config.",
+                    tool, a
+                );
+                has_suggestions = true;
+            } else if d > 3 && d > a {
+                println!(
+                    "    \x1b[33m!\x1b[0m {} denied {}x (vs {}x approved) — review safety config.",
+                    tool, d, a
+                );
+                has_suggestions = true;
+            }
+        }
+
+        let total_approved: usize = approved.values().sum();
+        let total_denied: usize = denied.values().sum();
+        let total = total_approved + total_denied;
+
+        if total > 20 && total_denied == 0 {
             println!(
-                "    {:<20} approved: {} | denied: {}",
-                tool, a, d
+                "    \x1b[36m*\x1b[0m All {} actions approved with 0 denials. Consider a less restrictive mode.",
+                total
             );
+            has_suggestions = true;
+        } else if total > 10 && total_denied > 0 && (total_denied as f64 / total as f64) > 0.5 {
+            println!(
+                "    \x1b[36m*\x1b[0m High denial rate ({}/{}). Review /permissions or add tools to blocklist.",
+                total_denied, total
+            );
+            has_suggestions = true;
+        }
+
+        if !has_suggestions {
+            println!("    No specific suggestions based on current patterns.");
         }
     }
 

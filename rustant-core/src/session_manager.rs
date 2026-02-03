@@ -376,7 +376,11 @@ impl SessionManager {
     }
 
     /// Search sessions by matching query against name, goal, summary, and tags.
+    /// Returns empty vec for empty/whitespace-only queries.
     pub fn search(&self, query: &str) -> Vec<&SessionEntry> {
+        if query.trim().is_empty() {
+            return Vec::new();
+        }
         let query_lower = query.to_lowercase();
         self.index
             .entries
@@ -720,9 +724,21 @@ mod tests {
             tags: tags.into_iter().map(|s| s.to_string()).collect(),
             project_type: None,
         };
-        index.entries.push(make_entry("debug-auth", Some("fix authentication bug"), vec!["bugfix"]));
-        index.entries.push(make_entry("refactor-api", Some("clean up API endpoints"), vec!["refactor"]));
-        index.entries.push(make_entry("add-tests", Some("write unit tests"), vec!["testing"]));
+        index.entries.push(make_entry(
+            "debug-auth",
+            Some("fix authentication bug"),
+            vec!["bugfix"],
+        ));
+        index.entries.push(make_entry(
+            "refactor-api",
+            Some("clean up API endpoints"),
+            vec!["refactor"],
+        ));
+        index.entries.push(make_entry(
+            "add-tests",
+            Some("write unit tests"),
+            vec!["testing"],
+        ));
 
         let mgr = SessionManager::from_index(index);
 
@@ -743,6 +759,17 @@ mod tests {
         // No matches
         let results = mgr.search("nonexistent");
         assert_eq!(results.len(), 0);
+
+        // Empty query returns empty (not all sessions)
+        let results = mgr.search("");
+        assert!(results.is_empty(), "Empty query should return no results");
+
+        // Whitespace-only query returns empty
+        let results = mgr.search("   ");
+        assert!(
+            results.is_empty(),
+            "Whitespace-only query should return no results"
+        );
     }
 
     #[test]
@@ -762,7 +789,9 @@ mod tests {
             tags: tags.into_iter().map(|s| s.to_string()).collect(),
             project_type: None,
         };
-        index.entries.push(make_entry("s1", vec!["bugfix", "urgent"]));
+        index
+            .entries
+            .push(make_entry("s1", vec!["bugfix", "urgent"]));
         index.entries.push(make_entry("s2", vec!["refactor"]));
         index.entries.push(make_entry("s3", vec!["bugfix"]));
 

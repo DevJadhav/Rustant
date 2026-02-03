@@ -425,27 +425,30 @@ impl Agent {
                         let msgs_count = msgs_to_summarize.len();
                         let pinned_count = self.memory.short_term.pinned_count();
 
-                        let (summary_text, was_llm) =
-                            match self.summarizer.summarize(&msgs_to_summarize).await {
-                                Ok(result) => {
-                                    info!(
-                                        messages_summarized = result.messages_summarized,
-                                        tokens_saved = result.tokens_saved,
-                                        "Context compression via LLM summarization"
-                                    );
-                                    (result.text, true)
-                                }
-                                Err(e) => {
-                                    warn!(error = %e, "LLM summarization failed, falling back to truncation");
-                                    // Fallback: smart structured summary preserving tool names
-                                    // and first/last messages instead of naive truncation
-                                    let text = crate::summarizer::smart_fallback_summary(
-                                        &msgs_to_summarize,
-                                        500,
-                                    );
-                                    (text, false)
-                                }
-                            };
+                        let (summary_text, was_llm) = match self
+                            .summarizer
+                            .summarize(&msgs_to_summarize)
+                            .await
+                        {
+                            Ok(result) => {
+                                info!(
+                                    messages_summarized = result.messages_summarized,
+                                    tokens_saved = result.tokens_saved,
+                                    "Context compression via LLM summarization"
+                                );
+                                (result.text, true)
+                            }
+                            Err(e) => {
+                                warn!(error = %e, "LLM summarization failed, falling back to truncation");
+                                // Fallback: smart structured summary preserving tool names
+                                // and first/last messages instead of naive truncation
+                                let text = crate::summarizer::smart_fallback_summary(
+                                    &msgs_to_summarize,
+                                    500,
+                                );
+                                (text, false)
+                            }
+                        };
 
                         self.memory.short_term.compress(summary_text);
 
@@ -1228,10 +1231,7 @@ impl AgentCallback for RecordingCallback {
             .push((message.to_string(), severity));
     }
     async fn on_context_health(&self, event: &ContextHealthEvent) {
-        self.context_health_events
-            .lock()
-            .await
-            .push(event.clone());
+        self.context_health_events.lock().await.push(event.clone());
     }
 }
 
