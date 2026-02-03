@@ -40,6 +40,9 @@ pub struct ApprovalContext {
     /// Whether the action can be undone, and how.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reversibility: Option<ReversibilityInfo>,
+    /// Preview of the changes (diff, command, etc.) for destructive tools.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
 }
 
 impl ApprovalContext {
@@ -64,6 +67,46 @@ impl ApprovalContext {
 
     pub fn with_reversibility(mut self, info: ReversibilityInfo) -> Self {
         self.reversibility = Some(info);
+        self
+    }
+
+    pub fn with_preview(mut self, preview: impl Into<String>) -> Self {
+        self.preview = Some(preview.into());
+        self
+    }
+
+    /// Auto-generate a preview from tool name and action details for destructive tools.
+    pub fn with_preview_from_tool(mut self, tool_name: &str, details: &ActionDetails) -> Self {
+        let preview = match (tool_name, details) {
+            ("file_write", ActionDetails::FileWrite { path, size_bytes }) => {
+                Some(format!(
+                    "Will write {} bytes to {}",
+                    size_bytes,
+                    path.display()
+                ))
+            }
+            ("file_patch", ActionDetails::FileWrite { path, .. }) => {
+                Some(format!("Will patch {}", path.display()))
+            }
+            ("shell_exec", ActionDetails::ShellCommand { command }) => {
+                let truncated = if command.len() > 200 {
+                    format!("{}...", &command[..200])
+                } else {
+                    command.clone()
+                };
+                Some(format!("$ {}", truncated))
+            }
+            ("git_commit", ActionDetails::GitOperation { operation }) => {
+                Some(format!("git {}", operation))
+            }
+            ("smart_edit", ActionDetails::FileWrite { path, .. }) => {
+                Some(format!("Will smart-edit {}", path.display()))
+            }
+            _ => None,
+        };
+        if let Some(p) = preview {
+            self.preview = Some(p);
+        }
         self
     }
 }
@@ -2039,5 +2082,55 @@ mod tests {
         };
         guardian.set_contract(contract);
         assert!(guardian.contract_enforcer().has_contract());
+    }
+
+    #[test]
+    fn test_approval_context_preview_file_write() {
+        let ctx = ApprovalContext::new().with_preview_from_tool(
+            "file_write",
+            &ActionDetails::FileWrite {
+                path: "src/main.rs".into(),
+                size_bytes: 512,
+            },
+        );
+        assert!(ctx.preview.is_some());
+        let preview = ctx.preview.unwrap();
+        assert!(preview.contains("512 bytes"));
+        assert!(preview.contains("src/main.rs"));
+    }
+
+    #[test]
+    fn test_approval_context_preview_shell_exec() {
+        let ctx = ApprovalContext::new().with_preview_from_tool(
+            "shell_exec",
+            &ActionDetails::ShellCommand {
+                command: "cargo test --workspace".into(),
+            },
+        );
+        assert!(ctx.preview.is_some());
+        assert!(ctx.preview.unwrap().contains("$ cargo test"));
+    }
+
+    #[test]
+    fn test_approval_context_preview_read_only_none() {
+        let ctx = ApprovalContext::new().with_preview_from_tool(
+            "file_read",
+            &ActionDetails::FileRead {
+                path: "src/main.rs".into(),
+            },
+        );
+        assert!(ctx.preview.is_none());
+    }
+
+    #[test]
+    fn test_approval_context_preview_git_commit() {
+        let ctx = ApprovalContext::new().with_preview_from_tool(
+            "git_commit",
+            &ActionDetails::GitOperation {
+                operation: "commit -m 'fix: auth bug'".into(),
+            },
+        );
+        assert!(ctx.preview.is_some());
+        assert!(ctx.preview.unwrap().contains("git commit"));
     }
 }

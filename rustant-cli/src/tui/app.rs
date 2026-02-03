@@ -115,6 +115,7 @@ impl App {
             context_window: config.llm.context_window,
             cost_usd: 0.0,
             is_streaming: false,
+            vim_enabled: false,
         };
 
         let sidebar = SidebarData {
@@ -776,6 +777,7 @@ impl App {
                 } else {
                     InputMode::Normal
                 };
+                self.header.vim_enabled = self.vim_mode;
             }
             "/theme dark" => self.theme = Theme::dark(),
             "/theme light" => self.theme = Theme::light(),
@@ -1785,6 +1787,54 @@ impl App {
                     timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
                 });
                 self.pending_clarification = Some(reply);
+            }
+            TuiEvent::ContextHealth(event) => {
+                let text = match &event {
+                    rustant_core::ContextHealthEvent::Warning {
+                        usage_percent,
+                        total_tokens,
+                        context_window,
+                    } => format!(
+                        "[Context: {}% used ({}/{})] Consider using /pin for important messages",
+                        usage_percent, total_tokens, context_window
+                    ),
+                    rustant_core::ContextHealthEvent::Critical {
+                        usage_percent,
+                        total_tokens,
+                        context_window,
+                    } => format!(
+                        "[Context: {}% used ({}/{})] Use /pin for critical messages or /compact to compress now",
+                        usage_percent, total_tokens, context_window
+                    ),
+                    rustant_core::ContextHealthEvent::Compressed {
+                        messages_compressed,
+                        was_llm_summarized,
+                        pinned_preserved,
+                    } => {
+                        let method = if *was_llm_summarized {
+                            "LLM-summarized"
+                        } else {
+                            "fallback truncation"
+                        };
+                        let pinned_info = if *pinned_preserved > 0 {
+                            format!(", {} pinned preserved", pinned_preserved)
+                        } else {
+                            String::new()
+                        };
+                        format!(
+                            "[Context compressed: {} messages via {}{}]",
+                            messages_compressed, method, pinned_info
+                        )
+                    }
+                };
+                let is_critical = matches!(event, rustant_core::ContextHealthEvent::Critical { .. });
+                self.conversation.push_message(DisplayMessage {
+                    role: Role::System,
+                    text,
+                    tool_name: None,
+                    is_error: is_critical,
+                    timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                });
             }
         }
     }

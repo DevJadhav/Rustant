@@ -16,6 +16,7 @@ pub struct HeaderData {
     pub context_window: usize,
     pub cost_usd: f64,
     pub is_streaming: bool,
+    pub vim_enabled: bool,
 }
 
 impl Default for HeaderData {
@@ -27,6 +28,7 @@ impl Default for HeaderData {
             context_window: 128_000,
             cost_usd: 0.0,
             is_streaming: false,
+            vim_enabled: false,
         }
     }
 }
@@ -73,7 +75,7 @@ pub fn render_header(frame: &mut Frame, area: Rect, data: &HeaderData, theme: &T
 
     let status_indicator = if data.is_streaming { "⟳" } else { "●" };
 
-    let spans = vec![
+    let mut spans = vec![
         Span::styled(
             format!(" {} Rustant", status_indicator),
             theme
@@ -97,6 +99,19 @@ pub fn render_header(frame: &mut Frame, area: Rect, data: &HeaderData, theme: &T
         Span::styled(" │ ", theme.header_style().fg(theme.border_color)),
         Span::styled(data.cost_display(), theme.header_style()),
     ];
+    if data.vim_enabled {
+        spans.push(Span::styled(
+            " │ ",
+            theme.header_style().fg(theme.border_color),
+        ));
+        spans.push(Span::styled(
+            "[VIM]",
+            theme
+                .header_style()
+                .add_modifier(Modifier::BOLD)
+                .fg(theme.accent),
+        ));
+    }
 
     let header = Paragraph::new(Line::from(spans)).style(theme.header_style());
     frame.render_widget(header, area);
@@ -168,6 +183,7 @@ mod tests {
             context_window: 128_000,
             cost_usd: 0.0342,
             is_streaming: false,
+            vim_enabled: false,
         };
         let theme = Theme::dark();
         terminal

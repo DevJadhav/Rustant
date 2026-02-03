@@ -34,6 +34,12 @@ pub struct SessionEntry {
     pub completed: bool,
     /// File path to the session data (relative to sessions directory).
     pub file_name: String,
+    /// User-defined tags for categorization.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    /// Auto-detected project type at save time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_type: Option<String>,
 }
 
 /// The session index stored as a JSON file.
@@ -158,6 +164,8 @@ impl SessionManager {
             total_tokens: 0,
             completed: false,
             file_name,
+            tags: Vec::new(),
+            project_type: None,
         };
 
         self.index.entries.push(entry.clone());
@@ -355,6 +363,72 @@ impl SessionManager {
     /// Get a reference to the session index.
     pub fn index(&self) -> &SessionIndex {
         &self.index
+    }
+
+    /// Create a SessionManager from an in-memory index (for testing).
+    #[cfg(test)]
+    pub(crate) fn from_index(index: SessionIndex) -> Self {
+        Self {
+            sessions_dir: PathBuf::from("/tmp/rustant-test-sessions"),
+            index,
+            active_session_id: None,
+        }
+    }
+
+    /// Search sessions by matching query against name, goal, summary, and tags.
+    pub fn search(&self, query: &str) -> Vec<&SessionEntry> {
+        let query_lower = query.to_lowercase();
+        self.index
+            .entries
+            .iter()
+            .filter(|e| {
+                e.name.to_lowercase().contains(&query_lower)
+                    || e.last_goal
+                        .as_ref()
+                        .is_some_and(|g| g.to_lowercase().contains(&query_lower))
+                    || e.summary
+                        .as_ref()
+                        .is_some_and(|s| s.to_lowercase().contains(&query_lower))
+                    || e.tags
+                        .iter()
+                        .any(|t| t.to_lowercase().contains(&query_lower))
+            })
+            .collect()
+    }
+
+    /// Filter sessions by tag.
+    pub fn filter_by_tag(&self, tag: &str) -> Vec<&SessionEntry> {
+        let tag_lower = tag.to_lowercase();
+        self.index
+            .entries
+            .iter()
+            .filter(|e| e.tags.iter().any(|t| t.to_lowercase() == tag_lower))
+            .collect()
+    }
+
+    /// Add a tag to a session.
+    pub fn tag_session(&mut self, query: &str, tag: &str) -> Result<(), MemoryError> {
+        let query_lower = query.to_lowercase();
+        let entry = if let Ok(id) = Uuid::parse_str(query) {
+            self.index.entries.iter_mut().find(|e| e.id == id)
+        } else {
+            self.index.entries.iter_mut().find(|e| {
+                e.name.to_lowercase() == query_lower
+                    || e.name.to_lowercase().starts_with(&query_lower)
+            })
+        };
+        match entry {
+            Some(e) => {
+                let tag_str = tag.to_string();
+                if !e.tags.contains(&tag_str) {
+                    e.tags.push(tag_str);
+                }
+                self.index.save(&self.sessions_dir)
+            }
+            None => Err(MemoryError::SessionLoadFailed {
+                message: format!("No session found matching: '{}'", query),
+            }),
+        }
     }
 }
 
@@ -608,10 +682,99 @@ mod tests {
             total_tokens: 1000,
             completed: false,
             file_name: "test.json".to_string(),
+            tags: vec!["bugfix".to_string()],
+            project_type: Some("Rust".to_string()),
         };
         let json = serde_json::to_string(&entry).unwrap();
         let restored: SessionEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.name, "test-session");
         assert_eq!(restored.message_count, 5);
+        assert_eq!(restored.tags, vec!["bugfix"]);
+        assert_eq!(restored.project_type, Some("Rust".to_string()));
+    }
+
+    #[test]
+    fn test_session_entry_deserialize_without_tags() {
+        // Ensure backward compatibility: old entries without tags/project_type still deserialize
+        let json = r#"{"id":"00000000-0000-0000-0000-000000000001","name":"old-session","created_at":"2024-01-01T00:00:00Z","updated_at":"2024-01-01T00:00:00Z","last_goal":null,"summary":null,"message_count":3,"total_tokens":500,"completed":false,"file_name":"old.json"}"#;
+        let entry: SessionEntry = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.name, "old-session");
+        assert!(entry.tags.is_empty());
+        assert!(entry.project_type.is_none());
+    }
+
+    #[test]
+    fn test_session_search() {
+        let mut index = SessionIndex::default();
+        let make_entry = |name: &str, goal: Option<&str>, tags: Vec<&str>| SessionEntry {
+            id: Uuid::new_v4(),
+            name: name.to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            last_goal: goal.map(|g| g.to_string()),
+            summary: None,
+            message_count: 1,
+            total_tokens: 100,
+            completed: false,
+            file_name: format!("{}.json", name),
+            tags: tags.into_iter().map(|s| s.to_string()).collect(),
+            project_type: None,
+        };
+        index.entries.push(make_entry("debug-auth", Some("fix authentication bug"), vec!["bugfix"]));
+        index.entries.push(make_entry("refactor-api", Some("clean up API endpoints"), vec!["refactor"]));
+        index.entries.push(make_entry("add-tests", Some("write unit tests"), vec!["testing"]));
+
+        let mgr = SessionManager::from_index(index);
+
+        // Search by name
+        let results = mgr.search("auth");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "debug-auth");
+
+        // Search by goal
+        let results = mgr.search("unit tests");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "add-tests");
+
+        // Search by tag
+        let results = mgr.search("bugfix");
+        assert_eq!(results.len(), 1);
+
+        // No matches
+        let results = mgr.search("nonexistent");
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_session_filter_by_tag() {
+        let mut index = SessionIndex::default();
+        let make_entry = |name: &str, tags: Vec<&str>| SessionEntry {
+            id: Uuid::new_v4(),
+            name: name.to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            last_goal: None,
+            summary: None,
+            message_count: 1,
+            total_tokens: 100,
+            completed: false,
+            file_name: format!("{}.json", name),
+            tags: tags.into_iter().map(|s| s.to_string()).collect(),
+            project_type: None,
+        };
+        index.entries.push(make_entry("s1", vec!["bugfix", "urgent"]));
+        index.entries.push(make_entry("s2", vec!["refactor"]));
+        index.entries.push(make_entry("s3", vec!["bugfix"]));
+
+        let mgr = SessionManager::from_index(index);
+
+        let results = mgr.filter_by_tag("bugfix");
+        assert_eq!(results.len(), 2);
+
+        let results = mgr.filter_by_tag("urgent");
+        assert_eq!(results.len(), 1);
+
+        let results = mgr.filter_by_tag("nonexistent");
+        assert_eq!(results.len(), 0);
     }
 }

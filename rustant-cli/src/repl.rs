@@ -10,6 +10,69 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// Extract a human-readable detail string from tool arguments.
+///
+/// Maps tool names to their primary argument for display during execution:
+/// - File tools show the file path
+/// - Shell tools show the command (truncated)
+/// - Git tools show the operation or commit message
+pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> Option<String> {
+    match tool_name {
+        "file_read" | "file_list" | "file_search" | "file_write" | "file_patch" => {
+            args.get("path")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        }
+        "shell_exec" => args.get("command").and_then(|v| v.as_str()).map(|s| {
+            if s.len() > 60 {
+                format!("{}...", &s[..60])
+            } else {
+                s.to_string()
+            }
+        }),
+        "git_status" | "git_diff" => Some("workspace".to_string()),
+        "git_commit" => args
+            .get("message")
+            .and_then(|v| v.as_str())
+            .map(|s| {
+                if s.len() > 50 {
+                    format!("\"{}...\"", &s[..50])
+                } else {
+                    format!("\"{}\"", s)
+                }
+            }),
+        "web_search" => args
+            .get("query")
+            .and_then(|v| v.as_str())
+            .map(|s| {
+                if s.len() > 50 {
+                    format!("\"{}...\"", &s[..50])
+                } else {
+                    format!("\"{}\"", s)
+                }
+            }),
+        "web_fetch" | "document_read" => args
+            .get("url")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        "smart_edit" => args
+            .get("file")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        "codebase_search" => args
+            .get("query")
+            .and_then(|v| v.as_str())
+            .map(|s| {
+                if s.len() > 50 {
+                    format!("\"{}...\"", &s[..50])
+                } else {
+                    format!("\"{}\"", s)
+                }
+            }),
+        _ => None,
+    }
+}
+
 /// A CLI callback that prints to stdout and reads approval from stdin.
 pub(crate) struct CliCallback;
 
@@ -49,6 +112,9 @@ impl AgentCallback for CliCallback {
             }
             println!();
         }
+        if let Some(ref preview) = action.approval_context.preview {
+            println!("  \x1b[36mPreview:\x1b[0m {}", preview);
+        }
 
         print!("  [y]es / [n]o / [a]pprove all similar > ");
         let _ = io::stdout().flush();
@@ -66,8 +132,13 @@ impl AgentCallback for CliCallback {
         }
     }
 
-    async fn on_tool_start(&self, tool_name: &str, _args: &serde_json::Value) {
-        println!("\x1b[36m  [{}] executing...\x1b[0m", tool_name);
+    async fn on_tool_start(&self, tool_name: &str, args: &serde_json::Value) {
+        let detail = extract_tool_detail(tool_name, args);
+        if let Some(ref detail) = detail {
+            println!("\x1b[36m  [{}: {}] executing...\x1b[0m", tool_name, detail);
+        } else {
+            println!("\x1b[36m  [{}] executing...\x1b[0m", tool_name);
+        }
     }
 
     async fn on_tool_result(&self, tool_name: &str, output: &ToolOutput, duration_ms: u64) {
@@ -147,6 +218,127 @@ impl AgentCallback for CliCallback {
             String::new()
         }
     }
+
+    async fn on_context_health(&self, event: &rustant_core::ContextHealthEvent) {
+        match event {
+            rustant_core::ContextHealthEvent::Warning {
+                usage_percent,
+                total_tokens,
+                context_window,
+            } => {
+                println!(
+                    "\x1b[33m  [Context: {}% used ({}/{})] Consider using /pin for important messages\x1b[0m",
+                    usage_percent, total_tokens, context_window
+                );
+            }
+            rustant_core::ContextHealthEvent::Critical {
+                usage_percent,
+                total_tokens,
+                context_window,
+            } => {
+                println!(
+                    "\x1b[31m  [Context: {}% used ({}/{})] Use /pin for critical messages or /compact to compress now\x1b[0m",
+                    usage_percent, total_tokens, context_window
+                );
+            }
+            rustant_core::ContextHealthEvent::Compressed {
+                messages_compressed,
+                was_llm_summarized,
+                pinned_preserved,
+            } => {
+                let method = if *was_llm_summarized {
+                    "LLM-summarized"
+                } else {
+                    "fallback truncation"
+                };
+                let pinned_info = if *pinned_preserved > 0 {
+                    format!(", {} pinned messages preserved", pinned_preserved)
+                } else {
+                    String::new()
+                };
+                println!(
+                    "\x1b[90m  [Context compressed: {} messages via {}{}]\x1b[0m",
+                    messages_compressed, method, pinned_info
+                );
+            }
+        }
+        let _ = io::stdout().flush();
+    }
+}
+
+/// Print contextual hints after /help based on current agent state.
+fn print_contextual_hints(agent: &Agent) {
+    let mem = agent.memory();
+    let mut hints = Vec::new();
+
+    if mem.short_term.len() > 50 {
+        hints.push("Tip: You have many messages. Use /compact to free context space.");
+    }
+    if mem.long_term.facts.is_empty() && mem.short_term.len() > 10 {
+        hints.push("Tip: Use /session save <name> to checkpoint your work.");
+    }
+
+    let context_window = agent.brain().context_window();
+    let ctx = mem.context_breakdown(context_window);
+    if ctx.usage_ratio() > 0.7 {
+        hints.push("Tip: Context is >70% full. Use /pin to protect important messages before compression.");
+    }
+
+    if !hints.is_empty() {
+        println!();
+        for hint in hints {
+            println!("\x1b[33m  {}\x1b[0m", hint);
+        }
+    }
+}
+
+/// Show first-run onboarding tour with project-specific guidance.
+///
+/// Checks for `.rustant/.onboarding_complete` marker. If absent, prints
+/// a contextual welcome message using project detection, then creates the marker.
+fn show_onboarding(workspace: &Path) {
+    let marker = workspace.join(".rustant").join(".onboarding_complete");
+    if marker.exists() {
+        return;
+    }
+
+    let info = rustant_core::project_detect::detect_project(workspace);
+    let tasks = rustant_core::project_detect::example_tasks(&info);
+
+    println!("\x1b[1;36m  Welcome to Rustant!\x1b[0m");
+    println!();
+
+    // Project-specific welcome
+    if info.project_type != rustant_core::project_detect::ProjectType::Unknown {
+        let framework_note = info
+            .framework
+            .as_ref()
+            .map(|f| format!(" ({} framework)", f))
+            .unwrap_or_default();
+        println!(
+            "  Detected a \x1b[1m{}{}\x1b[0m project.",
+            info.project_type, framework_note
+        );
+    }
+
+    println!("  Here are some things you can try:");
+    println!();
+    for task in tasks.iter().take(3) {
+        println!("    {}", task);
+    }
+    println!();
+    println!("  Quick reference:");
+    println!("    \x1b[36m@\x1b[0m reference files  |  \x1b[36m/\x1b[0m commands  |  \x1b[36m/tools\x1b[0m list tools");
+    println!("    \x1b[36m/permissions\x1b[0m adjust safety  |  \x1b[36m/context\x1b[0m check memory usage");
+    println!();
+    println!("  I'll ask for approval before modifying files. Adjust with \x1b[36m/permissions\x1b[0m.");
+    println!();
+
+    // Create the marker so the tour doesn't show again
+    let rustant_dir = workspace.join(".rustant");
+    if std::fs::create_dir_all(&rustant_dir).is_ok() {
+        let _ = std::fs::write(&marker, "onboarding completed\n");
+    }
 }
 
 /// Run the agent in interactive REPL mode.
@@ -166,6 +358,9 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
         workspace.display()
     );
     println!("  Type /help for commands, /quit to exit\n");
+
+    // Show first-run onboarding tour if not yet completed
+    show_onboarding(&workspace);
 
     let provider = if config.llm.auth_method == "oauth" {
         let cred_store = rustant_core::credentials::KeyringCredentialStore::new();
@@ -193,6 +388,25 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
     register_builtin_tools(&mut registry, workspace.clone());
     register_agent_tools_from_registry(&mut agent, &registry, &workspace);
 
+    // Attempt auto-recovery of the most recent session
+    if let Ok(mut mgr) = rustant_core::SessionManager::new(&workspace) {
+        match mgr.resume_latest() {
+            Ok((memory, _continuation)) => {
+                let msg_count = memory.short_term.len();
+                if msg_count > 0 {
+                    *agent.memory_mut() = memory;
+                    println!(
+                        "\x1b[90m  Recovered previous session ({} messages). Type /clear to start fresh.\x1b[0m",
+                        msg_count
+                    );
+                }
+            }
+            Err(_) => {
+                // No sessions available or recovery failed — start fresh silently
+            }
+        }
+    }
+
     let stdin = io::stdin();
     loop {
         print!("\x1b[1;34m> \x1b[0m");
@@ -217,12 +431,57 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
 
             match cmd {
                 "/quit" | "/exit" | "/q" => {
+                    // Offer to save session if there's meaningful context
+                    if agent.memory().short_term.total_messages_seen() > 2 {
+                        print!("Save session before exiting? [y/n/name] > ");
+                        let _ = io::stdout().flush();
+                        let mut save_input = String::new();
+                        if stdin.lock().read_line(&mut save_input).is_ok() {
+                            let save_input = save_input.trim();
+                            if !save_input.is_empty() && save_input != "n" && save_input != "no" {
+                                let session_name = if save_input == "y" || save_input == "yes" {
+                                    None
+                                } else {
+                                    Some(save_input)
+                                };
+                                if let Ok(mut mgr) =
+                                    rustant_core::SessionManager::new(&workspace)
+                                {
+                                    let entry = mgr.start_session(session_name);
+                                    let total_tokens = agent.brain().total_usage().total();
+                                    match mgr.save_checkpoint(agent.memory(), total_tokens) {
+                                        Ok(()) => {
+                                            println!("Session saved as '{}'.", entry.name);
+                                        }
+                                        Err(e) => {
+                                            println!("Failed to save session: {}", e);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     println!("Goodbye!");
                     break;
                 }
                 "/help" | "/?" => {
                     let registry = crate::slash::CommandRegistry::with_defaults();
-                    println!("{}", registry.help_text());
+                    if !arg1.is_empty() {
+                        // Topic-specific help
+                        match registry.help_for(arg1) {
+                            Some(help) => println!("\n{}", help),
+                            None => {
+                                println!("No help found for '{}'. Try /help for all commands.", arg1);
+                                if let Some(suggestion) = registry.suggest(&format!("/{}", arg1)) {
+                                    println!("Did you mean: {} ?", suggestion);
+                                }
+                            }
+                        }
+                    } else {
+                        println!("{}", registry.help_text());
+                        // Contextual suggestions based on agent state
+                        print_contextual_hints(&agent);
+                    }
                     continue;
                 }
                 "/clear" => {
@@ -268,7 +527,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     continue;
                 }
                 "/sessions" => {
-                    handle_sessions_command(&workspace);
+                    handle_sessions_command(arg1, arg2, &workspace);
                     continue;
                 }
                 "/safety" => {
@@ -315,6 +574,14 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     handle_permissions_command(arg1, &mut agent);
                     continue;
                 }
+                "/trust" => {
+                    handle_trust_command(&agent);
+                    continue;
+                }
+                "/keys" => {
+                    handle_keys_command();
+                    continue;
+                }
                 "/undo" => {
                     handle_undo_command(&workspace);
                     continue;
@@ -328,8 +595,18 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     continue;
                 }
                 _ => {
-                    // Use registry for unknown command suggestions
                     let registry = crate::slash::CommandRegistry::with_defaults();
+                    // Check if this is a TUI-only command
+                    if let Some(info) = registry.lookup(cmd) {
+                        if info.tui_only {
+                            println!(
+                                "The {} command is only available in TUI mode. Launch with: rustant (without --no-tui)",
+                                cmd
+                            );
+                            continue;
+                        }
+                    }
+                    // Use registry for unknown command suggestions
                     if let Some(suggestion) = registry.suggest(cmd) {
                         println!("Unknown command: {}. Did you mean {}?", cmd, suggestion);
                     } else {
@@ -358,6 +635,20 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
             }
             Err(e) => {
                 println!("\x1b[31mError: {}\x1b[0m", e);
+                // Show actionable guidance if available
+                {
+                    use rustant_core::error::UserGuidance;
+                    if let Some(suggestion) = e.suggestion() {
+                        println!("\x1b[33m  Suggestion: {}\x1b[0m", suggestion);
+                    }
+                    let steps = e.next_steps();
+                    if !steps.is_empty() {
+                        println!("\x1b[90m  Next steps:\x1b[0m");
+                        for step in &steps {
+                            println!("\x1b[90m    - {}\x1b[0m", step);
+                        }
+                    }
+                }
             }
         }
     }
@@ -812,7 +1103,7 @@ fn handle_session_command(sub: &str, name: &str, agent: &mut Agent, workspace: &
         }
         "list" => {
             // Delegate to the same handler as /sessions for consistency.
-            handle_sessions_command(workspace);
+            handle_sessions_command("", "", workspace);
         }
         _ => {
             println!("Usage: /session save [name] | /session load <name> | /session list");
@@ -1038,41 +1329,114 @@ fn handle_resume_command(query: &str, agent: &mut Agent, workspace: &Path) {
     }
 }
 
-/// Handle `/sessions` REPL command.
-fn handle_sessions_command(workspace: &Path) {
-    let mgr = match rustant_core::SessionManager::new(workspace) {
-        Ok(m) => m,
-        Err(e) => {
-            println!("Failed to initialize session manager: {}", e);
-            return;
+/// Handle `/sessions` REPL command with optional subcommands.
+fn handle_sessions_command(sub: &str, arg: &str, workspace: &Path) {
+    match sub {
+        "search" if !arg.is_empty() => {
+            let mgr = match rustant_core::SessionManager::new(workspace) {
+                Ok(m) => m,
+                Err(e) => {
+                    println!("Failed to initialize session manager: {}", e);
+                    return;
+                }
+            };
+            let results = mgr.search(arg);
+            if results.is_empty() {
+                println!("No sessions matching '{}'.", arg);
+                return;
+            }
+            println!("Search results for '{}':", arg);
+            for entry in &results {
+                print_session_entry(entry);
+            }
         }
+        "tag" if !arg.is_empty() => {
+            let parts: Vec<&str> = arg.splitn(2, ' ').collect();
+            if parts.len() < 2 {
+                println!("Usage: /sessions tag <session-name> <tag>");
+                return;
+            }
+            let mut mgr = match rustant_core::SessionManager::new(workspace) {
+                Ok(m) => m,
+                Err(e) => {
+                    println!("Failed to initialize session manager: {}", e);
+                    return;
+                }
+            };
+            match mgr.tag_session(parts[0], parts[1]) {
+                Ok(()) => println!("Tagged '{}' with '{}'.", parts[0], parts[1]),
+                Err(e) => println!("Failed to tag session: {}", e),
+            }
+        }
+        "filter" if !arg.is_empty() => {
+            let mgr = match rustant_core::SessionManager::new(workspace) {
+                Ok(m) => m,
+                Err(e) => {
+                    println!("Failed to initialize session manager: {}", e);
+                    return;
+                }
+            };
+            let results = mgr.filter_by_tag(arg);
+            if results.is_empty() {
+                println!("No sessions with tag '{}'.", arg);
+                return;
+            }
+            println!("Sessions tagged '{}':", arg);
+            for entry in &results {
+                print_session_entry(entry);
+            }
+        }
+        _ => {
+            // Default: list sessions
+            let mgr = match rustant_core::SessionManager::new(workspace) {
+                Ok(m) => m,
+                Err(e) => {
+                    println!("Failed to initialize session manager: {}", e);
+                    return;
+                }
+            };
+            let sessions = mgr.list_sessions(10);
+            if sessions.is_empty() {
+                println!("No saved sessions found.");
+                return;
+            }
+            println!("Saved sessions:");
+            for entry in &sessions {
+                print_session_entry(entry);
+            }
+            println!("\nCommands: /sessions search <query> | /sessions tag <name> <tag> | /sessions filter <tag>");
+            println!("Resume with: /resume <name>");
+        }
+    }
+}
+
+/// Print a formatted session entry.
+fn print_session_entry(entry: &rustant_core::session_manager::SessionEntry) {
+    let status = if entry.completed { "done" } else { "..." };
+    let goal = entry.last_goal.as_deref().unwrap_or("(no goal)");
+    let goal_display = if goal.len() > 50 {
+        format!("{}...", &goal[..50])
+    } else {
+        goal.to_string()
     };
-
-    let sessions = mgr.list_sessions(10);
-    if sessions.is_empty() {
-        println!("No saved sessions found.");
-        return;
-    }
-
-    println!("Saved sessions:");
-    for entry in &sessions {
-        let status = if entry.completed { "done" } else { "..." };
-        let goal = entry.last_goal.as_deref().unwrap_or("(no goal)");
-        let goal_display = if goal.len() > 50 {
-            format!("{}...", &goal[..50])
-        } else {
-            goal.to_string()
-        };
-        println!(
-            "  \x1b[36m{}\x1b[0m [{}] - {} ({} msgs, {})",
-            entry.name,
-            status,
-            goal_display,
-            entry.message_count,
-            entry.updated_at.format("%m/%d %H:%M")
-        );
-    }
-    println!("\nResume with: /resume <name>");
+    let tags_str = if entry.tags.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", entry.tags.join(", "))
+    };
+    // Show relative timestamp
+    let age = chrono::Utc::now().signed_duration_since(entry.updated_at);
+    let age_str = if age.num_days() > 0 {
+        format!("{} days ago", age.num_days())
+    } else if age.num_hours() > 0 {
+        format!("{} hours ago", age.num_hours())
+    } else {
+        format!("{} min ago", age.num_minutes().max(1))
+    };
+    println!(
+        "  \x1b[36m{}\x1b[0m [{}] - {} ({} msgs, {}){}",
+        entry.name, status, goal_display, entry.message_count, age_str, tags_str
+    );
 }
 
 /// Handle `/compact` command to compress conversation context.
@@ -1217,47 +1581,138 @@ async fn handle_doctor_command(agent: &Agent, workspace: &Path) {
     println!("Rustant Doctor");
     println!("══════════════════════════════");
 
-    // Workspace
-    println!("  Workspace:     {}", workspace.display());
-    let has_git = workspace.join(".git").exists();
-    println!("  Git repo:      {}", if has_git { "yes" } else { "no" });
+    let mut issues = Vec::new();
+    let mut warnings = Vec::new();
 
-    // Config
+    // 1. Workspace checks
+    println!("\n\x1b[1mWorkspace\x1b[0m");
+    println!("  Path:          {}", workspace.display());
+    let has_git = workspace.join(".git").exists();
+    if has_git {
+        println!("  Git repo:      \x1b[32myes\x1b[0m");
+    } else {
+        println!("  Git repo:      \x1b[33mno\x1b[0m");
+        warnings.push("No git repo found. Checkpoint/undo features require git init.");
+    }
+
+    let rustant_dir = workspace.join(".rustant");
+    if rustant_dir.exists() {
+        let writable = std::fs::write(rustant_dir.join(".doctor_test"), b"").is_ok();
+        if writable {
+            let _ = std::fs::remove_file(rustant_dir.join(".doctor_test"));
+            println!("  .rustant dir:  \x1b[32mwritable\x1b[0m");
+        } else {
+            println!("  .rustant dir:  \x1b[31mnot writable\x1b[0m");
+            issues.push("The .rustant directory is not writable. Sessions and config cannot be saved.");
+        }
+    } else {
+        println!("  .rustant dir:  \x1b[33mmissing\x1b[0m (will be created on first use)");
+    }
+
+    // 2. Configuration checks
+    println!("\n\x1b[1mConfiguration\x1b[0m");
+    let config = agent.config();
     let config_path = workspace.join(".rustant").join("config.toml");
     let config_found = config_path.exists() || rustant_core::config_exists(Some(workspace));
     println!(
         "  Config file:   {}",
         if config_found {
-            "found"
+            "\x1b[32mfound\x1b[0m"
         } else {
             "using defaults"
         }
     );
-
-    // Model
-    let config = agent.config();
     println!("  LLM provider:  {}", config.llm.provider);
     println!("  Model:         {}", config.llm.model);
-    println!("  Approval mode: {:?}", config.safety.approval_mode);
 
-    // Tools
+    // 3. API key check
+    let api_key_var = &config.llm.api_key_env;
+    let has_api_key = std::env::var(api_key_var).is_ok();
+    if has_api_key {
+        println!("  API key ({}): \x1b[32mset\x1b[0m", api_key_var);
+    } else {
+        println!("  API key ({}): \x1b[31mnot set\x1b[0m", api_key_var);
+        issues.push("API key environment variable is not set. Run /setup to configure.");
+    }
+
+    // 4. Tool registration check
+    println!("\n\x1b[1mTools\x1b[0m");
     let tools = agent.tool_definitions();
-    println!("  Tools:         {} registered", tools.len());
+    let expected_min_tools = 10;
+    println!("  Registered:    {} tools", tools.len());
+    if tools.len() < expected_min_tools {
+        println!("  Status:        \x1b[33mfewer than expected ({} < {})\x1b[0m", tools.len(), expected_min_tools);
+        warnings.push("Fewer tools than expected are registered.");
+    } else {
+        println!("  Status:        \x1b[32mok\x1b[0m");
+    }
 
-    // Memory
+    // 5. Memory and context check
+    println!("\n\x1b[1mMemory\x1b[0m");
     let mem = agent.memory();
     println!(
-        "  Memory:        {} messages, {} facts",
+        "  Messages:      {} in window, {} total seen",
         mem.short_term.len(),
-        mem.long_term.facts.len()
+        mem.short_term.total_messages_seen()
     );
+    println!("  Facts stored:  {}", mem.long_term.facts.len());
+    println!(
+        "  Pinned:        {}",
+        mem.short_term.pinned_count()
+    );
+    let has_summary = mem.short_term.summary().is_some();
+    if has_summary {
+        println!("  Compression:   \x1b[33mactive (older context summarized)\x1b[0m");
+    }
 
-    // Safety
+    // 6. Safety
+    println!("\n\x1b[1mSafety\x1b[0m");
+    println!("  Approval mode: {:?}", config.safety.approval_mode);
     let audit_count = agent.safety().audit_log().len();
     println!("  Audit entries: {}", audit_count);
 
-    println!("══════════════════════════════");
-    println!("  All checks passed.");
+    // 7. Session health
+    println!("\n\x1b[1mSessions\x1b[0m");
+    let session_dir = workspace.join(".rustant").join("sessions");
+    if session_dir.exists() {
+        let index_file = session_dir.join("index.json");
+        if index_file.exists() {
+            match std::fs::read_to_string(&index_file) {
+                Ok(content) => {
+                    if serde_json::from_str::<serde_json::Value>(&content).is_ok() {
+                        println!("  Session index: \x1b[32mvalid\x1b[0m");
+                    } else {
+                        println!("  Session index: \x1b[31mcorrupted\x1b[0m");
+                        issues.push("Session index is corrupted. Delete .rustant/sessions/index.json to reset.");
+                    }
+                }
+                Err(_) => {
+                    println!("  Session index: \x1b[31munreadable\x1b[0m");
+                    issues.push("Session index is unreadable.");
+                }
+            }
+        } else {
+            println!("  Session index: not yet created");
+        }
+    } else {
+        println!("  Sessions dir:  not yet created");
+    }
+
+    // Summary
+    println!("\n══════════════════════════════");
+    if issues.is_empty() && warnings.is_empty() {
+        println!("\x1b[32m  All checks passed.\x1b[0m");
+    } else {
+        for warning in &warnings {
+            println!("\x1b[33m  Warning: {}\x1b[0m", warning);
+        }
+        for issue in &issues {
+            println!("\x1b[31m  Issue: {}\x1b[0m", issue);
+        }
+        if !issues.is_empty() {
+            println!("\n  Run \x1b[1m/setup\x1b[0m to resolve configuration issues.");
+        }
+    }
 }
 
 /// Handle `/permissions` command to view or set approval mode.
@@ -1302,6 +1757,101 @@ fn handle_permissions_command(arg: &str, agent: &mut Agent) {
             );
         }
     }
+}
+
+/// Handle `/trust` command to show safety trust dashboard.
+fn handle_trust_command(agent: &Agent) {
+    let safety = agent.safety();
+    let mode = safety.approval_mode();
+    let mode_desc = match format!("{:?}", mode).to_lowercase().as_str() {
+        "safe" => "Auto-approve read-only operations, ask for writes and executes",
+        "cautious" => "Auto-approve reads and reversible writes, ask for executes",
+        "paranoid" => "Ask for approval on every single action",
+        "yolo" => "Auto-approve everything (no safety prompts)",
+        _ => "Custom mode",
+    };
+
+    println!("Trust Calibration Dashboard");
+    println!("============================");
+    println!("  Current mode: {:?}", mode);
+    println!("  {}", mode_desc);
+    println!();
+
+    // Per-tool approval stats from audit log
+    let log = safety.audit_log();
+    let mut approved: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut denied: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+    for entry in log {
+        match &entry.event {
+            rustant_core::safety::AuditEvent::ActionApproved { tool } => {
+                *approved.entry(tool.clone()).or_insert(0) += 1;
+            }
+            rustant_core::safety::AuditEvent::ActionDenied { tool, .. } => {
+                *denied.entry(tool.clone()).or_insert(0) += 1;
+            }
+            _ => {}
+        }
+    }
+
+    if approved.is_empty() && denied.is_empty() {
+        println!("  No approval history yet. Stats will appear as you use tools.");
+    } else {
+        println!("  Per-tool approval stats:");
+        let mut all_tools: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for k in approved.keys() {
+            all_tools.insert(k.as_str());
+        }
+        for k in denied.keys() {
+            all_tools.insert(k.as_str());
+        }
+        for tool in &all_tools {
+            let a = approved.get(*tool).copied().unwrap_or(0);
+            let d = denied.get(*tool).copied().unwrap_or(0);
+            println!(
+                "    {:<20} approved: {} | denied: {}",
+                tool, a, d
+            );
+        }
+    }
+
+    println!();
+    println!("  Change mode with: /permissions <safe|cautious|paranoid|yolo>");
+}
+
+/// Handle `/keys` command to show keyboard shortcuts.
+fn handle_keys_command() {
+    println!("Keyboard Shortcuts");
+    println!("==================");
+    println!();
+    println!("  Global:");
+    println!("    Ctrl+C / Ctrl+D      Quit");
+    println!("    Ctrl+L               Scroll to bottom");
+    println!();
+    println!("  Input:");
+    println!("    Enter                Send message");
+    println!("    Shift+Enter          New line");
+    println!("    Up/Down              Navigate history");
+    println!("    @                    File autocomplete");
+    println!("    /                    Command palette");
+    println!();
+    println!("  Overlays (TUI only):");
+    println!("    Ctrl+E               Toggle explanation panel");
+    println!("    Ctrl+T               Toggle multi-agent task board");
+    println!("    F1                   Toggle keyboard shortcuts overlay");
+    println!();
+    println!("  Approval mode:");
+    println!("    y                    Approve action");
+    println!("    n                    Deny action");
+    println!("    a                    Approve all similar actions");
+    println!("    d                    Show diff preview");
+    println!("    ?                    Show approval help");
+    println!();
+    println!("  Vim mode (TUI only):");
+    println!("    i / a / I / A        Enter insert mode");
+    println!("    Esc                  Return to normal mode");
+    println!("    /                    Enter command palette");
+    println!("    q                    Quit");
 }
 
 /// Handle `/undo` command to undo last file operation.
@@ -1367,5 +1917,103 @@ fn handle_review_command(workspace: &Path) {
             println!("\nCurrent uncommitted changes:");
             println!("{}", diff);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_tool_detail_file_read() {
+        let args = serde_json::json!({"path": "src/main.rs"});
+        assert_eq!(
+            extract_tool_detail("file_read", &args),
+            Some("src/main.rs".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_tool_detail_file_write() {
+        let args = serde_json::json!({"path": "output.txt", "content": "hello"});
+        assert_eq!(
+            extract_tool_detail("file_write", &args),
+            Some("output.txt".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_tool_detail_shell_exec() {
+        let args = serde_json::json!({"command": "cargo test"});
+        assert_eq!(
+            extract_tool_detail("shell_exec", &args),
+            Some("cargo test".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_tool_detail_shell_exec_truncation() {
+        let long_cmd = "a".repeat(100);
+        let args = serde_json::json!({"command": long_cmd});
+        let result = extract_tool_detail("shell_exec", &args).unwrap();
+        assert!(result.ends_with("..."));
+        assert!(result.len() <= 64); // 60 chars + "..."
+    }
+
+    #[test]
+    fn test_extract_tool_detail_git_commit() {
+        let args = serde_json::json!({"message": "fix auth bug"});
+        assert_eq!(
+            extract_tool_detail("git_commit", &args),
+            Some("\"fix auth bug\"".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_tool_detail_git_status() {
+        let args = serde_json::json!({});
+        assert_eq!(
+            extract_tool_detail("git_status", &args),
+            Some("workspace".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_tool_detail_web_search() {
+        let args = serde_json::json!({"query": "rust async patterns"});
+        assert_eq!(
+            extract_tool_detail("web_search", &args),
+            Some("\"rust async patterns\"".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_tool_detail_unknown_tool() {
+        let args = serde_json::json!({"foo": "bar"});
+        assert_eq!(extract_tool_detail("unknown_tool", &args), None);
+    }
+
+    #[test]
+    fn test_extract_tool_detail_missing_arg() {
+        let args = serde_json::json!({"other": "value"});
+        assert_eq!(extract_tool_detail("file_read", &args), None);
+    }
+
+    #[test]
+    fn test_extract_tool_detail_smart_edit() {
+        let args = serde_json::json!({"file": "src/lib.rs", "location": "fn main"});
+        assert_eq!(
+            extract_tool_detail("smart_edit", &args),
+            Some("src/lib.rs".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_tool_detail_codebase_search() {
+        let args = serde_json::json!({"query": "error handling"});
+        assert_eq!(
+            extract_tool_detail("codebase_search", &args),
+            Some("\"error handling\"".to_string())
+        );
     }
 }

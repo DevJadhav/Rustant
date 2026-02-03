@@ -24,12 +24,18 @@ impl InputMode {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Normal => "INSERT",
-            Self::VimNormal => "NORMAL",
-            Self::VimInsert => "INSERT",
+            Self::VimNormal => "VIM-N",
+            Self::VimInsert => "VIM-I",
             Self::CommandPalette => "CMD",
             Self::Autocomplete => "AUTO",
             Self::Approval => "APPROVE",
         }
+    }
+
+    /// Whether vim mode is active (either normal or insert).
+    #[allow(dead_code)]
+    pub fn is_vim(&self) -> bool {
+        matches!(self, Self::VimNormal | Self::VimInsert)
     }
 }
 
@@ -75,8 +81,8 @@ mod tests {
     #[test]
     fn test_input_mode_labels() {
         assert_eq!(InputMode::Normal.label(), "INSERT");
-        assert_eq!(InputMode::VimNormal.label(), "NORMAL");
-        assert_eq!(InputMode::VimInsert.label(), "INSERT");
+        assert_eq!(InputMode::VimNormal.label(), "VIM-N");
+        assert_eq!(InputMode::VimInsert.label(), "VIM-I");
         assert_eq!(InputMode::CommandPalette.label(), "CMD");
         assert_eq!(InputMode::Autocomplete.label(), "AUTO");
         assert_eq!(InputMode::Approval.label(), "APPROVE");
@@ -85,7 +91,15 @@ mod tests {
     #[test]
     fn test_input_mode_display() {
         assert_eq!(format!("{}", InputMode::Normal), "INSERT");
-        assert_eq!(format!("{}", InputMode::VimNormal), "NORMAL");
+        assert_eq!(format!("{}", InputMode::VimNormal), "VIM-N");
+    }
+
+    #[test]
+    fn test_input_mode_is_vim() {
+        assert!(!InputMode::Normal.is_vim());
+        assert!(InputMode::VimNormal.is_vim());
+        assert!(InputMode::VimInsert.is_vim());
+        assert!(!InputMode::CommandPalette.is_vim());
     }
 
     #[test]

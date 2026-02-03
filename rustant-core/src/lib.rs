@@ -40,7 +40,8 @@ pub mod workflow;
 
 // Re-export commonly used types at the crate root.
 pub use agent::{
-    Agent, AgentCallback, AgentMessage, BudgetSeverity, NoOpCallback, RegisteredTool, TaskResult,
+    Agent, AgentCallback, AgentMessage, BudgetSeverity, ContextHealthEvent, NoOpCallback,
+    RegisteredTool, TaskResult,
 };
 pub use brain::{Brain, LlmProvider, MockLlmProvider, TokenCounter};
 #[cfg(feature = "browser")]

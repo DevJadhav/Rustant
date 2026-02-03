@@ -90,17 +90,17 @@ rustant/
 |-----------|-------------|
 | **Brain** | LLM provider abstraction with 6 providers, streaming, cost tracking, failover |
 | **Memory** | Three-tier system: working (task), short-term (session), long-term (persistent) with cross-session learning via facts and corrections |
-| **Safety Guardian** | 5-layer defense with 4 approval modes, prompt injection detection, typed ActionDetails, and rich approval context |
+| **Safety Guardian** | 5-layer defense with 4 approval modes, prompt injection detection, typed ActionDetails, rich approval context with tool execution previews, and `/trust` dashboard |
 | **Tool Registry** | Dynamic registration with JSON schema validation, timeouts, and risk levels |
 | **Agent Loop** | ReAct pattern (Think → Act → Observe) with async execution and mid-task clarification via `ask_user` |
-| **Command Registry** | Categorized slash commands with aliases, tab completion, and typo suggestions |
+| **Command Registry** | Categorized slash commands with aliases, tab completion, typo suggestions, per-command detailed help, and graceful TUI-only command handling |
 | **Channels** | 13 platform integrations with unified `Channel` trait |
 | **Skills** | SKILL.md-based declarative tool definitions with security validation |
 | **Plugins** | Native (.so/.dll/.dylib) and WASM (wasmi) sandboxed extensions |
 | **Workflow Engine** | YAML-based multi-step automation with 12 built-in templates and approval gates |
 | **Search Engine** | Hybrid Tantivy full-text + SQLite vector search |
 | **Project Indexer** | Background workspace indexer with .gitignore-aware walking and multi-language signature extraction |
-| **Session Manager** | Persistent sessions with auto-save, resume by name/ID, and task continuations |
+| **Session Manager** | Persistent sessions with auto-save, resume by name/ID, task continuations, search, tagging, auto-recovery on startup, and exit save prompts |
 | **Audit Trail** | Merkle chain with SHA-256 for tamper-evident execution history |
 
 ## Features
@@ -162,9 +162,28 @@ Connect Rustant to 13 platforms with a unified interface:
 - **Hybrid Search** — Tantivy full-text + SQLite vector search for long-term memory
 - **Dashboard UI** — Tauri-based desktop application for real-time monitoring
 - **Project Indexer** — Background codebase indexing with function signature extraction for Rust, Python, JS/TS, Go, Java, Ruby, and C/C++
-- **Session Resume** — Persistent session management with auto-save, resume by name or ID, and task continuations
+- **Session Resume** — Persistent session management with auto-save, resume by name or ID, task continuations, search, tagging, and auto-recovery on startup
 - **Smart Editing** — Semantic code edit tool with fuzzy location matching (exact, line numbers, function patterns, similarity), diff preview, and auto-checkpoint
 - **Zero-Config Init** — Project type auto-detection for 8 languages with framework detection, safety whitelist generation, and example tasks
+- **First-Run Onboarding** — Interactive tour on first launch with project-aware examples and progressive capability introduction
+- **Context Health Monitor** — Proactive warnings at 70%/90% context usage with compression notifications and pinning suggestions
+- **Actionable Error Recovery** — Every error maps to specific recovery guidance with next steps and command suggestions
+- **Vim Mode** — Full vim keybindings (normal/insert) with VIM-N/VIM-I status labels and [VIM] header badge
+
+### UX & Usability
+
+- **First-Run Onboarding Tour** — On first launch, a project-aware interactive tour introduces capabilities, safety model, and example tasks. Personalized using auto-detected project type and framework.
+- **Context Window Health Monitor** — Proactive warnings at 70% (yellow) and 90% (red) context usage. Notifications when context is compressed, including whether LLM summarization or fallback truncation was used and how many pinned messages were preserved.
+- **Actionable Error Recovery** — Every error variant maps to specific recovery guidance. Rate limits show retry timers, auth failures suggest `/doctor` and `/setup`, file-not-found errors suggest closest matches.
+- **Tool Execution Previews** — Before approving destructive operations, see exactly what will change: file write sizes and paths, shell commands (truncated for safety), git operations, and smart-edit targets.
+- **Safety Trust Dashboard** — `/trust` command (Ctrl+S in TUI) shows current approval mode with plain-English explanation, per-tool approval history, and adaptive suggestions to relax or tighten trust.
+- **Progressive Help** — `/help [topic]` provides per-command detailed help with examples. State-aware suggestions (e.g., "consider `/compact`" when context is high). TUI-only commands in REPL show how to switch modes.
+- **Session Search & Tagging** — Tag sessions for organization, search across names/goals/summaries, filter by tag. Relative timestamps ("2 days ago") for quick scanning.
+- **Keyboard Shortcut Overlay** — F1 or `/keys` shows all shortcuts grouped by context.
+- **Enriched Tool Execution Display** — Tool execution shows file paths and key arguments: `[file_read: src/main.rs]` instead of generic `[file_read] executing...`.
+- **Real Diagnostics** — `/doctor` performs actual health checks: LLM connectivity, tool registration, config validation, workspace writability, session index integrity.
+- **Session Auto-Recovery** — Automatic recovery of the last session on startup with user notification. Exit prompts to save unsaved work.
+- **Vim Mode Indicators** — Distinct VIM-N/VIM-I status labels and a persistent [VIM] badge in the header bar.
 
 ### Natural Language Interaction
 
@@ -178,14 +197,17 @@ Rustant works like a conversational coding assistant. Type your request in plain
 
 When the agent needs more information, it asks a clarifying question directly in the session and waits for your response before continuing. This is powered by the `ask_user` pseudo-tool — the LLM calls it like any tool, and the answer is routed back through the agent callback.
 
-All `/command` slash commands are registered in a categorized command registry with alias support, tab completion, and "did you mean?" suggestions for typos (Levenshtein distance).
+All `/command` slash commands are registered in a categorized command registry with alias support, tab completion, per-command detailed help (`/help <topic>`), and "did you mean?" suggestions for typos (Levenshtein distance). TUI-only commands gracefully inform REPL users how to access TUI mode.
 
-### TUI Panels
+### TUI Panels & Overlays
 
 | Keybinding | Panel | Description |
 |------------|-------|-------------|
 | `Ctrl+E` | Explanation Panel | Safety transparency dashboard showing decision reasoning chains, alternatives, confidence, and context factors |
 | `Ctrl+T` | Task Board | Multi-agent status board showing agent names, roles, current tool, elapsed time, and tool call counts |
+| `Ctrl+S` | Trust Dashboard | Safety trust calibration: approval mode explanation, per-tool approval stats, and adaptive trust suggestions |
+| `Ctrl+D` | Doctor | Run diagnostic checks (LLM connectivity, tool registration, config validation, workspace health) |
+| `F1` / `/keys` | Keyboard Shortcuts | Floating overlay with all shortcuts grouped by context (Global, Input, Navigation, Overlays, Approval) |
 
 ## Built-in Tools
 
@@ -244,8 +266,10 @@ Additional safety layers:
 - **Merkle audit trail** — Tamper-evident, cryptographically verified execution history
 - **WASM sandboxing** — Plugin isolation via wasmi
 - **Filesystem sandboxing** — Path restrictions via cap-std
-- **Budget tracking** — Real-time budget warnings and exceeded notifications surfaced to users via CLI and TUI
+- **Budget tracking** — Real-time budget warnings with per-tool token breakdown showing top consumers
 - **Decision explanations** — Every tool call, safety denial, and contract violation produces a reviewable `DecisionExplanation` with reasoning, confidence, and alternatives
+- **Tool execution previews** — Auto-generated previews for destructive tools (diffs for file writes, command preview for shell, staged diff for commits) shown before approval
+- **Trust calibration** — `/trust` command and Ctrl+S overlay showing per-tool approval stats and adaptive trust suggestions
 
 ## CLI Reference
 
@@ -319,11 +343,14 @@ rustant ui [--port 18790]                  # Launch Tauri dashboard
 
 # REPL Commands (inside interactive session)
 # Session
-/quit (/exit, /q)                         # Exit Rustant
+/quit (/exit, /q)                         # Exit Rustant (prompts to save unsaved work)
 /clear                                    # Clear the screen
 /session save|load|list [name]            # Session management
 /resume [name]                            # Resume a saved session (latest if no name)
 /sessions                                 # List saved sessions with details
+/sessions search <query>                  # Full-text search across session names, goals, summaries
+/sessions tag <name> <tag>                # Tag a session for organization
+/sessions filter <tag>                    # List sessions matching a tag
 
 # Agent
 /cost                                     # Show token usage and cost
@@ -338,6 +365,7 @@ rustant ui [--port 18790]                  # Launch Tauri dashboard
 # Safety
 /safety                                   # Show current safety mode and stats
 /permissions [mode]                       # View or set approval mode (safe/cautious/paranoid/yolo)
+/trust                                    # Safety trust calibration dashboard
 /audit show [n] | verify                  # Show audit log or verify Merkle chain integrity
 
 # Development
@@ -346,9 +374,10 @@ rustant ui [--port 18790]                  # Launch Tauri dashboard
 /review                                   # Review all session file changes
 
 # System
-/help (/?)                                # Show categorized help
+/help [topic]                             # Categorized help, or detailed help for a topic
+/keys                                     # Show keyboard shortcut overlay (TUI: F1)
 /config [key] [value]                     # View or modify runtime configuration
-/doctor                                   # Run diagnostic checks (LLM, tools, workspace)
+/doctor                                   # Run diagnostic checks (LLM, tools, config, sessions)
 /setup                                    # Re-run provider setup wizard
 /workflows                                # List available workflow templates
 ```

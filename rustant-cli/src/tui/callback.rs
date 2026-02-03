@@ -60,6 +60,8 @@ pub enum TuiEvent {
         question: String,
         reply: oneshot::Sender<String>,
     },
+    /// Context window health notification (warnings, compression events).
+    ContextHealth(rustant_core::ContextHealthEvent),
 }
 
 /// Implements AgentCallback by forwarding events through an mpsc channel.
@@ -160,6 +162,10 @@ impl AgentCallback for TuiCallback {
         }
         // Block (async) until the TUI sends the user's answer.
         reply_rx.await.unwrap_or_default()
+    }
+
+    async fn on_context_health(&self, event: &rustant_core::ContextHealthEvent) {
+        let _ = self.tx.send(TuiEvent::ContextHealth(event.clone()));
     }
 }
 
@@ -307,6 +313,49 @@ mod tests {
                 assert_eq!(duration_ms, 42);
             }
             other => panic!("Expected ToolResult, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_callback_sends_context_health_warning() {
+        let (callback, mut rx) = TuiCallback::new();
+        let event = rustant_core::ContextHealthEvent::Warning {
+            usage_percent: 75,
+            total_tokens: 6000,
+            context_window: 8000,
+        };
+        callback.on_context_health(&event).await;
+        match rx.recv().await.unwrap() {
+            TuiEvent::ContextHealth(rustant_core::ContextHealthEvent::Warning {
+                usage_percent,
+                ..
+            }) => {
+                assert_eq!(usage_percent, 75);
+            }
+            other => panic!("Expected ContextHealth Warning, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_callback_sends_context_health_compressed() {
+        let (callback, mut rx) = TuiCallback::new();
+        let event = rustant_core::ContextHealthEvent::Compressed {
+            messages_compressed: 12,
+            was_llm_summarized: true,
+            pinned_preserved: 2,
+        };
+        callback.on_context_health(&event).await;
+        match rx.recv().await.unwrap() {
+            TuiEvent::ContextHealth(rustant_core::ContextHealthEvent::Compressed {
+                messages_compressed,
+                was_llm_summarized,
+                pinned_preserved,
+            }) => {
+                assert_eq!(messages_compressed, 12);
+                assert!(was_llm_summarized);
+                assert_eq!(pinned_preserved, 2);
+            }
+            other => panic!("Expected ContextHealth Compressed, got {:?}", other),
         }
     }
 }

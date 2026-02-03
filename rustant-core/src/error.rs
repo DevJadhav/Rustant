@@ -352,6 +352,241 @@ pub enum VoiceError {
     AuthFailed { provider: String },
 }
 
+/// Trait providing actionable recovery guidance for errors.
+///
+/// Each error variant maps to a human-friendly suggestion and next steps,
+/// helping users recover without external documentation.
+pub trait UserGuidance {
+    /// A concise suggestion for the most likely recovery action.
+    fn suggestion(&self) -> Option<String>;
+
+    /// Ordered list of next steps the user can try.
+    fn next_steps(&self) -> Vec<String>;
+}
+
+impl UserGuidance for RustantError {
+    fn suggestion(&self) -> Option<String> {
+        match self {
+            RustantError::Llm(e) => e.suggestion(),
+            RustantError::Tool(e) => e.suggestion(),
+            RustantError::Memory(e) => e.suggestion(),
+            RustantError::Config(e) => e.suggestion(),
+            RustantError::Safety(e) => e.suggestion(),
+            RustantError::Agent(e) => e.suggestion(),
+            RustantError::Channel(e) => e.suggestion(),
+            RustantError::Io(_) => Some("Check file permissions and disk space.".into()),
+            RustantError::Serialization(_) => {
+                Some("Data may be corrupted. Try /doctor to check.".into())
+            }
+            _ => None,
+        }
+    }
+
+    fn next_steps(&self) -> Vec<String> {
+        match self {
+            RustantError::Llm(e) => e.next_steps(),
+            RustantError::Tool(e) => e.next_steps(),
+            RustantError::Agent(e) => e.next_steps(),
+            _ => vec![],
+        }
+    }
+}
+
+impl UserGuidance for LlmError {
+    fn suggestion(&self) -> Option<String> {
+        match self {
+            LlmError::AuthFailed { provider } => Some(format!(
+                "Authentication failed for {}. Check your API key.",
+                provider
+            )),
+            LlmError::RateLimited { retry_after_secs } => Some(format!(
+                "Rate limited. Rustant will retry in {}s.",
+                retry_after_secs
+            )),
+            LlmError::Connection { .. } => {
+                Some("Cannot reach the LLM provider. Check your network.".into())
+            }
+            LlmError::Timeout { timeout_secs } => {
+                Some(format!("Request timed out after {}s.", timeout_secs))
+            }
+            LlmError::ContextOverflow { used, limit } => Some(format!(
+                "Context full ({}/{} tokens). Use /compact to free space.",
+                used, limit
+            )),
+            LlmError::UnsupportedModel { model } => {
+                Some(format!("Model '{}' is not supported by this provider.", model))
+            }
+            _ => None,
+        }
+    }
+
+    fn next_steps(&self) -> Vec<String> {
+        match self {
+            LlmError::AuthFailed { .. } => vec![
+                "Run /doctor to verify API key status.".into(),
+                "Run /setup to reconfigure your provider.".into(),
+            ],
+            LlmError::RateLimited { .. } => vec![
+                "Wait for the retry or switch models with /config model <name>.".into(),
+            ],
+            LlmError::Connection { .. } => vec![
+                "Check your internet connection.".into(),
+                "Run /doctor to test LLM connectivity.".into(),
+            ],
+            LlmError::ContextOverflow { .. } => vec![
+                "Use /compact to compress conversation history.".into(),
+                "Use /pin to protect important messages before compression.".into(),
+            ],
+            _ => vec![],
+        }
+    }
+}
+
+impl UserGuidance for ToolError {
+    fn suggestion(&self) -> Option<String> {
+        match self {
+            ToolError::NotFound { name } => {
+                Some(format!("Tool '{}' is not registered. Use /tools to list available tools.", name))
+            }
+            ToolError::InvalidArguments { name, reason } => {
+                Some(format!("Invalid arguments for '{}': {}", name, reason))
+            }
+            ToolError::ExecutionFailed { name, message } => {
+                // Try to categorize the failure
+                if message.contains("No such file") || message.contains("not found") {
+                    Some("File not found. Use file_list to browse available files.".to_string())
+                } else if message.contains("Permission denied") {
+                    Some(format!("Permission denied for '{name}'. Check file permissions."))
+                } else {
+                    Some(format!("Tool '{name}' failed. The agent will try to recover."))
+                }
+            }
+            ToolError::Timeout { name, timeout_secs } => Some(format!(
+                "Tool '{}' timed out after {}s. Consider breaking the task into smaller steps.",
+                name, timeout_secs
+            )),
+            ToolError::PermissionDenied { name, .. } => {
+                Some(format!("Permission denied for '{}'. Adjust with /permissions.", name))
+            }
+            _ => None,
+        }
+    }
+
+    fn next_steps(&self) -> Vec<String> {
+        match self {
+            ToolError::Timeout { .. } => vec![
+                "Try a more specific query or smaller file range.".into(),
+            ],
+            ToolError::NotFound { .. } => vec!["Run /tools to see registered tools.".into()],
+            _ => vec![],
+        }
+    }
+}
+
+impl UserGuidance for MemoryError {
+    fn suggestion(&self) -> Option<String> {
+        match self {
+            MemoryError::CompressionFailed { .. } => {
+                Some("Context compression failed. Use /compact to retry manually.".into())
+            }
+            MemoryError::CapacityExceeded => {
+                Some("Memory capacity exceeded. Use /compact or start a new session.".into())
+            }
+            MemoryError::SessionLoadFailed { message } => {
+                Some(format!("Session load failed: {}. Use /sessions to list available sessions.", message))
+            }
+            _ => None,
+        }
+    }
+
+    fn next_steps(&self) -> Vec<String> {
+        vec![]
+    }
+}
+
+impl UserGuidance for ConfigError {
+    fn suggestion(&self) -> Option<String> {
+        match self {
+            ConfigError::MissingField { field } => {
+                Some(format!("Missing config field '{}'. Run /setup to configure.", field))
+            }
+            ConfigError::EnvVarMissing { var } => {
+                Some(format!("Set environment variable {} or run /setup.", var))
+            }
+            _ => None,
+        }
+    }
+
+    fn next_steps(&self) -> Vec<String> {
+        vec![]
+    }
+}
+
+impl UserGuidance for SafetyError {
+    fn suggestion(&self) -> Option<String> {
+        match self {
+            SafetyError::ApprovalRejected => {
+                Some("Action was denied. The agent will try an alternative approach.".into())
+            }
+            SafetyError::PathDenied { path } => {
+                Some(format!("Path '{}' is blocked by safety policy.", path.display()))
+            }
+            SafetyError::CommandDenied { command } => {
+                Some(format!("Command '{}' is not in the allowed list. Adjust in config.", command))
+            }
+            _ => None,
+        }
+    }
+
+    fn next_steps(&self) -> Vec<String> {
+        vec![]
+    }
+}
+
+impl UserGuidance for AgentError {
+    fn suggestion(&self) -> Option<String> {
+        match self {
+            AgentError::MaxIterationsReached { max } => Some(format!(
+                "Task exceeded {} iterations. Break it into smaller steps.",
+                max
+            )),
+            AgentError::BudgetExceeded { .. } => {
+                Some("Token budget exceeded. Start a new session or increase the budget.".into())
+            }
+            AgentError::Cancelled => Some("Task was cancelled.".into()),
+            _ => None,
+        }
+    }
+
+    fn next_steps(&self) -> Vec<String> {
+        match self {
+            AgentError::MaxIterationsReached { .. } => vec![
+                "Increase limit with /config max_iterations <n>.".into(),
+                "Break your task into smaller, focused steps.".into(),
+            ],
+            _ => vec![],
+        }
+    }
+}
+
+impl UserGuidance for ChannelError {
+    fn suggestion(&self) -> Option<String> {
+        match self {
+            ChannelError::ConnectionFailed { name, .. } => {
+                Some(format!("Channel '{}' connection failed. Check credentials.", name))
+            }
+            ChannelError::AuthFailed { name } => {
+                Some(format!("Channel '{}' auth failed. Re-run channel setup.", name))
+            }
+            _ => None,
+        }
+    }
+
+    fn next_steps(&self) -> Vec<String> {
+        vec![]
+    }
+}
+
 /// A type alias for results using the top-level `RustantError`.
 pub type Result<T> = std::result::Result<T, RustantError>;
 

@@ -60,6 +60,29 @@ pub enum BudgetSeverity {
     Exceeded,
 }
 
+/// Event emitted for context window health monitoring.
+#[derive(Debug, Clone)]
+pub enum ContextHealthEvent {
+    /// Context usage is approaching the limit (>= 70%).
+    Warning {
+        usage_percent: u8,
+        total_tokens: usize,
+        context_window: usize,
+    },
+    /// Context usage is critical (>= 90%).
+    Critical {
+        usage_percent: u8,
+        total_tokens: usize,
+        context_window: usize,
+    },
+    /// Context compression just occurred.
+    Compressed {
+        messages_compressed: usize,
+        was_llm_summarized: bool,
+        pinned_preserved: usize,
+    },
+}
+
 /// Callback trait for user interaction (approval, display).
 #[async_trait::async_trait]
 pub trait AgentCallback: Send + Sync {
@@ -101,6 +124,10 @@ pub trait AgentCallback: Send + Sync {
     async fn on_clarification_request(&self, _question: &str) -> String {
         String::new()
     }
+
+    /// Notify about context window health changes (warnings, compression events).
+    /// Default is a no-op for backward compatibility.
+    async fn on_context_health(&self, _event: &ContextHealthEvent) {}
 }
 
 /// A tool executor function type. The agent holds tool executors and their definitions.
@@ -137,6 +164,8 @@ pub struct Agent {
     budget: crate::brain::TokenBudgetManager,
     /// Cross-session knowledge distiller for learning from corrections/facts.
     knowledge: crate::memory::KnowledgeDistiller,
+    /// Per-tool token usage tracking for budget breakdown.
+    tool_token_usage: HashMap<String, usize>,
 }
 
 impl Agent {
@@ -165,6 +194,7 @@ impl Agent {
             summarizer,
             budget,
             knowledge,
+            tool_token_usage: HashMap::new(),
         }
     }
 
@@ -250,6 +280,30 @@ impl Agent {
             let conversation = self.memory.context_messages();
             let tools = Some(self.tool_definitions());
 
+            // Context health check before LLM call
+            {
+                let context_window = self.brain.provider().context_window();
+                let breakdown = self.memory.context_breakdown(context_window);
+                let usage_percent = (breakdown.usage_ratio() * 100.0) as u8;
+                if usage_percent >= 90 {
+                    self.callback
+                        .on_context_health(&ContextHealthEvent::Critical {
+                            usage_percent,
+                            total_tokens: breakdown.total_tokens,
+                            context_window: breakdown.context_window,
+                        })
+                        .await;
+                } else if usage_percent >= 70 {
+                    self.callback
+                        .on_context_health(&ContextHealthEvent::Warning {
+                            usage_percent,
+                            total_tokens: breakdown.total_tokens,
+                            context_window: breakdown.context_window,
+                        })
+                        .await;
+                }
+            }
+
             // Pre-call budget check
             let estimated_tokens = self.brain.estimate_tokens(&conversation);
             let (input_rate, output_rate) = self.brain.provider_cost_rates();
@@ -258,22 +312,34 @@ impl Agent {
                 .check_budget(estimated_tokens, input_rate, output_rate);
             match &budget_result {
                 crate::brain::BudgetCheckResult::Exceeded { message } => {
+                    let top = self.top_tool_consumers(3);
+                    let enriched = if top.is_empty() {
+                        message.clone()
+                    } else {
+                        format!("{}. Top consumers: {}", message, top)
+                    };
                     self.callback
-                        .on_budget_warning(message, BudgetSeverity::Exceeded)
+                        .on_budget_warning(&enriched, BudgetSeverity::Exceeded)
                         .await;
                     if self.budget.should_halt_on_exceed() {
-                        warn!("Budget exceeded, halting: {}", message);
+                        warn!("Budget exceeded, halting: {}", enriched);
                         return Err(RustantError::Agent(AgentError::BudgetExceeded {
-                            message: message.clone(),
+                            message: enriched,
                         }));
                     }
-                    warn!("Budget warning (soft limit): {}", message);
+                    warn!("Budget warning (soft limit): {}", enriched);
                 }
                 crate::brain::BudgetCheckResult::Warning { message, .. } => {
+                    let top = self.top_tool_consumers(3);
+                    let enriched = if top.is_empty() {
+                        message.clone()
+                    } else {
+                        format!("{}. Top consumers: {}", message, top)
+                    };
                     self.callback
-                        .on_budget_warning(message, BudgetSeverity::Warning)
+                        .on_budget_warning(&enriched, BudgetSeverity::Warning)
                         .await;
-                    debug!("Budget warning: {}", message);
+                    debug!("Budget warning: {}", enriched);
                 }
                 crate::brain::BudgetCheckResult::Ok => {}
             }
@@ -329,17 +395,22 @@ impl Agent {
                     let result = self.execute_tool(id, name, arguments).await;
 
                     // --- OBSERVE ---
-                    match result {
+                    let result_tokens = match &result {
                         Ok(output) => {
                             let result_msg = Message::tool_result(id, &output.content, false);
+                            let tokens = output.content.len() / 4; // rough estimate
                             self.memory.add_message(result_msg);
+                            tokens
                         }
                         Err(e) => {
                             let error_msg = format!("Tool error: {}", e);
+                            let tokens = error_msg.len() / 4;
                             let result_msg = Message::tool_result(id, &error_msg, true);
                             self.memory.add_message(result_msg);
+                            tokens
                         }
-                    }
+                    };
+                    *self.tool_token_usage.entry(name.to_string()).or_insert(0) += result_tokens;
 
                     // Check context compression
                     if self.memory.short_term.needs_compression() {
@@ -351,26 +422,41 @@ impl Agent {
                             .into_iter()
                             .cloned()
                             .collect();
+                        let msgs_count = msgs_to_summarize.len();
+                        let pinned_count = self.memory.short_term.pinned_count();
 
-                        let summary_text = match self.summarizer.summarize(&msgs_to_summarize).await
-                        {
-                            Ok(result) => {
-                                info!(
-                                    messages_summarized = result.messages_summarized,
-                                    tokens_saved = result.tokens_saved,
-                                    "Context compression via LLM summarization"
-                                );
-                                result.text
-                            }
-                            Err(e) => {
-                                warn!(error = %e, "LLM summarization failed, falling back to truncation");
-                                // Fallback: smart structured summary preserving tool names
-                                // and first/last messages instead of naive truncation
-                                crate::summarizer::smart_fallback_summary(&msgs_to_summarize, 500)
-                            }
-                        };
+                        let (summary_text, was_llm) =
+                            match self.summarizer.summarize(&msgs_to_summarize).await {
+                                Ok(result) => {
+                                    info!(
+                                        messages_summarized = result.messages_summarized,
+                                        tokens_saved = result.tokens_saved,
+                                        "Context compression via LLM summarization"
+                                    );
+                                    (result.text, true)
+                                }
+                                Err(e) => {
+                                    warn!(error = %e, "LLM summarization failed, falling back to truncation");
+                                    // Fallback: smart structured summary preserving tool names
+                                    // and first/last messages instead of naive truncation
+                                    let text = crate::summarizer::smart_fallback_summary(
+                                        &msgs_to_summarize,
+                                        500,
+                                    );
+                                    (text, false)
+                                }
+                            };
 
                         self.memory.short_term.compress(summary_text);
+
+                        // Notify about compression
+                        self.callback
+                            .on_context_health(&ContextHealthEvent::Compressed {
+                                messages_compressed: msgs_count,
+                                was_llm_summarized: was_llm,
+                                pinned_preserved: pinned_count,
+                            })
+                            .await;
                     }
 
                     // Continue loop — agent needs to observe and think again
@@ -811,6 +897,9 @@ impl Agent {
             }
         }
 
+        // Add preview for destructive tools
+        ctx = ctx.with_preview_from_tool(tool_name, details);
+
         ctx
     }
 
@@ -999,6 +1088,33 @@ impl Agent {
         &mut self.config
     }
 
+    /// Get per-tool token usage breakdown (tool_name -> estimated tokens).
+    pub fn tool_token_breakdown(&self) -> &HashMap<String, usize> {
+        &self.tool_token_usage
+    }
+
+    /// Format top token consumers as a summary string.
+    pub fn top_tool_consumers(&self, n: usize) -> String {
+        if self.tool_token_usage.is_empty() {
+            return String::new();
+        }
+        let total: usize = self.tool_token_usage.values().sum();
+        if total == 0 {
+            return String::new();
+        }
+        let mut sorted: Vec<_> = self.tool_token_usage.iter().collect();
+        sorted.sort_by(|a, b| b.1.cmp(a.1));
+        let top: Vec<String> = sorted
+            .iter()
+            .take(n)
+            .map(|(name, tokens)| {
+                let pct = (**tokens as f64 / total as f64 * 100.0) as u8;
+                format!("{} ({}%)", name, pct)
+            })
+            .collect();
+        top.join(", ")
+    }
+
     /// Compact the conversation context by summarizing older messages.
     /// Returns (messages_before, messages_after).
     pub fn compact(&mut self) -> (usize, usize) {
@@ -1039,6 +1155,7 @@ pub struct RecordingCallback {
     status_changes: tokio::sync::Mutex<Vec<AgentStatus>>,
     explanations: tokio::sync::Mutex<Vec<DecisionExplanation>>,
     budget_warnings: tokio::sync::Mutex<Vec<(String, BudgetSeverity)>>,
+    context_health_events: tokio::sync::Mutex<Vec<ContextHealthEvent>>,
 }
 
 impl RecordingCallback {
@@ -1049,6 +1166,7 @@ impl RecordingCallback {
             status_changes: tokio::sync::Mutex::new(Vec::new()),
             explanations: tokio::sync::Mutex::new(Vec::new()),
             budget_warnings: tokio::sync::Mutex::new(Vec::new()),
+            context_health_events: tokio::sync::Mutex::new(Vec::new()),
         }
     }
 
@@ -1070,6 +1188,10 @@ impl RecordingCallback {
 
     pub async fn budget_warnings(&self) -> Vec<(String, BudgetSeverity)> {
         self.budget_warnings.lock().await.clone()
+    }
+
+    pub async fn context_health_events(&self) -> Vec<ContextHealthEvent> {
+        self.context_health_events.lock().await.clone()
     }
 }
 
@@ -1104,6 +1226,12 @@ impl AgentCallback for RecordingCallback {
             .lock()
             .await
             .push((message.to_string(), severity));
+    }
+    async fn on_context_health(&self, event: &ContextHealthEvent) {
+        self.context_health_events
+            .lock()
+            .await
+            .push(event.clone());
     }
 }
 
