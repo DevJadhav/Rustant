@@ -11,6 +11,7 @@ pub enum CommandCategory {
     Safety,
     Development,
     System,
+    Ui,
 }
 
 impl CommandCategory {
@@ -21,6 +22,7 @@ impl CommandCategory {
             CommandCategory::Safety => "Safety",
             CommandCategory::Development => "Development",
             CommandCategory::System => "System",
+            CommandCategory::Ui => "UI",
         }
     }
 
@@ -31,6 +33,7 @@ impl CommandCategory {
             CommandCategory::Safety,
             CommandCategory::Development,
             CommandCategory::System,
+            CommandCategory::Ui,
         ]
     }
 }
@@ -54,6 +57,8 @@ pub struct CommandInfo {
     pub usage: &'static str,
     /// Category for grouping in /help.
     pub category: CommandCategory,
+    /// Whether this command is only available in TUI mode.
+    pub tui_only: bool,
 }
 
 /// Registry holding all slash commands with their metadata.
@@ -91,6 +96,7 @@ impl CommandRegistry {
             description: "Exit Rustant",
             usage: "/quit",
             category: CommandCategory::Session,
+            tui_only: false,
         });
         self.register(CommandInfo {
             name: "/clear",
@@ -98,6 +104,7 @@ impl CommandRegistry {
             description: "Clear the screen",
             usage: "/clear",
             category: CommandCategory::Session,
+            tui_only: false,
         });
         self.register(CommandInfo {
             name: "/session",
@@ -105,6 +112,7 @@ impl CommandRegistry {
             description: "Save, load, or list sessions",
             usage: "/session save|load|list [name]",
             category: CommandCategory::Session,
+            tui_only: false,
         });
         self.register(CommandInfo {
             name: "/resume",
@@ -112,6 +120,7 @@ impl CommandRegistry {
             description: "Resume a saved session (latest if no name)",
             usage: "/resume [name]",
             category: CommandCategory::Session,
+            tui_only: false,
         });
         self.register(CommandInfo {
             name: "/sessions",
@@ -119,6 +128,7 @@ impl CommandRegistry {
             description: "List saved sessions with details",
             usage: "/sessions",
             category: CommandCategory::Session,
+            tui_only: false,
         });
 
         // Agent commands
@@ -128,6 +138,7 @@ impl CommandRegistry {
             description: "Show token usage and cost",
             usage: "/cost",
             category: CommandCategory::Agent,
+            tui_only: false,
         });
         self.register(CommandInfo {
             name: "/tools",
@@ -135,6 +146,7 @@ impl CommandRegistry {
             description: "List available tools",
             usage: "/tools",
             category: CommandCategory::Agent,
+            tui_only: false,
         });
         self.register(CommandInfo {
             name: "/status",
@@ -142,6 +154,7 @@ impl CommandRegistry {
             description: "Show agent status, task, and iteration count",
             usage: "/status",
             category: CommandCategory::Agent,
+            tui_only: false,
         });
         self.register(CommandInfo {
             name: "/compact",
@@ -149,6 +162,7 @@ impl CommandRegistry {
             description: "Compress conversation context to free memory",
             usage: "/compact",
             category: CommandCategory::Agent,
+            tui_only: false,
         });
         self.register(CommandInfo {
             name: "/context",
@@ -156,6 +170,7 @@ impl CommandRegistry {
             description: "Show context window usage breakdown",
             usage: "/context",
             category: CommandCategory::Agent,
+            tui_only: false,
         });
         self.register(CommandInfo {
             name: "/memory",
@@ -163,6 +178,7 @@ impl CommandRegistry {
             description: "Show memory system stats",
             usage: "/memory",
             category: CommandCategory::Agent,
+            tui_only: false,
         });
         self.register(CommandInfo {
             name: "/pin",
@@ -170,6 +186,7 @@ impl CommandRegistry {
             description: "Pin message #n (survives compression) or list pinned",
             usage: "/pin [n]",
             category: CommandCategory::Agent,
+            tui_only: false,
         });
         self.register(CommandInfo {
             name: "/unpin",
@@ -177,6 +194,7 @@ impl CommandRegistry {
             description: "Unpin message #n",
             usage: "/unpin <n>",
             category: CommandCategory::Agent,
+            tui_only: false,
         });
 
         // Safety commands
@@ -186,6 +204,7 @@ impl CommandRegistry {
             description: "Show current safety mode and stats",
             usage: "/safety",
             category: CommandCategory::Safety,
+            tui_only: false,
         });
         self.register(CommandInfo {
             name: "/permissions",
@@ -193,13 +212,15 @@ impl CommandRegistry {
             description: "View or set approval mode (safe/cautious/paranoid/yolo)",
             usage: "/permissions [mode]",
             category: CommandCategory::Safety,
+            tui_only: false,
         });
         self.register(CommandInfo {
             name: "/audit",
             aliases: &[],
-            description: "Show audit log or verify Merkle chain integrity",
-            usage: "/audit show [n] | verify",
+            description: "Show, query, export, or verify audit trail",
+            usage: "/audit [show [n] | verify | export [fmt] | query <tool>]",
             category: CommandCategory::Safety,
+            tui_only: false,
         });
 
         // Development commands
@@ -209,6 +230,7 @@ impl CommandRegistry {
             description: "Undo last file operation via git checkpoint",
             usage: "/undo",
             category: CommandCategory::Development,
+            tui_only: false,
         });
         self.register(CommandInfo {
             name: "/diff",
@@ -216,6 +238,7 @@ impl CommandRegistry {
             description: "Show recent file changes",
             usage: "/diff",
             category: CommandCategory::Development,
+            tui_only: false,
         });
         self.register(CommandInfo {
             name: "/review",
@@ -223,6 +246,7 @@ impl CommandRegistry {
             description: "Review all session file changes",
             usage: "/review",
             category: CommandCategory::Development,
+            tui_only: false,
         });
 
         // System commands
@@ -232,6 +256,7 @@ impl CommandRegistry {
             description: "Show this help message",
             usage: "/help",
             category: CommandCategory::System,
+            tui_only: false,
         });
         self.register(CommandInfo {
             name: "/config",
@@ -239,6 +264,7 @@ impl CommandRegistry {
             description: "View or modify runtime configuration",
             usage: "/config [key] [value]",
             category: CommandCategory::System,
+            tui_only: false,
         });
         self.register(CommandInfo {
             name: "/doctor",
@@ -246,6 +272,7 @@ impl CommandRegistry {
             description: "Run diagnostic checks (LLM, tools, workspace)",
             usage: "/doctor",
             category: CommandCategory::System,
+            tui_only: false,
         });
         self.register(CommandInfo {
             name: "/setup",
@@ -253,6 +280,7 @@ impl CommandRegistry {
             description: "Re-run provider setup wizard",
             usage: "/setup",
             category: CommandCategory::System,
+            tui_only: false,
         });
         self.register(CommandInfo {
             name: "/workflows",
@@ -260,6 +288,65 @@ impl CommandRegistry {
             description: "List available workflow templates",
             usage: "/workflows",
             category: CommandCategory::System,
+            tui_only: false,
+        });
+
+        // TUI-only commands
+        self.register(CommandInfo {
+            name: "/theme",
+            aliases: &[],
+            description: "Switch color theme",
+            usage: "/theme dark|light",
+            category: CommandCategory::Ui,
+            tui_only: true,
+        });
+        self.register(CommandInfo {
+            name: "/sidebar",
+            aliases: &[],
+            description: "Toggle sidebar visibility",
+            usage: "/sidebar",
+            category: CommandCategory::Ui,
+            tui_only: true,
+        });
+        self.register(CommandInfo {
+            name: "/vim",
+            aliases: &[],
+            description: "Toggle vim mode",
+            usage: "/vim",
+            category: CommandCategory::Ui,
+            tui_only: true,
+        });
+        self.register(CommandInfo {
+            name: "/save",
+            aliases: &[],
+            description: "Save session (shorthand for /session save)",
+            usage: "/save <name>",
+            category: CommandCategory::Session,
+            tui_only: true,
+        });
+        self.register(CommandInfo {
+            name: "/load",
+            aliases: &[],
+            description: "Load session (shorthand for /session load)",
+            usage: "/load <name>",
+            category: CommandCategory::Session,
+            tui_only: true,
+        });
+        self.register(CommandInfo {
+            name: "/analytics",
+            aliases: &[],
+            description: "Show session analytics dashboard",
+            usage: "/analytics",
+            category: CommandCategory::Agent,
+            tui_only: true,
+        });
+        self.register(CommandInfo {
+            name: "/replay",
+            aliases: &[],
+            description: "Replay execution traces",
+            usage: "/replay [next|prev|timeline|reset]",
+            category: CommandCategory::Agent,
+            tui_only: true,
         });
     }
 
@@ -293,9 +380,10 @@ impl CommandRegistry {
                 } else {
                     format!(" ({})", cmd.aliases.join(", "))
                 };
+                let tui_marker = if cmd.tui_only { " (TUI)" } else { "" };
                 output.push_str(&format!(
-                    "    {:<24} {}{}\n",
-                    cmd.usage, cmd.description, aliases
+                    "    {:<24} {}{}{}\n",
+                    cmd.usage, cmd.description, aliases, tui_marker
                 ));
             }
         }
@@ -399,10 +487,10 @@ mod tests {
     #[test]
     fn test_register_defaults_populates() {
         let registry = CommandRegistry::with_defaults();
-        // We have 24 commands registered
+        // We have 31 commands registered (24 core + 7 TUI-only)
         assert!(
-            registry.len() >= 24,
-            "Expected at least 24 commands, got {}",
+            registry.len() >= 31,
+            "Expected at least 31 commands, got {}",
             registry.len()
         );
     }
@@ -575,6 +663,7 @@ mod tests {
         assert_eq!(format!("{}", CommandCategory::Safety), "Safety");
         assert_eq!(format!("{}", CommandCategory::Development), "Development");
         assert_eq!(format!("{}", CommandCategory::System), "System");
+        assert_eq!(format!("{}", CommandCategory::Ui), "UI");
     }
 
     #[test]
@@ -584,5 +673,54 @@ mod tests {
             let count = registry.all().iter().filter(|c| c.category == *cat).count();
             assert!(count > 0, "Category {} has no commands", cat.label());
         }
+    }
+
+    #[test]
+    fn test_tui_only_commands_exist() {
+        let registry = CommandRegistry::with_defaults();
+        for name in &[
+            "/theme",
+            "/sidebar",
+            "/vim",
+            "/save",
+            "/load",
+            "/analytics",
+            "/replay",
+        ] {
+            let cmd = registry.lookup(name);
+            assert!(cmd.is_some(), "Missing TUI command: {}", name);
+            assert!(cmd.unwrap().tui_only, "{} should be TUI-only", name);
+        }
+    }
+
+    #[test]
+    fn test_core_commands_not_tui_only() {
+        let registry = CommandRegistry::with_defaults();
+        for name in &["/help", "/quit", "/compact", "/status", "/config"] {
+            let cmd = registry.lookup(name);
+            assert!(cmd.is_some(), "Missing core command: {}", name);
+            assert!(!cmd.unwrap().tui_only, "{} should NOT be TUI-only", name);
+        }
+    }
+
+    #[test]
+    fn test_ui_category_has_commands() {
+        let registry = CommandRegistry::with_defaults();
+        let count = registry
+            .all()
+            .iter()
+            .filter(|c| c.category == CommandCategory::Ui)
+            .count();
+        assert!(count >= 3, "UI category should have at least 3 commands");
+    }
+
+    #[test]
+    fn test_help_text_marks_tui_commands() {
+        let registry = CommandRegistry::with_defaults();
+        let help = registry.help_text();
+        assert!(
+            help.contains("(TUI)"),
+            "Help text should contain (TUI) markers for TUI-only commands"
+        );
     }
 }

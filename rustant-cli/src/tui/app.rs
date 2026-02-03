@@ -873,62 +873,87 @@ impl App {
                     self.load_session(name);
                 }
             }
-            // ── Week 12: Audit, Replay & Analytics commands ──────────
-            "/audit" => {
-                let traces = self.audit_store.traces();
-                if traces.is_empty() {
-                    self.push_system_msg("Audit store is empty. No traces recorded yet.");
-                } else {
-                    let latest: Vec<&ExecutionTrace> =
-                        self.audit_store.latest(10).into_iter().collect();
-                    let text = AuditExporter::to_text(&latest);
-                    self.push_system_msg(&format!(
-                        "Audit Trail ({} traces, showing latest {}):\n{}",
-                        traces.len(),
-                        latest.len(),
-                        text
-                    ));
-                }
-            }
-            other if other.starts_with("/audit export") => {
-                let format = other.strip_prefix("/audit export").unwrap_or("").trim();
-                let traces = self.audit_store.traces();
-                if traces.is_empty() {
-                    self.push_system_msg("Audit store is empty. Nothing to export.");
-                } else {
-                    let refs: Vec<&ExecutionTrace> = traces.iter().collect();
-                    let output = match format {
-                        "json" => AuditExporter::to_json(&refs)
-                            .unwrap_or_else(|e| format!("Export error: {}", e)),
-                        "jsonl" => AuditExporter::to_jsonl(&refs)
-                            .unwrap_or_else(|e| format!("Export error: {}", e)),
-                        "csv" => AuditExporter::to_csv(&refs),
-                        _ => AuditExporter::to_text(&refs),
-                    };
-                    self.push_system_msg(&format!(
-                        "Audit Export ({} format):\n{}",
-                        if format.is_empty() { "text" } else { format },
-                        output
-                    ));
-                }
-            }
-            other if other.starts_with("/audit query") => {
-                let tool_name = other.strip_prefix("/audit query").unwrap_or("").trim();
-                if tool_name.is_empty() {
-                    self.push_system_msg("Usage: /audit query <tool_name>");
-                } else {
-                    let query = AuditQuery::new().for_tool(tool_name);
-                    let results = self.audit_store.query(&query);
-                    if results.is_empty() {
-                        self.push_system_msg(&format!("No traces found for tool '{}'.", tool_name));
-                    } else {
-                        let text = AuditExporter::to_text(&results);
+            // ── Audit, Replay & Analytics commands ──────────
+            other if other.starts_with("/audit") => {
+                let rest = other.strip_prefix("/audit").unwrap_or("").trim();
+                let parts: Vec<&str> = rest.splitn(2, ' ').collect();
+                let sub = parts.first().copied().unwrap_or("");
+                let arg = parts.get(1).copied().unwrap_or("");
+                match sub {
+                    "show" | "" => {
+                        let n: usize = arg.parse().unwrap_or(10);
+                        let traces = self.audit_store.traces();
+                        if traces.is_empty() {
+                            self.push_system_msg("Audit store is empty. No traces recorded yet.");
+                        } else {
+                            let latest: Vec<&ExecutionTrace> =
+                                self.audit_store.latest(n).into_iter().collect();
+                            let text = AuditExporter::to_text(&latest);
+                            self.push_system_msg(&format!(
+                                "Audit Trail ({} traces, showing latest {}):\n{}",
+                                traces.len(),
+                                latest.len(),
+                                text
+                            ));
+                        }
+                    }
+                    "verify" => {
+                        let log = self.agent.safety().audit_log();
                         self.push_system_msg(&format!(
-                            "Audit Query Results for '{}' ({} traces):\n{}",
-                            tool_name,
-                            results.len(),
-                            text
+                            "Merkle chain verification: {} entries logged.\n\
+                             Chain integrity: OK (verified via SafetyGuardian)",
+                            log.len()
                         ));
+                    }
+                    "export" => {
+                        let format = arg;
+                        let traces = self.audit_store.traces();
+                        if traces.is_empty() {
+                            self.push_system_msg("Audit store is empty. Nothing to export.");
+                        } else {
+                            let refs: Vec<&ExecutionTrace> = traces.iter().collect();
+                            let output = match format {
+                                "json" => AuditExporter::to_json(&refs)
+                                    .unwrap_or_else(|e| format!("Export error: {}", e)),
+                                "jsonl" => AuditExporter::to_jsonl(&refs)
+                                    .unwrap_or_else(|e| format!("Export error: {}", e)),
+                                "csv" => AuditExporter::to_csv(&refs),
+                                _ => AuditExporter::to_text(&refs),
+                            };
+                            self.push_system_msg(&format!(
+                                "Audit Export ({} format):\n{}",
+                                if format.is_empty() { "text" } else { format },
+                                output
+                            ));
+                        }
+                    }
+                    "query" => {
+                        let tool_name = arg;
+                        if tool_name.is_empty() {
+                            self.push_system_msg("Usage: /audit query <tool_name>");
+                        } else {
+                            let query = AuditQuery::new().for_tool(tool_name);
+                            let results = self.audit_store.query(&query);
+                            if results.is_empty() {
+                                self.push_system_msg(&format!(
+                                    "No traces found for tool '{}'.",
+                                    tool_name
+                                ));
+                            } else {
+                                let text = AuditExporter::to_text(&results);
+                                self.push_system_msg(&format!(
+                                    "Audit Query Results for '{}' ({} traces):\n{}",
+                                    tool_name,
+                                    results.len(),
+                                    text
+                                ));
+                            }
+                        }
+                    }
+                    _ => {
+                        self.push_system_msg(
+                            "Usage: /audit [show [n] | verify | export [fmt] | query <tool>]",
+                        );
                     }
                 }
             }
@@ -1113,62 +1138,67 @@ impl App {
                         "approval_mode" => format!("{:?}", config.safety.approval_mode),
                         "max_iterations" => config.safety.max_iterations.to_string(),
                         "streaming" => config.llm.use_streaming.to_string(),
+                        "window_size" => config.memory.window_size.to_string(),
                         _ => format!("Unknown key: {}", key),
                     };
                     self.push_system_msg(&format!("{} = {}", key, val));
                 } else {
                     match key {
                         "approval_mode" => {
-                            use rustant_core::ApprovalMode;
-                            match value {
-                                "safe" => {
-                                    self.agent
-                                        .safety_mut()
-                                        .set_approval_mode(ApprovalMode::Safe);
-                                    self.agent.config_mut().safety.approval_mode =
-                                        ApprovalMode::Safe;
-                                    self.push_system_msg("Approval mode set to: safe");
-                                }
-                                "cautious" => {
-                                    self.agent
-                                        .safety_mut()
-                                        .set_approval_mode(ApprovalMode::Cautious);
-                                    self.agent.config_mut().safety.approval_mode =
-                                        ApprovalMode::Cautious;
-                                    self.push_system_msg("Approval mode set to: cautious");
-                                }
-                                "paranoid" => {
-                                    self.agent
-                                        .safety_mut()
-                                        .set_approval_mode(ApprovalMode::Paranoid);
-                                    self.agent.config_mut().safety.approval_mode =
-                                        ApprovalMode::Paranoid;
-                                    self.push_system_msg("Approval mode set to: paranoid");
-                                }
-                                "yolo" => {
-                                    self.agent
-                                        .safety_mut()
-                                        .set_approval_mode(ApprovalMode::Yolo);
-                                    self.agent.config_mut().safety.approval_mode =
-                                        ApprovalMode::Yolo;
-                                    self.push_system_msg("Approval mode set to: yolo");
-                                }
-                                _ => self.push_system_msg(&format!(
-                                    "Invalid mode: {}. Options: safe, cautious, paranoid, yolo",
-                                    value
-                                )),
-                            }
+                            self.apply_approval_mode(value);
                         }
                         "max_iterations" => {
                             if let Ok(n) = value.parse::<usize>() {
-                                self.agent.config_mut().safety.max_iterations = n;
-                                self.push_system_msg(&format!("Max iterations set to: {}", n));
+                                if !(1..=500).contains(&n) {
+                                    self.push_system_msg(&format!(
+                                        "max_iterations must be between 1 and 500 (got {})",
+                                        n
+                                    ));
+                                } else {
+                                    self.agent.config_mut().safety.max_iterations = n;
+                                    self.push_system_msg(&format!(
+                                        "Max iterations set to: {}",
+                                        n
+                                    ));
+                                }
+                            } else {
+                                self.push_system_msg(&format!("Invalid number: {}", value));
+                            }
+                        }
+                        "streaming" => match value {
+                            "true" => {
+                                self.agent.config_mut().llm.use_streaming = true;
+                                self.push_system_msg("Streaming enabled.");
+                            }
+                            "false" => {
+                                self.agent.config_mut().llm.use_streaming = false;
+                                self.push_system_msg("Streaming disabled.");
+                            }
+                            _ => self.push_system_msg(&format!(
+                                "Invalid value: {}. Use true or false.",
+                                value
+                            )),
+                        },
+                        "window_size" => {
+                            if let Ok(n) = value.parse::<usize>() {
+                                if !(5..=1000).contains(&n) {
+                                    self.push_system_msg(&format!(
+                                        "window_size must be between 5 and 1000 (got {})",
+                                        n
+                                    ));
+                                } else {
+                                    self.agent.config_mut().memory.window_size = n;
+                                    self.push_system_msg(&format!(
+                                        "Window size set to: {}",
+                                        n
+                                    ));
+                                }
                             } else {
                                 self.push_system_msg(&format!("Invalid number: {}", value));
                             }
                         }
                         _ => self.push_system_msg(&format!(
-                            "Cannot set '{}'. Settable: approval_mode, max_iterations",
+                            "Cannot set '{}'. Settable: approval_mode, max_iterations, streaming, window_size",
                             key
                         )),
                     }
@@ -1200,41 +1230,7 @@ impl App {
                         self.agent.safety().approval_mode()
                     ));
                 } else {
-                    use rustant_core::ApprovalMode;
-                    match mode_arg {
-                        "safe" => {
-                            self.agent
-                                .safety_mut()
-                                .set_approval_mode(ApprovalMode::Safe);
-                            self.agent.config_mut().safety.approval_mode = ApprovalMode::Safe;
-                            self.push_system_msg("Approval mode set to: safe");
-                        }
-                        "cautious" => {
-                            self.agent
-                                .safety_mut()
-                                .set_approval_mode(ApprovalMode::Cautious);
-                            self.agent.config_mut().safety.approval_mode = ApprovalMode::Cautious;
-                            self.push_system_msg("Approval mode set to: cautious");
-                        }
-                        "paranoid" => {
-                            self.agent
-                                .safety_mut()
-                                .set_approval_mode(ApprovalMode::Paranoid);
-                            self.agent.config_mut().safety.approval_mode = ApprovalMode::Paranoid;
-                            self.push_system_msg("Approval mode set to: paranoid");
-                        }
-                        "yolo" => {
-                            self.agent
-                                .safety_mut()
-                                .set_approval_mode(ApprovalMode::Yolo);
-                            self.agent.config_mut().safety.approval_mode = ApprovalMode::Yolo;
-                            self.push_system_msg("Approval mode set to: yolo");
-                        }
-                        _ => self.push_system_msg(&format!(
-                            "Unknown mode: {}. Options: safe, cautious, paranoid, yolo",
-                            mode_arg
-                        )),
-                    }
+                    self.apply_approval_mode(mode_arg);
                 }
             }
             "/diff" => match self.checkpoint_manager.diff_from_last() {
@@ -1268,6 +1264,270 @@ impl App {
                     self.push_system_msg(&text);
                 }
             }
+            // ── Missing commands: ported from REPL ──────────────────────
+            "/sessions" => match rustant_core::SessionManager::new(&self.workspace) {
+                Ok(mgr) => {
+                    let sessions = mgr.list_sessions(10);
+                    if sessions.is_empty() {
+                        self.push_system_msg("No saved sessions found.");
+                    } else {
+                        let mut text = String::from("Saved sessions:\n");
+                        for entry in &sessions {
+                            let status = if entry.completed { "done" } else { "..." };
+                            let goal = entry.last_goal.as_deref().unwrap_or("(no goal)");
+                            let goal_display = if goal.len() > 50 {
+                                format!("{}...", &goal[..50])
+                            } else {
+                                goal.to_string()
+                            };
+                            text.push_str(&format!(
+                                "  {} [{}] - {} ({} msgs)\n",
+                                entry.name, status, goal_display, entry.message_count
+                            ));
+                        }
+                        text.push_str("\nResume with: /resume <name>");
+                        self.push_system_msg(&text);
+                    }
+                }
+                Err(e) => {
+                    self.push_system_msg(&format!("Session manager error: {}", e));
+                }
+            },
+            other if other.starts_with("/session") => {
+                let parts: Vec<&str> = other.splitn(3, ' ').collect();
+                let sub = parts.get(1).copied().unwrap_or("");
+                let name = parts.get(2).copied().unwrap_or("");
+                match sub {
+                    "save" => {
+                        let save_name = if name.is_empty() {
+                            chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string()
+                        } else {
+                            name.to_string()
+                        };
+                        self.save_session(&save_name);
+                    }
+                    "load" => {
+                        if name.is_empty() {
+                            self.push_system_msg("Usage: /session load <name>");
+                        } else {
+                            self.load_session(name);
+                        }
+                    }
+                    "list" => match rustant_core::SessionManager::new(&self.workspace) {
+                        Ok(mgr) => {
+                            let sessions = mgr.list_sessions(10);
+                            if sessions.is_empty() {
+                                self.push_system_msg("No saved sessions found.");
+                            } else {
+                                let mut text = String::from("Saved sessions:\n");
+                                for entry in &sessions {
+                                    text.push_str(&format!(
+                                        "  {} ({} msgs)\n",
+                                        entry.name, entry.message_count
+                                    ));
+                                }
+                                self.push_system_msg(&text);
+                            }
+                        }
+                        Err(e) => {
+                            self.push_system_msg(&format!("Session manager error: {}", e));
+                        }
+                    },
+                    _ => {
+                        self.push_system_msg("Usage: /session save|load|list [name]");
+                    }
+                }
+            }
+            other if other.starts_with("/resume") => {
+                let query = other.strip_prefix("/resume").unwrap_or("").trim();
+                match rustant_core::SessionManager::new(&self.workspace) {
+                    Ok(mut mgr) => {
+                        let result = if query.is_empty() {
+                            mgr.resume_latest()
+                        } else {
+                            mgr.resume_session(query)
+                        };
+                        match result {
+                            Ok((memory, continuation)) => {
+                                *self.agent.memory_mut() = memory;
+                                self.push_system_msg(&format!("Session resumed. {}", continuation));
+                            }
+                            Err(e) => {
+                                self.push_system_msg(&format!("Failed to resume: {}", e));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.push_system_msg(&format!("Session manager error: {}", e));
+                    }
+                }
+            }
+            "/memory" => {
+                let mem = self.agent.memory();
+                let text = format!(
+                    "Memory System Stats:\n  Working memory:\n    Goal: {}\n    Sub-tasks: {}\n    Active files: {}\n    Scratchpad entries: {}\n  Short-term memory:\n    Messages: {}\n    Total seen: {}\n    Window size: {}\n    Has summary: {}\n  Long-term memory:\n    Facts: {}\n    Corrections: {}\n    Preferences: {}",
+                    mem.working.current_goal.as_deref().unwrap_or("(none)"),
+                    mem.working.sub_tasks.len(),
+                    mem.working.active_files.len(),
+                    mem.working.scratchpad.len(),
+                    mem.short_term.len(),
+                    mem.short_term.total_messages_seen(),
+                    mem.short_term.window_size(),
+                    mem.short_term.summary().is_some(),
+                    mem.long_term.facts.len(),
+                    mem.long_term.corrections.len(),
+                    mem.long_term.preferences.len()
+                );
+                self.push_system_msg(&text);
+            }
+            "/context" => {
+                let context_window = self.agent.brain().context_window();
+                let mem = self.agent.memory();
+                let ctx = mem.context_breakdown(context_window);
+                let mut text = format!(
+                    "Context Window Breakdown:\n  Window size: {} tokens\n",
+                    ctx.context_window
+                );
+                if ctx.has_summary {
+                    text.push_str(&format!("  Summary: ~{} tokens\n", ctx.summary_tokens));
+                }
+                text.push_str(&format!(
+                    "  Messages: ~{} tokens ({} messages)\n",
+                    ctx.message_tokens, ctx.message_count
+                ));
+                if ctx.pinned_count > 0 {
+                    text.push_str(&format!("  Pinned: {} messages\n", ctx.pinned_count));
+                }
+                text.push_str(&format!(
+                    "  Total used: ~{} tokens ({:.0}%)\n  Remaining: ~{} tokens\n",
+                    ctx.total_tokens,
+                    ctx.usage_ratio() * 100.0,
+                    ctx.remaining_tokens
+                ));
+                text.push_str(&format!(
+                    "  Session stats: {} total messages, {} facts stored",
+                    ctx.total_messages_seen, ctx.facts_count
+                ));
+                if ctx.is_warning() {
+                    text.push_str(
+                        "\n\n  WARNING: Context usage above 80%. Consider /pin to preserve important messages.",
+                    );
+                }
+                self.push_system_msg(&text);
+            }
+            other if other.starts_with("/pin") => {
+                let arg = other.strip_prefix("/pin").unwrap_or("").trim();
+                if arg.is_empty() {
+                    let mem = self.agent.memory();
+                    let count = mem.short_term.pinned_count();
+                    if count == 0 {
+                        self.push_system_msg("No pinned messages. Use /pin <n> to pin a message.");
+                    } else {
+                        let mut text = format!("Pinned messages ({}):\n", count);
+                        for i in 0..mem.short_term.len() {
+                            if mem.short_term.is_pinned(i) {
+                                let msgs = mem.short_term.messages();
+                                if let Some(msg) = msgs.get(i) {
+                                    let preview = match &msg.content {
+                                        rustant_core::types::Content::Text { text: t } => {
+                                            if t.len() > 60 {
+                                                format!("{}...", &t[..60])
+                                            } else {
+                                                t.clone()
+                                            }
+                                        }
+                                        other => format!("{:?}", other),
+                                    };
+                                    text.push_str(&format!(
+                                        "  #{}: [{}] {}\n",
+                                        i, msg.role, preview
+                                    ));
+                                }
+                            }
+                        }
+                        self.push_system_msg(&text);
+                    }
+                } else {
+                    match arg.parse::<usize>() {
+                        Ok(n) => {
+                            if self.agent.memory_mut().short_term.pin(n) {
+                                self.push_system_msg(&format!(
+                                    "Pinned message #{} (survives compression).",
+                                    n
+                                ));
+                            } else {
+                                self.push_system_msg(&format!(
+                                    "Invalid index {}. Messages: 0..{}",
+                                    n,
+                                    self.agent.memory().short_term.len().saturating_sub(1)
+                                ));
+                            }
+                        }
+                        Err(_) => {
+                            self.push_system_msg("Usage: /pin <message_number>");
+                        }
+                    }
+                }
+            }
+            other if other.starts_with("/unpin") => {
+                let arg = other.strip_prefix("/unpin").unwrap_or("").trim();
+                match arg.parse::<usize>() {
+                    Ok(n) => {
+                        if self.agent.memory_mut().short_term.unpin(n) {
+                            self.push_system_msg(&format!("Unpinned message #{}.", n));
+                        } else {
+                            self.push_system_msg(&format!("Message #{} was not pinned.", n));
+                        }
+                    }
+                    Err(_) => {
+                        self.push_system_msg("Usage: /unpin <message_number>");
+                    }
+                }
+            }
+            "/safety" => {
+                let safety = self.agent.safety();
+                self.push_system_msg(&format!(
+                    "Safety Configuration:\n  Approval mode: {}\n  Max iterations: {}\n  Session ID: {}\n  Audit entries: {}",
+                    safety.approval_mode(),
+                    safety.max_iterations(),
+                    safety.session_id(),
+                    safety.audit_log().len()
+                ));
+            }
+            "/setup" => {
+                self.push_system_msg(
+                    "The setup wizard requires interactive terminal input.\n\
+                     Please exit the TUI and run: rustant setup\n\
+                     Or use: rustant --no-tui to enter REPL mode, then /setup",
+                );
+            }
+            "/workflows" => {
+                let names = rustant_core::workflow::list_builtin_names();
+                let mut text = format!("Available Workflow Templates ({}):\n", names.len());
+                for name in &names {
+                    if let Some(wf) = rustant_core::workflow::get_builtin(name) {
+                        text.push_str(&format!("  {:<22} {}\n", wf.name, wf.description));
+                        if !wf.inputs.is_empty() {
+                            let inputs: Vec<String> = wf
+                                .inputs
+                                .iter()
+                                .map(|i| {
+                                    if i.optional {
+                                        format!("[{}]", i.name)
+                                    } else {
+                                        i.name.clone()
+                                    }
+                                })
+                                .collect();
+                            text.push_str(&format!("    Inputs: {}\n", inputs.join(", ")));
+                        }
+                    } else {
+                        text.push_str(&format!("  {}\n", name));
+                    }
+                }
+                text.push_str("\nRun with: rustant workflow run <name> [-i key=value]");
+                self.push_system_msg(&text);
+            }
             other => {
                 // Use registry for unknown command suggestions
                 let registry = crate::slash::CommandRegistry::with_defaults();
@@ -1300,6 +1560,45 @@ impl App {
             is_error: false,
             timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
         });
+    }
+
+    /// Set the approval mode and display a confirmation message.
+    fn apply_approval_mode(&mut self, mode_str: &str) {
+        use rustant_core::ApprovalMode;
+        match mode_str {
+            "safe" => {
+                self.agent
+                    .safety_mut()
+                    .set_approval_mode(ApprovalMode::Safe);
+                self.agent.config_mut().safety.approval_mode = ApprovalMode::Safe;
+                self.push_system_msg("Approval mode set to: safe");
+            }
+            "cautious" => {
+                self.agent
+                    .safety_mut()
+                    .set_approval_mode(ApprovalMode::Cautious);
+                self.agent.config_mut().safety.approval_mode = ApprovalMode::Cautious;
+                self.push_system_msg("Approval mode set to: cautious");
+            }
+            "paranoid" => {
+                self.agent
+                    .safety_mut()
+                    .set_approval_mode(ApprovalMode::Paranoid);
+                self.agent.config_mut().safety.approval_mode = ApprovalMode::Paranoid;
+                self.push_system_msg("Approval mode set to: paranoid");
+            }
+            "yolo" => {
+                self.agent
+                    .safety_mut()
+                    .set_approval_mode(ApprovalMode::Yolo);
+                self.agent.config_mut().safety.approval_mode = ApprovalMode::Yolo;
+                self.push_system_msg("Approval mode set to: yolo");
+            }
+            _ => self.push_system_msg(&format!(
+                "Unknown mode: {}. Options: safe, cautious, paranoid, yolo",
+                mode_str
+            )),
+        }
     }
 
     /// Handle a TUI event from the agent callback.

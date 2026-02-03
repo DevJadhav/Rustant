@@ -1046,8 +1046,12 @@ fn handle_config_command(key: &str, value: &str, agent: &mut Agent) {
         }
         "max_iterations" => {
             if let Ok(n) = value.parse::<usize>() {
-                agent.config_mut().safety.max_iterations = n;
-                println!("Max iterations set to: {}", n);
+                if !(1..=500).contains(&n) {
+                    println!("max_iterations must be between 1 and 500 (got {})", n);
+                } else {
+                    agent.config_mut().safety.max_iterations = n;
+                    println!("Max iterations set to: {}", n);
+                }
             } else {
                 println!("Invalid number: {}", value);
             }
@@ -1065,8 +1069,12 @@ fn handle_config_command(key: &str, value: &str, agent: &mut Agent) {
         },
         "window_size" => {
             if let Ok(n) = value.parse::<usize>() {
-                agent.config_mut().memory.window_size = n;
-                println!("Window size set to: {}", n);
+                if !(5..=1000).contains(&n) {
+                    println!("window_size must be between 5 and 1000 (got {})", n);
+                } else {
+                    agent.config_mut().memory.window_size = n;
+                    println!("Window size set to: {}", n);
+                }
             } else {
                 println!("Invalid number: {}", value);
             }
