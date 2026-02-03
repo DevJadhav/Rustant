@@ -121,12 +121,7 @@ impl ProgressState {
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 /// Render the progress bar area.
-pub fn render_progress_bar(
-    frame: &mut Frame,
-    area: Rect,
-    state: &ProgressState,
-    theme: &Theme,
-) {
+pub fn render_progress_bar(frame: &mut Frame, area: Rect, state: &ProgressState, theme: &Theme) {
     if !state.is_active() || area.height < 2 {
         return;
     }
@@ -137,16 +132,31 @@ pub fn render_progress_bar(
 
     // If we have shell output, split the area: top for status, bottom for output
     if !state.shell_lines.is_empty() && area.height >= 4 {
-        let [status_area, output_area] = Layout::vertical([
-            Constraint::Length(2),
-            Constraint::Min(1),
-        ])
-        .areas(area);
+        let [status_area, output_area] =
+            Layout::vertical([Constraint::Length(2), Constraint::Min(1)]).areas(area);
 
-        render_status_line(frame, status_area, spinner, tool_name, &state.stage, elapsed, state.percent, theme);
+        render_status_line(
+            frame,
+            status_area,
+            spinner,
+            tool_name,
+            &state.stage,
+            elapsed,
+            state.percent,
+            theme,
+        );
         render_shell_output(frame, output_area, state, theme);
     } else {
-        render_status_line(frame, area, spinner, tool_name, &state.stage, elapsed, state.percent, theme);
+        render_status_line(
+            frame,
+            area,
+            spinner,
+            tool_name,
+            &state.stage,
+            elapsed,
+            state.percent,
+            theme,
+        );
     }
 }
 
@@ -183,20 +193,14 @@ fn render_status_line(
             theme.tool_call_style().add_modifier(Modifier::BOLD),
         ),
         Span::styled(stage, theme.sidebar_style()),
-        Span::styled(
-            format!("  [{}]", elapsed_str),
-            theme.sidebar_style(),
-        ),
+        Span::styled(format!("  [{}]", elapsed_str), theme.sidebar_style()),
     ]);
 
     if area.height >= 2 {
         if let Some(pct) = percent {
             // Show a gauge on the second line
-            let [line_area, gauge_area] = Layout::vertical([
-                Constraint::Length(1),
-                Constraint::Length(1),
-            ])
-            .areas(area);
+            let [line_area, gauge_area] =
+                Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(area);
 
             let paragraph = Paragraph::new(line).style(theme.base_style());
             frame.render_widget(paragraph, line_area);
@@ -218,12 +222,7 @@ fn render_status_line(
 }
 
 /// Render the scrollable shell output mini-terminal.
-fn render_shell_output(
-    frame: &mut Frame,
-    area: Rect,
-    state: &ProgressState,
-    theme: &Theme,
-) {
+fn render_shell_output(frame: &mut Frame, area: Rect, state: &ProgressState, theme: &Theme) {
     let lines: Vec<Line> = state
         .shell_lines
         .iter()

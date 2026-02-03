@@ -94,6 +94,13 @@ pub trait AgentCallback: Send + Sync {
     /// Notify about progress during tool execution (streaming output, file operations, etc.).
     /// Default is a no-op for backward compatibility.
     async fn on_progress(&self, _progress: &ProgressUpdate) {}
+
+    /// Request clarification from the user. Returns the user's answer.
+    /// Called when the agent needs more information to proceed.
+    /// Default returns empty string for backward compatibility.
+    async fn on_clarification_request(&self, _question: &str) -> String {
+        String::new()
+    }
 }
 
 /// A tool executor function type. The agent holds tool executors and their definitions.
@@ -168,7 +175,26 @@ impl Agent {
 
     /// Get tool definitions for the LLM.
     pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
-        self.tools.values().map(|t| t.definition.clone()).collect()
+        let mut defs: Vec<ToolDefinition> =
+            self.tools.values().map(|t| t.definition.clone()).collect();
+
+        // Add the ask_user pseudo-tool so the LLM knows it can ask clarifying questions.
+        defs.push(ToolDefinition {
+            name: "ask_user".to_string(),
+            description: "Ask the user a clarifying question when you need more information to proceed. Use this when the task is ambiguous or you need to confirm something before taking action.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "The question to ask the user"
+                    }
+                },
+                "required": ["question"]
+            }),
+        });
+
+        defs
     }
 
     /// Process a user task through the agent loop.
@@ -501,6 +527,23 @@ impl Agent {
         tool_name: &str,
         arguments: &serde_json::Value,
     ) -> Result<ToolOutput, ToolError> {
+        // Handle ask_user pseudo-tool before regular tool lookup.
+        // This bypasses safety checks since it's read-only user interaction.
+        if tool_name == "ask_user" {
+            self.state.status = AgentStatus::WaitingForClarification;
+            self.callback
+                .on_status_change(AgentStatus::WaitingForClarification)
+                .await;
+            let question = arguments
+                .get("question")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Can you provide more details?");
+            let answer = self.callback.on_clarification_request(question).await;
+            self.state.status = AgentStatus::Executing;
+            self.callback.on_status_change(AgentStatus::Executing).await;
+            return Ok(ToolOutput::text(answer));
+        }
+
         // Look up the tool
         let tool = self
             .tools
@@ -944,6 +987,31 @@ impl Agent {
     /// Get a mutable reference to the memory system.
     pub fn memory_mut(&mut self) -> &mut MemorySystem {
         &mut self.memory
+    }
+
+    /// Get a reference to the agent configuration.
+    pub fn config(&self) -> &AgentConfig {
+        &self.config
+    }
+
+    /// Get a mutable reference to the agent configuration.
+    pub fn config_mut(&mut self) -> &mut AgentConfig {
+        &mut self.config
+    }
+
+    /// Compact the conversation context by summarizing older messages.
+    /// Returns (messages_before, messages_after).
+    pub fn compact(&mut self) -> (usize, usize) {
+        let before = self.memory.short_term.len();
+        if before <= 2 {
+            return (before, before);
+        }
+        let msgs: Vec<crate::types::Message> =
+            self.memory.short_term.messages().iter().cloned().collect();
+        let summary = crate::summarizer::smart_fallback_summary(&msgs, 500);
+        self.memory.short_term.compress(summary);
+        let after = self.memory.short_term.len();
+        (before, after)
     }
 }
 

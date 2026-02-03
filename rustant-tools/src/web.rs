@@ -67,13 +67,12 @@ impl Tool for WebSearchTool {
     }
 
     async fn execute(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError> {
-        let query = args
-            .get("query")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidArguments {
+        let query = args.get("query").and_then(|v| v.as_str()).ok_or_else(|| {
+            ToolError::InvalidArguments {
                 name: "web_search".into(),
                 reason: "Missing required parameter: query".into(),
-            })?;
+            }
+        })?;
 
         let max_results = args
             .get("max_results")
@@ -97,19 +96,23 @@ impl Tool for WebSearchTool {
             urlencoding::encode(query)
         );
 
-        let response = client.get(&url).send().await.map_err(|e| {
-            ToolError::ExecutionFailed {
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
                 name: "web_search".into(),
                 message: format!("Search request failed: {}", e),
-            }
-        })?;
+            })?;
 
-        let body: serde_json::Value = response.json().await.map_err(|e| {
-            ToolError::ExecutionFailed {
-                name: "web_search".into(),
-                message: format!("Failed to parse search response: {}", e),
-            }
-        })?;
+        let body: serde_json::Value =
+            response
+                .json()
+                .await
+                .map_err(|e| ToolError::ExecutionFailed {
+                    name: "web_search".into(),
+                    message: format!("Failed to parse search response: {}", e),
+                })?;
 
         let mut results = Vec::new();
 
@@ -130,12 +133,12 @@ impl Tool for WebSearchTool {
 
         // Extract related topics
         if let Some(topics) = body.get("RelatedTopics").and_then(|v| v.as_array()) {
-            for topic in topics.iter().take(max_results.saturating_sub(results.len())) {
+            for topic in topics
+                .iter()
+                .take(max_results.saturating_sub(results.len()))
+            {
                 if let Some(text) = topic.get("Text").and_then(|v| v.as_str()) {
-                    let url = topic
-                        .get("FirstURL")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                    let url = topic.get("FirstURL").and_then(|v| v.as_str()).unwrap_or("");
                     results.push(format!("- {}\n  URL: {}", text, url));
                 }
             }
@@ -143,7 +146,10 @@ impl Tool for WebSearchTool {
 
         // Extract results from Results array
         if let Some(res_array) = body.get("Results").and_then(|v| v.as_array()) {
-            for result in res_array.iter().take(max_results.saturating_sub(results.len())) {
+            for result in res_array
+                .iter()
+                .take(max_results.saturating_sub(results.len()))
+            {
                 if let Some(text) = result.get("Text").and_then(|v| v.as_str()) {
                     let url = result
                         .get("FirstURL")
@@ -227,13 +233,12 @@ impl Tool for WebFetchTool {
     }
 
     async fn execute(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError> {
-        let url = args
-            .get("url")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidArguments {
+        let url = args.get("url").and_then(|v| v.as_str()).ok_or_else(|| {
+            ToolError::InvalidArguments {
                 name: "web_fetch".into(),
                 reason: "Missing required parameter: url".into(),
-            })?;
+            }
+        })?;
 
         let max_length = args
             .get("max_length")
@@ -258,16 +263,21 @@ impl Tool for WebFetchTool {
                 message: format!("Failed to create HTTP client: {}", e),
             })?;
 
-        let response = client.get(url).send().await.map_err(|e| {
-            ToolError::ExecutionFailed {
+        let response = client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
                 name: "web_fetch".into(),
                 message: format!("Fetch failed: {}", e),
-            }
-        })?;
+            })?;
 
         let status = response.status();
         if !status.is_success() {
-            return Ok(ToolOutput::text(format!("HTTP {} for URL: {}", status, url)));
+            return Ok(ToolOutput::text(format!(
+                "HTTP {} for URL: {}",
+                status, url
+            )));
         }
 
         let content_type = response
@@ -277,22 +287,30 @@ impl Tool for WebFetchTool {
             .unwrap_or("")
             .to_string();
 
-        let body = response.text().await.map_err(|e| ToolError::ExecutionFailed {
-            name: "web_fetch".into(),
-            message: format!("Failed to read response body: {}", e),
-        })?;
+        let body = response
+            .text()
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                name: "web_fetch".into(),
+                message: format!("Failed to read response body: {}", e),
+            })?;
 
         // Extract text from HTML
-        let text = if content_type.contains("text/html") || content_type.contains("application/xhtml") {
-            extract_text_from_html(&body)
-        } else {
-            // Plain text or other formats — return as-is
-            body
-        };
+        let text =
+            if content_type.contains("text/html") || content_type.contains("application/xhtml") {
+                extract_text_from_html(&body)
+            } else {
+                // Plain text or other formats — return as-is
+                body
+            };
 
         // Truncate if needed
         let text = if text.len() > max_length {
-            format!("{}...\n\n[Truncated at {} characters. Use max_length to see more.]", &text[..max_length], max_length)
+            format!(
+                "{}...\n\n[Truncated at {} characters. Use max_length to see more.]",
+                &text[..max_length],
+                max_length
+            )
         } else {
             text
         };
@@ -418,10 +436,12 @@ impl DocumentReadTool {
             self.workspace.join(path)
         };
 
-        let canonical = resolved.canonicalize().map_err(|e| ToolError::ExecutionFailed {
-            name: "document_read".into(),
-            message: format!("Path resolution failed: {}", e),
-        })?;
+        let canonical = resolved
+            .canonicalize()
+            .map_err(|e| ToolError::ExecutionFailed {
+                name: "document_read".into(),
+                message: format!("Path resolution failed: {}", e),
+            })?;
 
         // Allow reading outside workspace for documents (e.g., ~/Downloads/*.pdf)
         // but still validate the path exists
@@ -475,13 +495,12 @@ impl Tool for DocumentReadTool {
     }
 
     async fn execute(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError> {
-        let path_str = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidArguments {
+        let path_str = args.get("path").and_then(|v| v.as_str()).ok_or_else(|| {
+            ToolError::InvalidArguments {
                 name: "document_read".into(),
                 reason: "Missing required parameter: path".into(),
-            })?;
+            }
+        })?;
 
         let max_length = args
             .get("max_length")
@@ -498,8 +517,26 @@ impl Tool for DocumentReadTool {
 
         // Validate supported extensions
         let supported = [
-            "txt", "md", "csv", "json", "yaml", "yml", "toml", "xml", "log", "cfg", "ini",
-            "html", "htm", "rst", "adoc", "tex", "rtf", "conf", "properties", "env",
+            "txt",
+            "md",
+            "csv",
+            "json",
+            "yaml",
+            "yml",
+            "toml",
+            "xml",
+            "log",
+            "cfg",
+            "ini",
+            "html",
+            "htm",
+            "rst",
+            "adoc",
+            "tex",
+            "rtf",
+            "conf",
+            "properties",
+            "env",
         ];
 
         if !supported.contains(&extension.as_str()) {
@@ -537,9 +574,7 @@ impl Tool for DocumentReadTool {
             text
         };
 
-        let file_size = std::fs::metadata(&path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let file_size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
 
         let content = format!(
             "Document: {} ({} bytes, .{}):\n\n{}",
@@ -613,9 +648,7 @@ mod tests {
     #[tokio::test]
     async fn test_web_fetch_invalid_url() {
         let tool = WebFetchTool::new();
-        let result = tool
-            .execute(serde_json::json!({"url": "not-a-url"}))
-            .await;
+        let result = tool.execute(serde_json::json!({"url": "not-a-url"})).await;
         assert!(result.is_err());
     }
 

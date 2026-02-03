@@ -85,7 +85,10 @@ impl TaskBoard {
 
     pub fn select_prev(&mut self) {
         if !self.agents.is_empty() {
-            self.selected = self.selected.checked_sub(1).unwrap_or(self.agents.len() - 1);
+            self.selected = self
+                .selected
+                .checked_sub(1)
+                .unwrap_or(self.agents.len() - 1);
         }
     }
 
@@ -114,12 +117,7 @@ impl TaskBoard {
 }
 
 /// Render the task board overlay.
-pub fn render_task_board(
-    frame: &mut Frame,
-    area: Rect,
-    board: &TaskBoard,
-    theme: &Theme,
-) {
+pub fn render_task_board(frame: &mut Frame, area: Rect, board: &TaskBoard, theme: &Theme) {
     if !board.visible || area.width < 40 || area.height < 12 {
         return;
     }
@@ -135,9 +133,16 @@ pub fn render_task_board(
     frame.render_widget(Clear, popup_area);
 
     // Build title with counts
-    let running = board.agents.iter().filter(|a| a.status == BoardAgentStatus::Running).count();
+    let running = board
+        .agents
+        .iter()
+        .filter(|a| a.status == BoardAgentStatus::Running)
+        .count();
     let total = board.agents.len();
-    let title = format!(" Task Board [{} agents, {} running] [Esc to close] ", total, running);
+    let title = format!(
+        " Task Board [{} agents, {} running] [Esc to close] ",
+        total, running
+    );
 
     let outer_block = Block::default()
         .title(title)
@@ -171,11 +176,9 @@ pub fn render_task_board(
     }
 
     // Split: table on top, detail on bottom
-    let [table_area, detail_area] = Layout::vertical([
-        Constraint::Min(5),
-        Constraint::Length(inner.height.min(6)),
-    ])
-    .areas(inner);
+    let [table_area, detail_area] =
+        Layout::vertical([Constraint::Min(5), Constraint::Length(inner.height.min(6))])
+            .areas(inner);
 
     // Render agent table
     render_agent_table(frame, table_area, board, theme);
@@ -187,12 +190,7 @@ pub fn render_task_board(
 }
 
 /// Render the agent table.
-fn render_agent_table(
-    frame: &mut Frame,
-    area: Rect,
-    board: &TaskBoard,
-    theme: &Theme,
-) {
+fn render_agent_table(frame: &mut Frame, area: Rect, board: &TaskBoard, theme: &Theme) {
     let header = Row::new(vec!["", "Agent", "Role", "Status", "Tool", "Time", "Calls"])
         .style(theme.tool_call_style().add_modifier(Modifier::BOLD));
 
@@ -209,10 +207,7 @@ fn render_agent_table(
                 BoardAgentStatus::Idle => theme.base_style(),
             };
 
-            let tool = agent
-                .current_tool
-                .as_deref()
-                .unwrap_or("-");
+            let tool = agent.current_tool.as_deref().unwrap_or("-");
 
             let elapsed = if agent.elapsed_secs < 60.0 {
                 format!("{:.0}s", agent.elapsed_secs)
@@ -243,24 +238,17 @@ fn render_agent_table(
         Constraint::Length(5),
     ];
 
-    let table = Table::new(rows, widths)
-        .header(header)
-        .block(
-            Block::default()
-                .borders(Borders::BOTTOM)
-                .border_style(theme.border_style()),
-        );
+    let table = Table::new(rows, widths).header(header).block(
+        Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(theme.border_style()),
+    );
 
     frame.render_widget(table, area);
 }
 
 /// Render detail for the selected agent.
-fn render_agent_detail(
-    frame: &mut Frame,
-    area: Rect,
-    agent: &AgentSummary,
-    theme: &Theme,
-) {
+fn render_agent_detail(frame: &mut Frame, area: Rect, agent: &AgentSummary, theme: &Theme) {
     let block = Block::default()
         .title(format!(" {} ", agent.name))
         .borders(Borders::TOP)
@@ -276,10 +264,7 @@ fn render_agent_detail(
     let mut lines = vec![
         Line::from(vec![
             Span::styled(" ID: ", theme.sidebar_style()),
-            Span::styled(
-                format!("{}", agent.id),
-                theme.tool_call_style(),
-            ),
+            Span::styled(format!("{}", agent.id), theme.tool_call_style()),
             Span::styled("  Role: ", theme.sidebar_style()),
             Span::styled(&agent.role, theme.tool_call_style()),
         ]),
@@ -296,10 +281,7 @@ fn render_agent_detail(
             Span::styled("  Tool calls: ", theme.sidebar_style()),
             Span::styled(agent.tool_calls.to_string(), theme.sidebar_style()),
             Span::styled("  Tokens: ", theme.sidebar_style()),
-            Span::styled(
-                format_tokens(agent.token_usage),
-                theme.sidebar_style(),
-            ),
+            Span::styled(format_tokens(agent.token_usage), theme.sidebar_style()),
         ]),
     ];
 
@@ -313,10 +295,7 @@ fn render_agent_detail(
     if agent.pending_messages > 0 {
         lines.push(Line::from(vec![
             Span::styled(" Pending messages: ", theme.sidebar_style()),
-            Span::styled(
-                agent.pending_messages.to_string(),
-                theme.warning_style(),
-            ),
+            Span::styled(agent.pending_messages.to_string(), theme.warning_style()),
         ]));
     }
 

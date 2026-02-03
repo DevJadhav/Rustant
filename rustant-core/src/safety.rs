@@ -1015,6 +1015,11 @@ impl SafetyGuardian {
         self.config.approval_mode
     }
 
+    /// Set the approval mode at runtime.
+    pub fn set_approval_mode(&mut self, mode: ApprovalMode) {
+        self.config.approval_mode = mode;
+    }
+
     /// Get the maximum iterations allowed.
     pub fn max_iterations(&self) -> usize {
         self.config.max_iterations

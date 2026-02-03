@@ -55,6 +55,11 @@ pub enum TuiEvent {
     /// Multi-agent status update for the task board.
     #[allow(dead_code)]
     MultiAgentUpdate(Vec<crate::tui::widgets::task_board::AgentSummary>),
+    /// A clarification question from the agent. The TUI must send the answer via the oneshot.
+    ClarificationRequest {
+        question: String,
+        reply: oneshot::Sender<String>,
+    },
 }
 
 /// Implements AgentCallback by forwarding events through an mpsc channel.
@@ -142,6 +147,19 @@ impl AgentCallback for TuiCallback {
 
     async fn on_progress(&self, progress: &ProgressUpdate) {
         let _ = self.tx.send(TuiEvent::Progress(progress.clone()));
+    }
+
+    async fn on_clarification_request(&self, question: &str) -> String {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let sent = self.tx.send(TuiEvent::ClarificationRequest {
+            question: question.to_string(),
+            reply: reply_tx,
+        });
+        if sent.is_err() {
+            return String::new();
+        }
+        // Block (async) until the TUI sends the user's answer.
+        reply_rx.await.unwrap_or_default()
     }
 }
 
@@ -249,6 +267,28 @@ mod tests {
 
         let result = approval_task.await.unwrap();
         assert_eq!(result, ApprovalDecision::Deny);
+    }
+
+    #[tokio::test]
+    async fn test_callback_sends_clarification_request() {
+        let (callback, mut rx) = TuiCallback::new();
+
+        let clarify_task = tokio::spawn(async move {
+            callback
+                .on_clarification_request("Which environment?")
+                .await
+        });
+
+        match rx.recv().await.unwrap() {
+            TuiEvent::ClarificationRequest { question, reply } => {
+                assert_eq!(question, "Which environment?");
+                reply.send("production".to_string()).unwrap();
+            }
+            other => panic!("Expected ClarificationRequest, got {:?}", other),
+        }
+
+        let answer = clarify_task.await.unwrap();
+        assert_eq!(answer, "production");
     }
 
     #[tokio::test]

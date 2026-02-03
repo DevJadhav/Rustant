@@ -125,7 +125,10 @@ fn parse_line_pattern(pattern: &str) -> Option<(usize, usize)> {
     if let Some(rest) = lower.strip_prefix("lines ") {
         let parts: Vec<&str> = rest.split('-').collect();
         if parts.len() == 2 {
-            if let (Ok(a), Ok(b)) = (parts[0].trim().parse::<usize>(), parts[1].trim().parse::<usize>()) {
+            if let (Ok(a), Ok(b)) = (
+                parts[0].trim().parse::<usize>(),
+                parts[1].trim().parse::<usize>(),
+            ) {
                 return Some((a, b));
             }
         }
@@ -135,12 +138,19 @@ fn parse_line_pattern(pattern: &str) -> Option<(usize, usize)> {
 }
 
 /// Find a location by line range.
-fn find_by_line_range(content: &str, start_line: usize, end_line: usize) -> Result<LocationMatch, String> {
+fn find_by_line_range(
+    content: &str,
+    start_line: usize,
+    end_line: usize,
+) -> Result<LocationMatch, String> {
     let lines: Vec<&str> = content.lines().collect();
     let total = lines.len();
 
     if start_line == 0 || start_line > total {
-        return Err(format!("Line {} is out of range (file has {} lines)", start_line, total));
+        return Err(format!(
+            "Line {} is out of range (file has {} lines)",
+            start_line, total
+        ));
     }
 
     let end_line = end_line.min(total);
@@ -179,8 +189,19 @@ fn find_by_function_pattern(content: &str, pattern: &str) -> Option<LocationMatc
     let pattern_lower = pattern.to_lowercase();
 
     // Common function signature prefixes
-    let fn_prefixes = ["fn ", "def ", "func ", "function ", "pub fn ", "async fn ",
-                       "pub async fn ", "impl ", "class ", "struct ", "enum "];
+    let fn_prefixes = [
+        "fn ",
+        "def ",
+        "func ",
+        "function ",
+        "pub fn ",
+        "async fn ",
+        "pub async fn ",
+        "impl ",
+        "class ",
+        "struct ",
+        "enum ",
+    ];
 
     // Check if pattern looks like a function reference
     let is_fn_pattern = fn_prefixes.iter().any(|p| pattern_lower.starts_with(p))
@@ -229,9 +250,31 @@ fn find_by_function_pattern(content: &str, pattern: &str) -> Option<LocationMatc
 fn extract_identifier_from_pattern(pattern: &str) -> String {
     // Common language keywords to skip
     const KEYWORDS: &[&str] = &[
-        "fn", "def", "func", "function", "pub", "async", "impl", "class",
-        "struct", "enum", "let", "const", "var", "type", "trait", "interface",
-        "the", "a", "an", "in", "of", "for", "with", "from", "to",
+        "fn",
+        "def",
+        "func",
+        "function",
+        "pub",
+        "async",
+        "impl",
+        "class",
+        "struct",
+        "enum",
+        "let",
+        "const",
+        "var",
+        "type",
+        "trait",
+        "interface",
+        "the",
+        "a",
+        "an",
+        "in",
+        "of",
+        "for",
+        "with",
+        "from",
+        "to",
     ];
 
     // Remove common wrappers
@@ -470,10 +513,7 @@ fn truncate(s: &str, max_len: usize) -> String {
 }
 
 /// Validate that a path stays inside the workspace.
-fn validate_workspace_path(
-    workspace: &Path,
-    path_str: &str,
-) -> Result<PathBuf, ToolError> {
+fn validate_workspace_path(workspace: &Path, path_str: &str) -> Result<PathBuf, ToolError> {
     let workspace_canonical = workspace
         .canonicalize()
         .unwrap_or_else(|_| workspace.to_path_buf());
@@ -579,19 +619,21 @@ impl Tool for SmartEditTool {
                 reason: "'path' parameter is required".into(),
             })?;
 
-        let location_str = args["location"]
-            .as_str()
-            .ok_or_else(|| ToolError::InvalidArguments {
-                name: "smart_edit".into(),
-                reason: "'location' parameter is required".into(),
-            })?;
+        let location_str =
+            args["location"]
+                .as_str()
+                .ok_or_else(|| ToolError::InvalidArguments {
+                    name: "smart_edit".into(),
+                    reason: "'location' parameter is required".into(),
+                })?;
 
-        let edit_type_str = args["edit_type"]
-            .as_str()
-            .ok_or_else(|| ToolError::InvalidArguments {
-                name: "smart_edit".into(),
-                reason: "'edit_type' parameter is required".into(),
-            })?;
+        let edit_type_str =
+            args["edit_type"]
+                .as_str()
+                .ok_or_else(|| ToolError::InvalidArguments {
+                    name: "smart_edit".into(),
+                    reason: "'edit_type' parameter is required".into(),
+                })?;
 
         let edit_type = EditType::from_str(edit_type_str).ok_or_else(|| {
             ToolError::InvalidArguments {
@@ -626,12 +668,11 @@ impl Tool for SmartEditTool {
                 })?;
 
         // Find the location
-        let location = find_location(&content, location_str).map_err(|e| {
-            ToolError::ExecutionFailed {
+        let location =
+            find_location(&content, location_str).map_err(|e| ToolError::ExecutionFailed {
                 name: "smart_edit".into(),
                 message: e,
-            }
-        })?;
+            })?;
 
         debug!(
             "smart_edit: matched at line {} ({} bytes)",
@@ -814,8 +855,14 @@ mod tests {
     #[test]
     fn test_edit_type_from_str() {
         assert_eq!(EditType::from_str("replace"), Some(EditType::Replace));
-        assert_eq!(EditType::from_str("insert_after"), Some(EditType::InsertAfter));
-        assert_eq!(EditType::from_str("insert-before"), Some(EditType::InsertBefore));
+        assert_eq!(
+            EditType::from_str("insert_after"),
+            Some(EditType::InsertAfter)
+        );
+        assert_eq!(
+            EditType::from_str("insert-before"),
+            Some(EditType::InsertBefore)
+        );
         assert_eq!(EditType::from_str("delete"), Some(EditType::Delete));
         assert_eq!(EditType::from_str("remove"), Some(EditType::Delete));
         assert_eq!(EditType::from_str("unknown"), None);
@@ -830,8 +877,14 @@ mod tests {
 
     #[test]
     fn test_extract_identifier() {
-        assert_eq!(extract_identifier_from_pattern("fn handle_request"), "handle_request");
-        assert_eq!(extract_identifier_from_pattern("the process_data function"), "process_data");
+        assert_eq!(
+            extract_identifier_from_pattern("fn handle_request"),
+            "handle_request"
+        );
+        assert_eq!(
+            extract_identifier_from_pattern("the process_data function"),
+            "process_data"
+        );
     }
 
     #[test]
@@ -858,17 +911,24 @@ mod tests {
         git2::Repository::init(&workspace).unwrap();
 
         // Create a test file
-        fs::write(workspace.join("test.rs"), "fn old_name() {\n    // body\n}\n").unwrap();
+        fs::write(
+            workspace.join("test.rs"),
+            "fn old_name() {\n    // body\n}\n",
+        )
+        .unwrap();
 
         // Initial commit so checkpoint works
         let repo = git2::Repository::open(&workspace).unwrap();
         let mut index = repo.index().unwrap();
-        index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None).unwrap();
+        index
+            .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+            .unwrap();
         index.write().unwrap();
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = git2::Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
 
         let tool = SmartEditTool::new(workspace.clone());
 
@@ -903,12 +963,15 @@ mod tests {
 
         let repo = git2::Repository::open(&workspace).unwrap();
         let mut index = repo.index().unwrap();
-        index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None).unwrap();
+        index
+            .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+            .unwrap();
         index.write().unwrap();
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = git2::Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
 
         let tool = SmartEditTool::new(workspace.clone());
 
@@ -936,12 +999,15 @@ mod tests {
 
         let repo = git2::Repository::open(&workspace).unwrap();
         let mut index = repo.index().unwrap();
-        index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None).unwrap();
+        index
+            .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+            .unwrap();
         index.write().unwrap();
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = git2::Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
 
         let tool = SmartEditTool::new(workspace.clone());
 

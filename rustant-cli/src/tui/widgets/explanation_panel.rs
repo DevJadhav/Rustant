@@ -79,7 +79,6 @@ impl ExplanationPanel {
     pub fn is_visible(&self) -> bool {
         self.visible
     }
-
 }
 
 /// Render the explanation panel as a full-screen overlay.
@@ -124,11 +123,9 @@ pub fn render_explanation_panel(
     }
 
     // Split into timeline list (left) and detail view (right)
-    let [list_area, detail_area] = Layout::horizontal([
-        Constraint::Length(inner.width.min(30)),
-        Constraint::Min(20),
-    ])
-    .areas(inner);
+    let [list_area, detail_area] =
+        Layout::horizontal([Constraint::Length(inner.width.min(30)), Constraint::Min(20)])
+            .areas(inner);
 
     // --- Timeline list ---
     render_timeline(frame, list_area, panel, theme);
@@ -212,9 +209,7 @@ fn render_detail(
     lines.push(Line::from(vec![
         Span::styled(
             format!(" {} ", dtype),
-            theme
-                .assistant_message_style()
-                .add_modifier(Modifier::BOLD),
+            theme.assistant_message_style().add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!("  Confidence: {:.0}%", explanation.confidence * 100.0),
@@ -235,10 +230,7 @@ fn render_detail(
         )));
         for step in &explanation.reasoning_chain {
             lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  {}. ", step.step_number),
-                    theme.tool_call_style(),
-                ),
+                Span::styled(format!("  {}. ", step.step_number), theme.tool_call_style()),
                 Span::styled(&step.description, theme.sidebar_style()),
             ]));
             if let Some(ref evidence) = step.evidence {
@@ -259,14 +251,8 @@ fn render_detail(
         )));
         for alt in &explanation.considered_alternatives {
             lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  x {} ", alt.tool_name),
-                    theme.error_style(),
-                ),
-                Span::styled(
-                    format!("({})", alt.estimated_risk),
-                    theme.sidebar_style(),
-                ),
+                Span::styled(format!("  x {} ", alt.tool_name), theme.error_style()),
+                Span::styled(format!("({})", alt.estimated_risk), theme.sidebar_style()),
             ]));
             lines.push(Line::from(Span::styled(
                 format!("    Rejected: {}", alt.reason_not_selected),
@@ -302,9 +288,7 @@ fn render_detail(
         theme.status_bar_style(),
     )));
 
-    let detail_block = Block::default()
-        .title(" Detail ")
-        .borders(Borders::NONE);
+    let detail_block = Block::default().title(" Detail ").borders(Borders::NONE);
 
     let paragraph = Paragraph::new(lines)
         .block(detail_block)

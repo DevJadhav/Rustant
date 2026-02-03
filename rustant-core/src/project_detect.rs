@@ -322,11 +322,7 @@ pub fn recommended_allowed_commands(info: &ProjectInfo) -> Vec<String> {
             }
         }
         ProjectType::Ruby => {
-            commands.extend([
-                "ruby".to_string(),
-                "bundle".to_string(),
-                "rake".to_string(),
-            ]);
+            commands.extend(["ruby".to_string(), "bundle".to_string(), "rake".to_string()]);
         }
         ProjectType::CSharp => {
             commands.push("dotnet".to_string());
@@ -480,16 +476,8 @@ mod tests {
     #[test]
     fn test_detect_mixed_project() {
         let dir = TempDir::new().unwrap();
-        std::fs::write(
-            dir.path().join("Cargo.toml"),
-            "[package]\nname = \"test\"",
-        )
-        .unwrap();
-        std::fs::write(
-            dir.path().join("package.json"),
-            r#"{"name": "test"}"#,
-        )
-        .unwrap();
+        std::fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"test\"").unwrap();
+        std::fs::write(dir.path().join("package.json"), r#"{"name": "test"}"#).unwrap();
 
         let info = detect_project(dir.path());
         match &info.project_type {

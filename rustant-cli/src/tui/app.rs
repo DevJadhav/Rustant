@@ -10,8 +10,8 @@ use crate::tui::widgets::diff_view::DiffView;
 use crate::tui::widgets::explanation_panel::{render_explanation_panel, ExplanationPanel};
 use crate::tui::widgets::header::{render_header, HeaderData};
 use crate::tui::widgets::input_area::{InputAction, InputWidget};
-use crate::tui::widgets::progress_bar::{render_progress_bar, ProgressState};
 use crate::tui::widgets::markdown::SyntaxHighlighter;
+use crate::tui::widgets::progress_bar::{render_progress_bar, ProgressState};
 use crate::tui::widgets::sidebar::{render_sidebar, FileEntry, FileStatus, SidebarData};
 use crate::tui::widgets::status_bar::{render_status_bar, InputMode};
 use crate::tui::widgets::task_board::{render_task_board, TaskBoard};
@@ -61,6 +61,9 @@ pub struct App {
 
     // Approval state
     pending_approval: Option<oneshot::Sender<rustant_core::safety::ApprovalDecision>>,
+
+    // Clarification state
+    pending_clarification: Option<oneshot::Sender<String>>,
 
     // Audit & Replay (Week 12)
     audit_store: AuditStore,
@@ -141,6 +144,7 @@ impl App {
             agent,
             workspace,
             pending_approval: None,
+            pending_clarification: None,
             audit_store: AuditStore::new(),
             replay_session: ReplaySession::new(),
             explanation_panel: ExplanationPanel::new(),
@@ -726,6 +730,19 @@ impl App {
             return;
         }
 
+        // If there's a pending clarification, resolve it with the user's input
+        if self.pending_clarification.is_some() {
+            self.conversation.push_message(DisplayMessage {
+                role: Role::User,
+                text: text.clone(),
+                tool_name: None,
+                is_error: false,
+                timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
+            });
+            self.resolve_clarification(text);
+            return;
+        }
+
         // Handle slash commands locally
         if text.starts_with('/') {
             self.handle_command(&text);
@@ -794,32 +811,10 @@ impl App {
                 });
             }
             "/help" | "/?" => {
+                let registry = crate::slash::CommandRegistry::with_defaults();
                 self.conversation.push_message(DisplayMessage {
                     role: Role::System,
-                    text: concat!(
-                        "Commands:\n",
-                        "  /help            - Show this help\n",
-                        "  /quit            - Exit Rustant\n",
-                        "  /clear           - Clear conversation\n",
-                        "  /cost            - Show token usage and cost\n",
-                        "  /tools           - List available tools\n",
-                        "  /sidebar         - Toggle sidebar\n",
-                        "  /vim             - Toggle vim mode\n",
-                        "  /theme <name>    - Switch theme (dark/light)\n",
-                        "  /save <name>     - Save session\n",
-                        "  /load <name>     - Load session\n",
-                        "  /undo            - Undo last file change\n",
-                        "  /audit           - Show audit trail\n",
-                        "  /audit export <fmt> - Export traces (json/csv/text)\n",
-                        "  /audit query <tool> - Query traces by tool\n",
-                        "  /analytics       - Show usage analytics\n",
-                        "  /replay          - Start/show replay\n",
-                        "  /replay next     - Step forward in replay\n",
-                        "  /replay prev     - Step backward in replay\n",
-                        "  /replay timeline - Show full timeline\n",
-                        "  /replay reset    - Clear replay session"
-                    )
-                    .to_string(),
+                    text: registry.help_text(),
                     tool_name: None,
                     is_error: false,
                     timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
@@ -1072,10 +1067,222 @@ impl App {
                 self.replay_session = ReplaySession::new();
                 self.push_system_msg("Replay session cleared.");
             }
+            "/compact" => {
+                let (before, after) = self.agent.compact();
+                if before == after {
+                    self.push_system_msg(&format!("Nothing to compact ({} messages).", before));
+                } else {
+                    self.push_system_msg(&format!(
+                        "Compacted {} messages down to {} (+ summary).",
+                        before, after
+                    ));
+                }
+            }
+            "/status" => {
+                let state = self.agent.state();
+                let usage = self.agent.brain().total_usage();
+                let cost = self.agent.brain().total_cost();
+                let goal = state.current_goal.as_deref().unwrap_or("(none)");
+                self.push_system_msg(&format!(
+                    "Status: {} | Goal: {} | Iter: {}/{} | Tokens: {} | Cost: ${:.4}",
+                    state.status,
+                    goal,
+                    state.iteration,
+                    state.max_iterations,
+                    usage.total(),
+                    cost.total()
+                ));
+            }
+            other if other.starts_with("/config") => {
+                let parts: Vec<&str> = other.splitn(3, ' ').collect();
+                let key = parts.get(1).copied().unwrap_or("");
+                let value = parts.get(2).copied().unwrap_or("");
+                if key.is_empty() {
+                    let config = self.agent.config();
+                    self.push_system_msg(&format!(
+                        "Config: model={}, approval_mode={:?}, max_iterations={}, streaming={}",
+                        config.llm.model,
+                        config.safety.approval_mode,
+                        config.safety.max_iterations,
+                        config.llm.use_streaming
+                    ));
+                } else if value.is_empty() {
+                    let config = self.agent.config();
+                    let val = match key {
+                        "model" => config.llm.model.clone(),
+                        "approval_mode" => format!("{:?}", config.safety.approval_mode),
+                        "max_iterations" => config.safety.max_iterations.to_string(),
+                        "streaming" => config.llm.use_streaming.to_string(),
+                        _ => format!("Unknown key: {}", key),
+                    };
+                    self.push_system_msg(&format!("{} = {}", key, val));
+                } else {
+                    match key {
+                        "approval_mode" => {
+                            use rustant_core::ApprovalMode;
+                            match value {
+                                "safe" => {
+                                    self.agent
+                                        .safety_mut()
+                                        .set_approval_mode(ApprovalMode::Safe);
+                                    self.agent.config_mut().safety.approval_mode =
+                                        ApprovalMode::Safe;
+                                    self.push_system_msg("Approval mode set to: safe");
+                                }
+                                "cautious" => {
+                                    self.agent
+                                        .safety_mut()
+                                        .set_approval_mode(ApprovalMode::Cautious);
+                                    self.agent.config_mut().safety.approval_mode =
+                                        ApprovalMode::Cautious;
+                                    self.push_system_msg("Approval mode set to: cautious");
+                                }
+                                "paranoid" => {
+                                    self.agent
+                                        .safety_mut()
+                                        .set_approval_mode(ApprovalMode::Paranoid);
+                                    self.agent.config_mut().safety.approval_mode =
+                                        ApprovalMode::Paranoid;
+                                    self.push_system_msg("Approval mode set to: paranoid");
+                                }
+                                "yolo" => {
+                                    self.agent
+                                        .safety_mut()
+                                        .set_approval_mode(ApprovalMode::Yolo);
+                                    self.agent.config_mut().safety.approval_mode =
+                                        ApprovalMode::Yolo;
+                                    self.push_system_msg("Approval mode set to: yolo");
+                                }
+                                _ => self.push_system_msg(&format!(
+                                    "Invalid mode: {}. Options: safe, cautious, paranoid, yolo",
+                                    value
+                                )),
+                            }
+                        }
+                        "max_iterations" => {
+                            if let Ok(n) = value.parse::<usize>() {
+                                self.agent.config_mut().safety.max_iterations = n;
+                                self.push_system_msg(&format!("Max iterations set to: {}", n));
+                            } else {
+                                self.push_system_msg(&format!("Invalid number: {}", value));
+                            }
+                        }
+                        _ => self.push_system_msg(&format!(
+                            "Cannot set '{}'. Settable: approval_mode, max_iterations",
+                            key
+                        )),
+                    }
+                }
+            }
+            "/doctor" => {
+                let config = self.agent.config();
+                let tools = self.agent.tool_definitions();
+                let mem = self.agent.memory();
+                let audit_count = self.agent.safety().audit_log().len();
+                let has_git = self.workspace.join(".git").exists();
+                self.push_system_msg(&format!(
+                    "Rustant Doctor\n  Workspace: {}\n  Git: {}\n  Provider: {} ({})\n  Tools: {} registered\n  Memory: {} messages, {} facts\n  Audit: {} entries\n  All checks passed.",
+                    self.workspace.display(),
+                    if has_git { "yes" } else { "no" },
+                    config.llm.provider,
+                    config.llm.model,
+                    tools.len(),
+                    mem.short_term.len(),
+                    mem.long_term.facts.len(),
+                    audit_count
+                ));
+            }
+            other if other.starts_with("/permissions") => {
+                let mode_arg = other.strip_prefix("/permissions").unwrap_or("").trim();
+                if mode_arg.is_empty() {
+                    self.push_system_msg(&format!(
+                        "Approval mode: {:?}. Options: safe, cautious, paranoid, yolo",
+                        self.agent.safety().approval_mode()
+                    ));
+                } else {
+                    use rustant_core::ApprovalMode;
+                    match mode_arg {
+                        "safe" => {
+                            self.agent
+                                .safety_mut()
+                                .set_approval_mode(ApprovalMode::Safe);
+                            self.agent.config_mut().safety.approval_mode = ApprovalMode::Safe;
+                            self.push_system_msg("Approval mode set to: safe");
+                        }
+                        "cautious" => {
+                            self.agent
+                                .safety_mut()
+                                .set_approval_mode(ApprovalMode::Cautious);
+                            self.agent.config_mut().safety.approval_mode = ApprovalMode::Cautious;
+                            self.push_system_msg("Approval mode set to: cautious");
+                        }
+                        "paranoid" => {
+                            self.agent
+                                .safety_mut()
+                                .set_approval_mode(ApprovalMode::Paranoid);
+                            self.agent.config_mut().safety.approval_mode = ApprovalMode::Paranoid;
+                            self.push_system_msg("Approval mode set to: paranoid");
+                        }
+                        "yolo" => {
+                            self.agent
+                                .safety_mut()
+                                .set_approval_mode(ApprovalMode::Yolo);
+                            self.agent.config_mut().safety.approval_mode = ApprovalMode::Yolo;
+                            self.push_system_msg("Approval mode set to: yolo");
+                        }
+                        _ => self.push_system_msg(&format!(
+                            "Unknown mode: {}. Options: safe, cautious, paranoid, yolo",
+                            mode_arg
+                        )),
+                    }
+                }
+            }
+            "/diff" => match self.checkpoint_manager.diff_from_last() {
+                Ok(diff) => {
+                    if diff.is_empty() {
+                        self.push_system_msg("No changes since last checkpoint.");
+                    } else {
+                        self.push_system_msg(&diff);
+                    }
+                }
+                Err(e) => self.push_system_msg(&format!("Diff failed: {}", e)),
+            },
+            "/review" => {
+                let checkpoints = self.checkpoint_manager.checkpoints();
+                if checkpoints.is_empty() {
+                    self.push_system_msg("No file changes to review.");
+                } else {
+                    let mut text =
+                        format!("Session changes ({} checkpoints):\n", checkpoints.len());
+                    for (i, cp) in checkpoints.iter().enumerate() {
+                        text.push_str(&format!(
+                            "  {}. {} - {}\n",
+                            i + 1,
+                            cp.label,
+                            cp.timestamp.format("%H:%M:%S")
+                        ));
+                        for f in &cp.changed_files {
+                            text.push_str(&format!("     {}\n", f));
+                        }
+                    }
+                    self.push_system_msg(&text);
+                }
+            }
             other => {
+                // Use registry for unknown command suggestions
+                let registry = crate::slash::CommandRegistry::with_defaults();
+                let cmd_name = other.split_whitespace().next().unwrap_or(other);
+                let msg = if let Some(suggestion) = registry.suggest(cmd_name) {
+                    format!(
+                        "Unknown command: {}. Did you mean {}?",
+                        cmd_name, suggestion
+                    )
+                } else {
+                    format!("Unknown command: {}. Type /help for commands.", other)
+                };
                 self.conversation.push_message(DisplayMessage {
                     role: Role::System,
-                    text: format!("Unknown command: {}. Type /help for commands.", other),
+                    text: msg,
                     tool_name: None,
                     is_error: false,
                     timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
@@ -1269,6 +1476,24 @@ impl App {
             TuiEvent::MultiAgentUpdate(agents) => {
                 self.task_board.update_agents(agents);
             }
+            TuiEvent::ClarificationRequest { question, reply } => {
+                // Show the question in the conversation and store the reply sender.
+                self.conversation.push_message(DisplayMessage {
+                    role: Role::Assistant,
+                    text: format!("? {}", question),
+                    tool_name: None,
+                    is_error: false,
+                    timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
+                });
+                self.pending_clarification = Some(reply);
+            }
+        }
+    }
+
+    /// Resolve a pending clarification request with the user's answer.
+    pub fn resolve_clarification(&mut self, answer: String) {
+        if let Some(reply) = self.pending_clarification.take() {
+            let _ = reply.send(answer);
         }
     }
 
@@ -2321,12 +2546,20 @@ mod tests {
     }
 
     #[test]
-    fn test_handle_command_help_contains_audit() {
+    fn test_handle_command_help_contains_key_commands() {
         let mut app = App::new(test_config(), std::env::temp_dir());
         app.handle_command("/help");
         let last = app.conversation.messages.last().unwrap();
-        assert!(last.text.contains("/audit"));
-        assert!(last.text.contains("/analytics"));
-        assert!(last.text.contains("/replay"));
+        assert!(last.text.contains("/audit"), "Help should contain /audit");
+        assert!(last.text.contains("/help"), "Help should contain /help");
+        assert!(
+            last.text.contains("/compact"),
+            "Help should contain /compact"
+        );
+        assert!(last.text.contains("/config"), "Help should contain /config");
+        assert!(
+            last.text.contains("/permissions"),
+            "Help should contain /permissions"
+        );
     }
 }

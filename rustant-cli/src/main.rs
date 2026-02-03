@@ -6,6 +6,7 @@ pub(crate) mod channel_setup;
 mod commands;
 mod repl;
 pub(crate) mod setup;
+pub(crate) mod slash;
 mod tui;
 
 use clap::Parser;

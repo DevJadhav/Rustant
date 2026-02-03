@@ -133,6 +133,20 @@ impl AgentCallback for CliCallback {
         }
         let _ = io::stdout().flush();
     }
+
+    async fn on_clarification_request(&self, question: &str) -> String {
+        println!("\n\x1b[33m?\x1b[0m {}", question);
+        print!("\x1b[1;34m> \x1b[0m");
+        let _ = io::stdout().flush();
+
+        let stdin = io::stdin();
+        let mut answer = String::new();
+        if stdin.lock().read_line(&mut answer).is_ok() {
+            answer.trim().to_string()
+        } else {
+            String::new()
+        }
+    }
 }
 
 /// Run the agent in interactive REPL mode.
@@ -207,7 +221,8 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     break;
                 }
                 "/help" | "/?" => {
-                    print_help();
+                    let registry = crate::slash::CommandRegistry::with_defaults();
+                    println!("{}", registry.help_text());
                     continue;
                 }
                 "/clear" => {
@@ -280,11 +295,49 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     handle_workflows_command();
                     continue;
                 }
+                "/compact" => {
+                    handle_compact_command(&mut agent);
+                    continue;
+                }
+                "/status" => {
+                    handle_status_command(&agent);
+                    continue;
+                }
+                "/config" => {
+                    handle_config_command(arg1, arg2, &mut agent);
+                    continue;
+                }
+                "/doctor" => {
+                    handle_doctor_command(&agent, &workspace).await;
+                    continue;
+                }
+                "/permissions" => {
+                    handle_permissions_command(arg1, &mut agent);
+                    continue;
+                }
+                "/undo" => {
+                    handle_undo_command(&workspace);
+                    continue;
+                }
+                "/diff" => {
+                    handle_diff_command(&workspace);
+                    continue;
+                }
+                "/review" => {
+                    handle_review_command(&workspace);
+                    continue;
+                }
                 _ => {
-                    println!(
-                        "Unknown command: {}. Type /help for available commands.",
-                        input
-                    );
+                    // Use registry for unknown command suggestions
+                    let registry = crate::slash::CommandRegistry::with_defaults();
+                    if let Some(suggestion) = registry.suggest(cmd) {
+                        println!("Unknown command: {}. Did you mean {}?", cmd, suggestion);
+                    } else {
+                        println!(
+                            "Unknown command: {}. Type /help for available commands.",
+                            cmd
+                        );
+                    }
                     continue;
                 }
             }
@@ -754,12 +807,22 @@ fn handle_context_command(agent: &Agent) {
     if ctx.has_summary {
         println!("  Summary:    ~{} tokens", ctx.summary_tokens);
     }
-    println!("  Messages:   ~{} tokens ({} messages)", ctx.message_tokens, ctx.message_count);
+    println!(
+        "  Messages:   ~{} tokens ({} messages)",
+        ctx.message_tokens, ctx.message_count
+    );
     if ctx.pinned_count > 0 {
-        println!("  Pinned:     {} messages (survive compression)", ctx.pinned_count);
+        println!(
+            "  Pinned:     {} messages (survive compression)",
+            ctx.pinned_count
+        );
     }
     println!("  ──────────────────────────");
-    println!("  Total used: ~{} tokens ({:.0}%)", ctx.total_tokens, ctx.usage_ratio() * 100.0);
+    println!(
+        "  Total used: ~{} tokens ({:.0}%)",
+        ctx.total_tokens,
+        ctx.usage_ratio() * 100.0
+    );
     println!("  Remaining:  ~{} tokens", ctx.remaining_tokens);
     println!("  ──────────────────────────");
     println!("  Session stats:");
@@ -780,10 +843,7 @@ fn handle_workflows_command() {
 
     for name in &names {
         if let Some(wf) = rustant_core::workflow::get_builtin(name) {
-            println!(
-                "  \x1b[36m{:<22}\x1b[0m {}",
-                wf.name, wf.description
-            );
+            println!("  \x1b[36m{:<22}\x1b[0m {}", wf.name, wf.description);
             if !wf.inputs.is_empty() {
                 let inputs: Vec<String> = wf
                     .inputs
@@ -806,9 +866,13 @@ fn handle_workflows_command() {
     println!();
     println!("  Daily automation templates:");
     println!("    morning_briefing  — Schedule with: rustant cron add briefing \"0 0 9 * * MON-FRI *\" \"workflow run morning_briefing\"");
-    println!("    pr_review         — Run: rustant workflow run pr_review --input branch=feature-xyz");
+    println!(
+        "    pr_review         — Run: rustant workflow run pr_review --input branch=feature-xyz"
+    );
     println!("    dependency_audit  — Schedule weekly: rustant cron add audit \"0 0 10 * * MON *\" \"workflow run dependency_audit\"");
-    println!("    changelog         — Run: rustant workflow run changelog --input since=\"1 week ago\"");
+    println!(
+        "    changelog         — Run: rustant workflow run changelog --input since=\"1 week ago\""
+    );
 }
 
 /// Handle `/resume` REPL command.
@@ -867,10 +931,7 @@ fn handle_sessions_command(workspace: &Path) {
     println!("Saved sessions:");
     for entry in &sessions {
         let status = if entry.completed { "done" } else { "..." };
-        let goal = entry
-            .last_goal
-            .as_deref()
-            .unwrap_or("(no goal)");
+        let goal = entry.last_goal.as_deref().unwrap_or("(no goal)");
         let goal_display = if goal.len() > 50 {
             format!("{}...", &goal[..50])
         } else {
@@ -888,33 +949,289 @@ fn handle_sessions_command(workspace: &Path) {
     println!("\nResume with: /resume <name>");
 }
 
-fn print_help() {
-    println!(
-        r#"
-Available commands:
-  /help, /?            Show this help message
-  /quit, /exit         Exit Rustant
-  /clear               Clear the screen
-  /cost                Show token usage and cost
-  /tools               List available tools
-  /setup               Re-run provider setup wizard
-  /safety              Show current safety mode and stats
-  /memory              Show memory system stats
-  /audit show [n]      Show last N audit entries (default: 10)
-  /audit verify        Verify Merkle chain integrity
-  /session save [name] Save current session
-  /session load [name] Load a saved session
-  /session list        List saved sessions
-  /resume [name]       Resume a saved session (latest if no name)
-  /sessions            List saved sessions with details
-  /pin [n]             Pin message #n (survives compression) or list pinned
-  /unpin <n>           Unpin message #n
-  /context             Show context window usage breakdown
-  /workflows           List available workflow templates
+/// Handle `/compact` command to compress conversation context.
+fn handle_compact_command(agent: &mut Agent) {
+    let (before, after) = agent.compact();
+    if before == after {
+        println!("Nothing to compact ({} messages).", before);
+    } else {
+        println!(
+            "Compacted {} messages down to {} (+ summary).",
+            before, after
+        );
+    }
+}
 
-Input:
-  Type your task or question and press Enter.
-  Use @path to reference files (future: autocomplete).
-"#
+/// Handle `/status` command to show agent status.
+fn handle_status_command(agent: &Agent) {
+    let state = agent.state();
+    println!("Agent Status: {}", state.status);
+    if let Some(ref goal) = state.current_goal {
+        println!("Current Goal: {}", goal);
+    }
+    println!("Iteration: {}/{}", state.iteration, state.max_iterations);
+    if let Some(id) = state.task_id {
+        println!("Task ID: {}", id);
+    }
+    let usage = agent.brain().total_usage();
+    let cost = agent.brain().total_cost();
+    println!(
+        "Session: {} tokens ({}in/{}out), ${:.4}",
+        usage.total(),
+        usage.input_tokens,
+        usage.output_tokens,
+        cost.total()
     );
+}
+
+/// Handle `/config` command to view or modify runtime configuration.
+fn handle_config_command(key: &str, value: &str, agent: &mut Agent) {
+    if key.is_empty() {
+        // Show current config summary
+        let config = agent.config();
+        println!("Runtime Configuration:");
+        println!("  model:          {}", config.llm.model);
+        println!("  approval_mode:  {:?}", config.safety.approval_mode);
+        println!("  max_iterations: {}", config.safety.max_iterations);
+        println!("  streaming:      {}", config.llm.use_streaming);
+        println!("  window_size:    {}", config.memory.window_size);
+        println!("\nUse /config <key> <value> to change settings.");
+        return;
+    }
+
+    if value.is_empty() {
+        // Show single key
+        let config = agent.config();
+        match key {
+            "model" => println!("model = {}", config.llm.model),
+            "approval_mode" => println!("approval_mode = {:?}", config.safety.approval_mode),
+            "max_iterations" => println!("max_iterations = {}", config.safety.max_iterations),
+            "streaming" => println!("streaming = {}", config.llm.use_streaming),
+            "window_size" => println!("window_size = {}", config.memory.window_size),
+            _ => println!("Unknown config key: {}. Available: model, approval_mode, max_iterations, streaming, window_size", key),
+        }
+        return;
+    }
+
+    // Set a value
+    match key {
+        "approval_mode" => {
+            use rustant_core::ApprovalMode;
+            match value {
+                "safe" => {
+                    agent.safety_mut().set_approval_mode(ApprovalMode::Safe);
+                    agent.config_mut().safety.approval_mode = ApprovalMode::Safe;
+                    println!("Approval mode set to: safe");
+                }
+                "cautious" => {
+                    agent.safety_mut().set_approval_mode(ApprovalMode::Cautious);
+                    agent.config_mut().safety.approval_mode = ApprovalMode::Cautious;
+                    println!("Approval mode set to: cautious");
+                }
+                "paranoid" => {
+                    agent.safety_mut().set_approval_mode(ApprovalMode::Paranoid);
+                    agent.config_mut().safety.approval_mode = ApprovalMode::Paranoid;
+                    println!("Approval mode set to: paranoid");
+                }
+                "yolo" => {
+                    agent.safety_mut().set_approval_mode(ApprovalMode::Yolo);
+                    agent.config_mut().safety.approval_mode = ApprovalMode::Yolo;
+                    println!("Approval mode set to: yolo");
+                }
+                _ => println!(
+                    "Invalid approval mode: {}. Options: safe, cautious, paranoid, yolo",
+                    value
+                ),
+            }
+        }
+        "max_iterations" => {
+            if let Ok(n) = value.parse::<usize>() {
+                agent.config_mut().safety.max_iterations = n;
+                println!("Max iterations set to: {}", n);
+            } else {
+                println!("Invalid number: {}", value);
+            }
+        }
+        "streaming" => match value {
+            "true" | "on" | "1" => {
+                agent.config_mut().llm.use_streaming = true;
+                println!("Streaming enabled.");
+            }
+            "false" | "off" | "0" => {
+                agent.config_mut().llm.use_streaming = false;
+                println!("Streaming disabled.");
+            }
+            _ => println!("Invalid value: {}. Use true/false.", value),
+        },
+        "window_size" => {
+            if let Ok(n) = value.parse::<usize>() {
+                agent.config_mut().memory.window_size = n;
+                println!("Window size set to: {}", n);
+            } else {
+                println!("Invalid number: {}", value);
+            }
+        }
+        _ => println!(
+            "Cannot set '{}'. Settable keys: approval_mode, max_iterations, streaming, window_size",
+            key
+        ),
+    }
+}
+
+/// Handle `/doctor` command to run diagnostic checks.
+async fn handle_doctor_command(agent: &Agent, workspace: &Path) {
+    println!("Rustant Doctor");
+    println!("══════════════════════════════");
+
+    // Workspace
+    println!("  Workspace:     {}", workspace.display());
+    let has_git = workspace.join(".git").exists();
+    println!("  Git repo:      {}", if has_git { "yes" } else { "no" });
+
+    // Config
+    let config_path = workspace.join(".rustant").join("config.toml");
+    let config_found = config_path.exists() || rustant_core::config_exists(Some(workspace));
+    println!(
+        "  Config file:   {}",
+        if config_found {
+            "found"
+        } else {
+            "using defaults"
+        }
+    );
+
+    // Model
+    let config = agent.config();
+    println!("  LLM provider:  {}", config.llm.provider);
+    println!("  Model:         {}", config.llm.model);
+    println!("  Approval mode: {:?}", config.safety.approval_mode);
+
+    // Tools
+    let tools = agent.tool_definitions();
+    println!("  Tools:         {} registered", tools.len());
+
+    // Memory
+    let mem = agent.memory();
+    println!(
+        "  Memory:        {} messages, {} facts",
+        mem.short_term.len(),
+        mem.long_term.facts.len()
+    );
+
+    // Safety
+    let audit_count = agent.safety().audit_log().len();
+    println!("  Audit entries: {}", audit_count);
+
+    println!("══════════════════════════════");
+    println!("  All checks passed.");
+}
+
+/// Handle `/permissions` command to view or set approval mode.
+fn handle_permissions_command(arg: &str, agent: &mut Agent) {
+    use rustant_core::ApprovalMode;
+
+    if arg.is_empty() {
+        println!(
+            "Current approval mode: {:?}",
+            agent.safety().approval_mode()
+        );
+        println!("Options: safe, cautious, paranoid, yolo");
+        println!("\nChange with: /permissions <mode>");
+        return;
+    }
+
+    match arg {
+        "safe" => {
+            agent.safety_mut().set_approval_mode(ApprovalMode::Safe);
+            agent.config_mut().safety.approval_mode = ApprovalMode::Safe;
+            println!("Approval mode set to: safe (auto-approve read-only)");
+        }
+        "cautious" => {
+            agent.safety_mut().set_approval_mode(ApprovalMode::Cautious);
+            agent.config_mut().safety.approval_mode = ApprovalMode::Cautious;
+            println!("Approval mode set to: cautious (auto-approve reads + writes)");
+        }
+        "paranoid" => {
+            agent.safety_mut().set_approval_mode(ApprovalMode::Paranoid);
+            agent.config_mut().safety.approval_mode = ApprovalMode::Paranoid;
+            println!("Approval mode set to: paranoid (approve everything)");
+        }
+        "yolo" => {
+            agent.safety_mut().set_approval_mode(ApprovalMode::Yolo);
+            agent.config_mut().safety.approval_mode = ApprovalMode::Yolo;
+            println!("Approval mode set to: yolo (auto-approve everything)");
+        }
+        _ => {
+            println!(
+                "Unknown mode: {}. Options: safe, cautious, paranoid, yolo",
+                arg
+            );
+        }
+    }
+}
+
+/// Handle `/undo` command to undo last file operation.
+fn handle_undo_command(workspace: &Path) {
+    use rustant_tools::checkpoint::CheckpointManager;
+    let mut mgr = CheckpointManager::new(workspace.to_path_buf());
+    match mgr.undo() {
+        Ok(cp) => {
+            println!("Restored checkpoint: {}", cp.label);
+            if !cp.changed_files.is_empty() {
+                println!("  Restored files:");
+                for f in &cp.changed_files {
+                    println!("    {}", f);
+                }
+            }
+        }
+        Err(e) => println!("Undo failed: {}", e),
+    }
+}
+
+/// Handle `/diff` command to show recent file changes.
+fn handle_diff_command(workspace: &Path) {
+    use rustant_tools::checkpoint::CheckpointManager;
+    let mgr = CheckpointManager::new(workspace.to_path_buf());
+    match mgr.diff_from_last() {
+        Ok(diff) => {
+            if diff.is_empty() {
+                println!("No changes since last checkpoint.");
+            } else {
+                println!("{}", diff);
+            }
+        }
+        Err(e) => println!("Diff failed: {}", e),
+    }
+}
+
+/// Handle `/review` command to review session changes.
+fn handle_review_command(workspace: &Path) {
+    use rustant_tools::checkpoint::CheckpointManager;
+    let mgr = CheckpointManager::new(workspace.to_path_buf());
+    let checkpoints = mgr.checkpoints();
+    if checkpoints.is_empty() {
+        println!("No file changes to review.");
+        return;
+    }
+
+    println!("Session changes ({} checkpoints):", checkpoints.len());
+    for (i, cp) in checkpoints.iter().enumerate() {
+        println!(
+            "  {}. {} - {}",
+            i + 1,
+            cp.label,
+            cp.timestamp.format("%H:%M:%S")
+        );
+        for f in &cp.changed_files {
+            println!("     {}", f);
+        }
+    }
+
+    // Show current diff
+    if let Ok(diff) = mgr.diff_from_last() {
+        if !diff.is_empty() {
+            println!("\nCurrent uncommitted changes:");
+            println!("{}", diff);
+        }
+    }
 }

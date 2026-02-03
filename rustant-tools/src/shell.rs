@@ -188,8 +188,16 @@ impl ShellExecTool {
         let result = format!(
             "Exit code: {}\n\n--- stdout ---\n{}\n--- stderr ---\n{}",
             exit_code,
-            if stdout.is_empty() { "(empty)" } else { &stdout },
-            if stderr.is_empty() { "(empty)" } else { &stderr }
+            if stdout.is_empty() {
+                "(empty)"
+            } else {
+                &stdout
+            },
+            if stderr.is_empty() {
+                "(empty)"
+            } else {
+                &stderr
+            }
         );
 
         if exit_code != 0 {
@@ -380,7 +388,11 @@ mod tests {
             }
         }
         // At least the initial ToolProgress + 2 stdout lines
-        assert!(progress_count >= 3, "Expected at least 3 progress updates, got {}", progress_count);
+        assert!(
+            progress_count >= 3,
+            "Expected at least 3 progress updates, got {}",
+            progress_count
+        );
     }
 
     #[tokio::test]
@@ -410,6 +422,9 @@ mod tests {
     #[test]
     fn test_truncate_cmd() {
         assert_eq!(truncate_cmd("echo hello", 20), "echo hello");
-        assert_eq!(truncate_cmd("a very long command that should be truncated", 20), "a very long comman..");
+        assert_eq!(
+            truncate_cmd("a very long command that should be truncated", 20),
+            "a very long comman.."
+        );
     }
 }

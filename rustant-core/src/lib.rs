@@ -69,10 +69,10 @@ pub use explanation::{DecisionExplanation, DecisionType, ExplanationBuilder, Fac
 pub use gateway::{
     ChannelBridge, ClientMessage, GatewayConfig, GatewayEvent, NodeBridge, ServerMessage,
 };
+pub use indexer::{IndexStats, IndexerConfig, ProjectIndexer};
 pub use injection::{
     InjectionDetector, InjectionScanResult, InjectionType, Severity as InjectionSeverity,
 };
-pub use indexer::{IndexStats, IndexerConfig, ProjectIndexer};
 pub use memory::{
     BehavioralRule, ContextBreakdown, KnowledgeDistiller, KnowledgeStore, MemorySystem, Session,
     SessionMetadata,
@@ -89,6 +89,9 @@ pub use nodes::{
 };
 pub use oauth::AuthMethod;
 pub use pairing::{DeviceIdentity, PairingChallenge, PairingManager, PairingResult};
+pub use project_detect::{
+    detect_project, example_tasks, recommended_allowed_commands, ProjectInfo, ProjectType,
+};
 pub use providers::{
     create_provider, create_provider_with_auth, CircuitBreaker, CircuitState, FailoverProvider,
     GeminiProvider, ModelInfo,
@@ -97,7 +100,6 @@ pub use safety::{
     AdaptiveTrust, ApprovalContext, ApprovalDecision, BehavioralFingerprint, ContractEnforcer,
     Invariant, Predicate, ResourceBounds, ReversibilityInfo, SafetyContract, SafetyGuardian,
 };
-pub use project_detect::{detect_project, example_tasks, recommended_allowed_commands, ProjectInfo, ProjectType};
 pub use sandbox::SandboxedFs;
 pub use scheduler::{
     BackgroundJob, CronJob, CronJobConfig, CronScheduler, HeartbeatConfig, HeartbeatManager,

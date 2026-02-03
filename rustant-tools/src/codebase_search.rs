@@ -28,10 +28,13 @@ impl CodebaseSearchTool {
 
     /// Ensure the indexer is initialized and workspace is indexed.
     fn ensure_indexed(&self) -> Result<(), ToolError> {
-        let mut guard = self.indexer.lock().map_err(|e| ToolError::ExecutionFailed {
-            name: "codebase_search".into(),
-            message: format!("Lock error: {}", e),
-        })?;
+        let mut guard = self
+            .indexer
+            .lock()
+            .map_err(|e| ToolError::ExecutionFailed {
+                name: "codebase_search".into(),
+                message: format!("Lock error: {}", e),
+            })?;
 
         if guard.is_none() {
             let search_config = SearchConfig {
@@ -40,10 +43,12 @@ impl CodebaseSearchTool {
                 ..Default::default()
             };
 
-            let mut indexer = ProjectIndexer::new(self.workspace.clone(), search_config)
-                .map_err(|e| ToolError::ExecutionFailed {
-                    name: "codebase_search".into(),
-                    message: format!("Failed to initialize indexer: {}", e),
+            let mut indexer =
+                ProjectIndexer::new(self.workspace.clone(), search_config).map_err(|e| {
+                    ToolError::ExecutionFailed {
+                        name: "codebase_search".into(),
+                        message: format!("Failed to initialize indexer: {}", e),
+                    }
                 })?;
 
             indexer.index_workspace();
@@ -92,27 +97,30 @@ impl Tool for CodebaseSearchTool {
                 reason: "'query' parameter is required".into(),
             })?;
 
-        let max_results = args["max_results"]
-            .as_u64()
-            .unwrap_or(10) as usize;
+        let max_results = args["max_results"].as_u64().unwrap_or(10) as usize;
 
         // Ensure workspace is indexed (lazy initialization)
         self.ensure_indexed()?;
 
-        let guard = self.indexer.lock().map_err(|e| ToolError::ExecutionFailed {
-            name: "codebase_search".into(),
-            message: format!("Lock error: {}", e),
-        })?;
+        let guard = self
+            .indexer
+            .lock()
+            .map_err(|e| ToolError::ExecutionFailed {
+                name: "codebase_search".into(),
+                message: format!("Lock error: {}", e),
+            })?;
 
         let indexer = guard.as_ref().ok_or_else(|| ToolError::ExecutionFailed {
             name: "codebase_search".into(),
             message: "Indexer not initialized".into(),
         })?;
 
-        let results = indexer.search(query).map_err(|e| ToolError::ExecutionFailed {
-            name: "codebase_search".into(),
-            message: format!("Search failed: {}", e),
-        })?;
+        let results = indexer
+            .search(query)
+            .map_err(|e| ToolError::ExecutionFailed {
+                name: "codebase_search".into(),
+                message: format!("Search failed: {}", e),
+            })?;
 
         if results.is_empty() {
             return Ok(ToolOutput::text(format!(
@@ -121,7 +129,11 @@ impl Tool for CodebaseSearchTool {
             )));
         }
 
-        let mut output = format!("Found {} results for '{}':\n\n", results.len().min(max_results), query);
+        let mut output = format!(
+            "Found {} results for '{}':\n\n",
+            results.len().min(max_results),
+            query
+        );
 
         for (i, result) in results.iter().take(max_results).enumerate() {
             output.push_str(&format!(

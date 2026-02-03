@@ -72,7 +72,9 @@ async fn handle_config(action: ConfigAction, workspace: &Path) -> anyhow::Result
 }
 
 async fn handle_init(workspace: &Path) -> anyhow::Result<()> {
-    use rustant_core::project_detect::{detect_project, example_tasks, recommended_allowed_commands};
+    use rustant_core::project_detect::{
+        detect_project, example_tasks, recommended_allowed_commands,
+    };
 
     println!("\n  \x1b[1mRustant Smart Init\x1b[0m\n");
 
@@ -101,10 +103,7 @@ async fn handle_init(workspace: &Path) -> anyhow::Result<()> {
     let config_path = config_dir.join("config.toml");
 
     if config_path.exists() {
-        println!(
-            "  Config already exists at: {}\n",
-            config_path.display()
-        );
+        println!("  Config already exists at: {}\n", config_path.display());
         let overwrite = dialoguer::Confirm::new()
             .with_prompt("  Overwrite with project-optimized config?")
             .default(false)
@@ -250,7 +249,8 @@ async fn handle_init(workspace: &Path) -> anyhow::Result<()> {
         "  Approval mode: \x1b[36m{}\x1b[0m (reads auto-approved, writes ask first)",
         config.safety.approval_mode
     );
-    println!("  Provider: \x1b[36m{}\x1b[0m | Model: \x1b[36m{}\x1b[0m\n",
+    println!(
+        "  Provider: \x1b[36m{}\x1b[0m | Model: \x1b[36m{}\x1b[0m\n",
         config.llm.provider, config.llm.model
     );
 
@@ -276,7 +276,10 @@ async fn handle_resume(session: Option<&str>, workspace: &Path) -> anyhow::Resul
         println!("  Last goal: \x1b[36m{}\x1b[0m", goal);
     }
     println!("  Messages restored: \x1b[36m{}\x1b[0m", msg_count);
-    println!("  Facts in memory: \x1b[36m{}\x1b[0m", memory.long_term.facts.len());
+    println!(
+        "  Facts in memory: \x1b[36m{}\x1b[0m",
+        memory.long_term.facts.len()
+    );
     println!();
 
     // Load config and start interactive session with resumed memory
@@ -357,15 +360,9 @@ fn handle_sessions(limit: usize, workspace: &Path) -> anyhow::Result<()> {
         } else {
             "\x1b[33min progress\x1b[0m"
         };
-        let goal = entry
-            .last_goal
-            .as_deref()
-            .unwrap_or("(no goal recorded)");
+        let goal = entry.last_goal.as_deref().unwrap_or("(no goal recorded)");
 
-        println!(
-            "  \x1b[1;36m{}\x1b[0m  [{}]",
-            entry.name, status
-        );
+        println!("  \x1b[1;36m{}\x1b[0m  [{}]", entry.name, status);
         println!(
             "    Goal: {}",
             if goal.len() > 60 {

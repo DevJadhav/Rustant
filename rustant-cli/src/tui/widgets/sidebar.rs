@@ -146,12 +146,7 @@ pub fn render_sidebar(frame: &mut Frame, area: Rect, data: &SidebarData, theme: 
 }
 
 /// Render the detailed context breakdown with stacked components.
-fn render_context_breakdown(
-    frame: &mut Frame,
-    area: Rect,
-    ctx: &ContextBreakdown,
-    theme: &Theme,
-) {
+fn render_context_breakdown(frame: &mut Frame, area: Rect, ctx: &ContextBreakdown, theme: &Theme) {
     let block = Block::default()
         .title(" Memory ")
         .borders(Borders::TOP)
@@ -181,7 +176,11 @@ fn render_context_breakdown(
     lines.push(Line::from(vec![
         Span::styled(" Messages: ", theme.sidebar_style()),
         Span::styled(
-            format!("{} (~{}tok)", ctx.message_count, format_tokens(ctx.message_tokens)),
+            format!(
+                "{} (~{}tok)",
+                ctx.message_count,
+                format_tokens(ctx.message_tokens)
+            ),
             theme.sidebar_style(),
         ),
     ]));
@@ -190,10 +189,7 @@ fn render_context_breakdown(
     if ctx.pinned_count > 0 {
         lines.push(Line::from(vec![
             Span::styled(" Pinned: ", theme.sidebar_style()),
-            Span::styled(
-                format!("{}", ctx.pinned_count),
-                theme.warning_style(),
-            ),
+            Span::styled(format!("{}", ctx.pinned_count), theme.warning_style()),
         ]));
     }
 
@@ -219,12 +215,13 @@ fn render_context_breakdown(
     };
 
     lines.push(Line::from(vec![
+        Span::styled(format!(" [{:.0}%] ", ratio * 100.0), gauge_style),
         Span::styled(
-            format!(" [{:.0}%] ", ratio * 100.0),
-            gauge_style,
-        ),
-        Span::styled(
-            format!("{}tok / {}tok", format_tokens(ctx.total_tokens), format_tokens(ctx.context_window)),
+            format!(
+                "{}tok / {}tok",
+                format_tokens(ctx.total_tokens),
+                format_tokens(ctx.context_window)
+            ),
             theme.sidebar_style(),
         ),
     ]));

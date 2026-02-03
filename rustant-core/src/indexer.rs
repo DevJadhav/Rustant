@@ -18,10 +18,44 @@ const MAX_FILES: usize = 5000;
 
 /// File extensions considered indexable source code.
 const SOURCE_EXTENSIONS: &[&str] = &[
-    "rs", "py", "js", "ts", "jsx", "tsx", "go", "java", "rb", "c", "cpp", "cc",
-    "h", "hpp", "cs", "swift", "kt", "scala", "lua", "sh", "bash", "zsh",
-    "toml", "yaml", "yml", "json", "xml", "html", "css", "scss", "sql",
-    "md", "txt", "cfg", "ini", "env", "dockerfile", "makefile",
+    "rs",
+    "py",
+    "js",
+    "ts",
+    "jsx",
+    "tsx",
+    "go",
+    "java",
+    "rb",
+    "c",
+    "cpp",
+    "cc",
+    "h",
+    "hpp",
+    "cs",
+    "swift",
+    "kt",
+    "scala",
+    "lua",
+    "sh",
+    "bash",
+    "zsh",
+    "toml",
+    "yaml",
+    "yml",
+    "json",
+    "xml",
+    "html",
+    "css",
+    "scss",
+    "sql",
+    "md",
+    "txt",
+    "cfg",
+    "ini",
+    "env",
+    "dockerfile",
+    "makefile",
 ];
 
 /// Result of indexing a workspace.
@@ -107,9 +141,7 @@ impl ProjectIndexer {
 
         // Index the project structure summary first
         let structure = self.build_structure_summary(&project_info);
-        let _ = self
-            .engine
-            .index_fact("__project_structure__", &structure);
+        let _ = self.engine.index_fact("__project_structure__", &structure);
 
         let mut files_indexed = 0;
         let mut entries_indexed = 1; // structure summary counts as 1
@@ -225,10 +257,7 @@ impl ProjectIndexer {
     pub fn build_structure_summary(&self, info: &ProjectInfo) -> String {
         let mut summary = String::new();
 
-        summary.push_str(&format!(
-            "Project type: {:?}\n",
-            info.project_type
-        ));
+        summary.push_str(&format!("Project type: {:?}\n", info.project_type));
 
         if let Some(ref framework) = info.framework {
             summary.push_str(&format!("Framework: {}\n", framework));
@@ -287,12 +316,7 @@ impl ProjectIndexer {
         let head: Vec<&str> = lines.iter().take(20).copied().collect();
 
         // Build summary
-        let mut summary = format!(
-            "{} ({} lines)\n{}",
-            path,
-            total_lines,
-            head.join("\n")
-        );
+        let mut summary = format!("{} ({} lines)\n{}", path, total_lines, head.join("\n"));
 
         // If file is longer, add a note
         if total_lines > 20 {
@@ -311,9 +335,7 @@ fn is_indexable(path: &Path) -> bool {
         .map(|n| n.to_string_lossy().to_lowercase())
         .unwrap_or_default();
 
-    if ["makefile", "dockerfile", "rakefile", "gemfile", "procfile"]
-        .contains(&name.as_str())
-    {
+    if ["makefile", "dockerfile", "rakefile", "gemfile", "procfile"].contains(&name.as_str()) {
         return true;
     }
 
@@ -346,12 +368,7 @@ fn extract_signatures(content: &str, path: &str) -> Vec<String> {
         };
 
         if let Some(sig_text) = sig {
-            signatures.push(format!(
-                "{}:{} {}",
-                path,
-                i + 1,
-                sig_text
-            ));
+            signatures.push(format!("{}:{} {}", path, i + 1, sig_text));
         }
     }
 
@@ -380,10 +397,7 @@ fn extract_rust_signature(line: &str) -> Option<String> {
 }
 
 fn extract_python_signature(line: &str) -> Option<String> {
-    if line.starts_with("def ")
-        || line.starts_with("async def ")
-        || line.starts_with("class ")
-    {
+    if line.starts_with("def ") || line.starts_with("async def ") || line.starts_with("class ") {
         Some(line.trim_end_matches(':').trim().to_string())
     } else {
         None
@@ -407,9 +421,7 @@ fn extract_js_signature(line: &str) -> Option<String> {
 }
 
 fn extract_go_signature(line: &str) -> Option<String> {
-    if line.starts_with("func ")
-        || line.starts_with("type ")
-    {
+    if line.starts_with("func ") || line.starts_with("type ") {
         Some(line.trim_end_matches('{').trim().to_string())
     } else {
         None
@@ -417,7 +429,14 @@ fn extract_go_signature(line: &str) -> Option<String> {
 }
 
 fn extract_java_signature(line: &str) -> Option<String> {
-    let keywords = ["public ", "private ", "protected ", "static ", "abstract ", "final "];
+    let keywords = [
+        "public ",
+        "private ",
+        "protected ",
+        "static ",
+        "abstract ",
+        "final ",
+    ];
     let is_declaration = keywords.iter().any(|k| line.starts_with(k))
         && (line.contains('(') || line.contains("class ") || line.contains("interface "));
 
@@ -429,10 +448,7 @@ fn extract_java_signature(line: &str) -> Option<String> {
 }
 
 fn extract_ruby_signature(line: &str) -> Option<String> {
-    if line.starts_with("def ")
-        || line.starts_with("class ")
-        || line.starts_with("module ")
-    {
+    if line.starts_with("def ") || line.starts_with("class ") || line.starts_with("module ") {
         Some(line.trim().to_string())
     } else {
         None
@@ -482,8 +498,16 @@ mod tests {
             "pub mod utils;\n\npub struct Config {\n    pub name: String,\n}\n\nimpl Config {\n    pub fn new() -> Self {\n        Self { name: String::new() }\n    }\n}\n",
         )
         .unwrap();
-        fs::write(path.join("Cargo.toml"), "[package]\nname = \"test\"\nversion = \"0.1.0\"\n").unwrap();
-        fs::write(path.join("README.md"), "# Test Project\n\nA test project.\n").unwrap();
+        fs::write(
+            path.join("Cargo.toml"),
+            "[package]\nname = \"test\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            path.join("README.md"),
+            "# Test Project\n\nA test project.\n",
+        )
+        .unwrap();
 
         // Create .gitignore
         fs::write(path.join(".gitignore"), "target/\n*.tmp\n").unwrap();
@@ -552,7 +576,10 @@ mod tests {
 
         // Should have indexed some files
         assert!(stats.files_indexed > 0, "Should index at least one file");
-        assert!(stats.entries_indexed > 0, "Should create at least one entry");
+        assert!(
+            stats.entries_indexed > 0,
+            "Should create at least one entry"
+        );
 
         // Project info should be detected
         assert!(stats.project_info.is_some());
@@ -573,7 +600,10 @@ mod tests {
 
         // Search for something we know is in the workspace
         let results = indexer.search("main function").unwrap();
-        assert!(!results.is_empty(), "Should find results for 'main function'");
+        assert!(
+            !results.is_empty(),
+            "Should find results for 'main function'"
+        );
 
         // At least one result should reference main.rs
         let has_main = results.iter().any(|r| r.content.contains("main"));
@@ -606,8 +636,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mut indexer =
-            ProjectIndexer::with_config(path, search_config, custom).unwrap();
+        let mut indexer = ProjectIndexer::with_config(path, search_config, custom).unwrap();
         let stats = indexer.index_workspace();
 
         // Should respect max_files limit
@@ -657,6 +686,9 @@ mod tests {
         let has_target = results
             .iter()
             .any(|r| r.content.contains("target/debug.rs"));
-        assert!(!has_target, "Files in target/ should be ignored by .gitignore");
+        assert!(
+            !has_target,
+            "Files in target/ should be ignored by .gitignore"
+        );
     }
 }

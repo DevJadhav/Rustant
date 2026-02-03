@@ -269,10 +269,7 @@ pub enum ProgressUpdate {
         bytes_processed: Option<u64>,
     },
     /// A line of shell output arrived.
-    ShellOutput {
-        line: String,
-        is_stderr: bool,
-    },
+    ShellOutput { line: String, is_stderr: bool },
 }
 
 /// The current state of the agent.
@@ -284,6 +281,7 @@ pub enum AgentStatus {
     Deciding,
     Executing,
     WaitingForApproval,
+    WaitingForClarification,
     Complete,
     Error,
 }
@@ -296,6 +294,7 @@ impl std::fmt::Display for AgentStatus {
             AgentStatus::Deciding => write!(f, "deciding"),
             AgentStatus::Executing => write!(f, "executing"),
             AgentStatus::WaitingForApproval => write!(f, "waiting for approval"),
+            AgentStatus::WaitingForClarification => write!(f, "waiting for clarification"),
             AgentStatus::Complete => write!(f, "complete"),
             AgentStatus::Error => write!(f, "error"),
         }
@@ -640,6 +639,10 @@ mod tests {
         assert_eq!(
             AgentStatus::WaitingForApproval.to_string(),
             "waiting for approval"
+        );
+        assert_eq!(
+            AgentStatus::WaitingForClarification.to_string(),
+            "waiting for clarification"
         );
     }
 }

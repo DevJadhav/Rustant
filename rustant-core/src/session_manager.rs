@@ -49,11 +49,10 @@ impl SessionIndex {
         if !index_path.exists() {
             return Ok(Self::default());
         }
-        let json = std::fs::read_to_string(&index_path).map_err(|e| {
-            MemoryError::PersistenceError {
+        let json =
+            std::fs::read_to_string(&index_path).map_err(|e| MemoryError::PersistenceError {
                 message: format!("Failed to read session index: {}", e),
-            }
-        })?;
+            })?;
         serde_json::from_str(&json).map_err(|e| MemoryError::PersistenceError {
             message: format!("Failed to parse session index: {}", e),
         })
@@ -218,10 +217,7 @@ impl SessionManager {
 
     /// Resume a session by name or ID. Returns the loaded MemorySystem and
     /// a continuation prompt to inject into the agent.
-    pub fn resume_session(
-        &mut self,
-        query: &str,
-    ) -> Result<(MemorySystem, String), MemoryError> {
+    pub fn resume_session(&mut self, query: &str) -> Result<(MemorySystem, String), MemoryError> {
         let entry = if let Ok(id) = Uuid::parse_str(query) {
             self.index
                 .find_by_id(id)
@@ -230,32 +226,30 @@ impl SessionManager {
                     message: format!("No session found with ID: {}", id),
                 })?
         } else {
-            self.index
-                .find_by_name(query)
-                .cloned()
-                .ok_or_else(|| MemoryError::SessionLoadFailed {
+            self.index.find_by_name(query).cloned().ok_or_else(|| {
+                MemoryError::SessionLoadFailed {
                     message: format!("No session found matching: '{}'", query),
-                })?
+                }
+            })?
         };
 
         let session_path = self.sessions_dir.join(&entry.file_name);
         let memory = MemorySystem::load_session(&session_path)?;
 
         // Build continuation prompt
-        let mut continuation = String::from(
-            "You are resuming a previous session. Here is what was accomplished:\n",
-        );
+        let mut continuation =
+            String::from("You are resuming a previous session. Here is what was accomplished:\n");
         if let Some(ref goal) = entry.last_goal {
             continuation.push_str(&format!("- Last goal: {}\n", goal));
         }
         if let Some(ref summary) = entry.summary {
             continuation.push_str(&format!("- Summary: {}\n", summary));
         }
+        continuation.push_str(&format!("- Messages exchanged: {}\n", entry.message_count));
         continuation.push_str(&format!(
-            "- Messages exchanged: {}\n",
-            entry.message_count
+            "- Session started: {}\n",
+            entry.created_at.format("%Y-%m-%d %H:%M UTC")
         ));
-        continuation.push_str(&format!("- Session started: {}\n", entry.created_at.format("%Y-%m-%d %H:%M UTC")));
         if entry.completed {
             continuation.push_str("- Status: Completed\n");
         } else {
@@ -271,13 +265,13 @@ impl SessionManager {
 
     /// Resume the most recent session.
     pub fn resume_latest(&mut self) -> Result<(MemorySystem, String), MemoryError> {
-        let entry = self
-            .index
-            .most_recent()
-            .cloned()
-            .ok_or_else(|| MemoryError::SessionLoadFailed {
-                message: "No sessions found to resume".to_string(),
-            })?;
+        let entry =
+            self.index
+                .most_recent()
+                .cloned()
+                .ok_or_else(|| MemoryError::SessionLoadFailed {
+                    message: "No sessions found to resume".to_string(),
+                })?;
         self.resume_session(&entry.id.to_string())
     }
 
@@ -292,11 +286,10 @@ impl SessionManager {
             self.index.entries.iter_mut().find(|e| e.id == id)
         } else {
             let query_lower = query.to_lowercase();
-            self.index
-                .entries
-                .iter_mut()
-                .find(|e| e.name.to_lowercase() == query_lower
-                    || e.name.to_lowercase().starts_with(&query_lower))
+            self.index.entries.iter_mut().find(|e| {
+                e.name.to_lowercase() == query_lower
+                    || e.name.to_lowercase().starts_with(&query_lower)
+            })
         };
 
         match entry {
@@ -315,7 +308,11 @@ impl SessionManager {
         let (idx, file_name, name) = {
             let query_lower = query.to_lowercase();
             let found = if let Ok(id) = Uuid::parse_str(query) {
-                self.index.entries.iter().enumerate().find(|(_, e)| e.id == id)
+                self.index
+                    .entries
+                    .iter()
+                    .enumerate()
+                    .find(|(_, e)| e.id == id)
             } else {
                 self.index.entries.iter().enumerate().find(|(_, e)| {
                     e.name.to_lowercase() == query_lower

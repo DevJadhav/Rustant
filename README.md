@@ -77,7 +77,7 @@ rustant --model gpt-4o --approval cautious --workspace ./project "add tests for 
 ```
 rustant/
 ├── rustant-core/      # Agent orchestrator, brain, memory, safety, channels, gateway
-├── rustant-tools/     # 12 built-in tools + 7 LSP tools
+├── rustant-tools/     # 17 built-in tools + 7 LSP tools
 ├── rustant-cli/       # CLI with REPL, TUI, and subcommands
 ├── rustant-mcp/       # MCP server + client (JSON-RPC 2.0)
 ├── rustant-ui/        # Tauri desktop dashboard
@@ -92,12 +92,15 @@ rustant/
 | **Memory** | Three-tier system: working (task), short-term (session), long-term (persistent) with cross-session learning via facts and corrections |
 | **Safety Guardian** | 5-layer defense with 4 approval modes, prompt injection detection, typed ActionDetails, and rich approval context |
 | **Tool Registry** | Dynamic registration with JSON schema validation, timeouts, and risk levels |
-| **Agent Loop** | ReAct pattern (Think → Act → Observe) with async execution |
+| **Agent Loop** | ReAct pattern (Think → Act → Observe) with async execution and mid-task clarification via `ask_user` |
+| **Command Registry** | Categorized slash commands with aliases, tab completion, and typo suggestions |
 | **Channels** | 13 platform integrations with unified `Channel` trait |
 | **Skills** | SKILL.md-based declarative tool definitions with security validation |
 | **Plugins** | Native (.so/.dll/.dylib) and WASM (wasmi) sandboxed extensions |
-| **Workflow Engine** | YAML-based multi-step automation with approval gates |
+| **Workflow Engine** | YAML-based multi-step automation with 12 built-in templates and approval gates |
 | **Search Engine** | Hybrid Tantivy full-text + SQLite vector search |
+| **Project Indexer** | Background workspace indexer with .gitignore-aware walking and multi-language signature extraction |
+| **Session Manager** | Persistent sessions with auto-save, resume by name/ID, and task continuations |
 | **Audit Trail** | Merkle chain with SHA-256 for tamper-evident execution history |
 
 ## Features
@@ -151,17 +154,42 @@ Connect Rustant to 13 platforms with a unified interface:
 ### More Capabilities
 
 - **Canvas** — Rich content rendering: charts (Chart.js), tables, forms, Mermaid diagrams, code, HTML, markdown
-- **Workflow Engine** — Declarative YAML DSL with step dependencies, approval gates, conditional execution, retry/fallback
+- **Workflow Engine** — Declarative YAML DSL with 12 built-in templates (code_review, morning_briefing, pr_review, dependency_audit, changelog, and more), step dependencies, approval gates, and conditional execution
 - **Cron Scheduler** — Background job management, heartbeat monitoring, webhook endpoints
 - **Multi-Agent** — Agent spawning with parent-child relationships, message bus, resource limits, sandboxed workspaces
 - **WebSocket Gateway** — axum-based remote access with TLS, REST API, session management
 - **MCP Protocol** — JSON-RPC 2.0 server and client for tool interoperability with external systems
 - **Hybrid Search** — Tantivy full-text + SQLite vector search for long-term memory
 - **Dashboard UI** — Tauri-based desktop application for real-time monitoring
+- **Project Indexer** — Background codebase indexing with function signature extraction for Rust, Python, JS/TS, Go, Java, Ruby, and C/C++
+- **Session Resume** — Persistent session management with auto-save, resume by name or ID, and task continuations
+- **Smart Editing** — Semantic code edit tool with fuzzy location matching (exact, line numbers, function patterns, similarity), diff preview, and auto-checkpoint
+- **Zero-Config Init** — Project type auto-detection for 8 languages with framework detection, safety whitelist generation, and example tasks
+
+### Natural Language Interaction
+
+Rustant works like a conversational coding assistant. Type your request in plain English, and the agent works on it autonomously:
+
+```
+> refactor the auth module to use async/await
+> add unit tests for the payment service
+> find all usages of the deprecated API and suggest replacements
+```
+
+When the agent needs more information, it asks a clarifying question directly in the session and waits for your response before continuing. This is powered by the `ask_user` pseudo-tool — the LLM calls it like any tool, and the answer is routed back through the agent callback.
+
+All `/command` slash commands are registered in a categorized command registry with alias support, tab completion, and "did you mean?" suggestions for typos (Levenshtein distance).
+
+### TUI Panels
+
+| Keybinding | Panel | Description |
+|------------|-------|-------------|
+| `Ctrl+E` | Explanation Panel | Safety transparency dashboard showing decision reasoning chains, alternatives, confidence, and context factors |
+| `Ctrl+T` | Task Board | Multi-agent status board showing agent names, roles, current tool, elapsed time, and tool call counts |
 
 ## Built-in Tools
 
-### Core Tools (12)
+### Core Tools (17)
 
 | Tool | Risk Level | Description |
 |------|------------|-------------|
@@ -177,6 +205,11 @@ Connect Rustant to 13 platforms with a unified interface:
 | `echo` | Read-only | Echo messages for debugging |
 | `datetime` | Read-only | Get current date and time |
 | `calculator` | Read-only | Evaluate mathematical expressions |
+| `web_search` | Read-only | Search the web via DuckDuckGo (privacy-first, no API key) |
+| `web_fetch` | Read-only | Fetch a URL and extract readable text content |
+| `document_read` | Read-only | Read local documents (txt, md, csv, json, yaml, xml, html, and more) |
+| `smart_edit` | Write | Semantic code editor with fuzzy location matching and diff preview |
+| `codebase_search` | Read-only | Natural language search over indexed project files and signatures |
 
 ### LSP Tools (7)
 
@@ -221,8 +254,12 @@ Additional safety layers:
 rustant                                    # Interactive REPL with TUI
 rustant "task"                             # Single task execution
 rustant setup                              # Interactive provider setup wizard
+rustant init                               # Smart project init (auto-detect type, generate config)
 rustant config init                        # Create default config
 rustant config show                        # Display current config
+
+# Sessions
+rustant resume [name]                      # Resume a session (most recent if no name)
 
 # Channels
 rustant channel list                       # List configured channels
@@ -279,6 +316,41 @@ rustant plugin info <name>                 # Show plugin details
 rustant update check                       # Check for updates
 rustant update install                     # Install latest version
 rustant ui [--port 18790]                  # Launch Tauri dashboard
+
+# REPL Commands (inside interactive session)
+# Session
+/quit (/exit, /q)                         # Exit Rustant
+/clear                                    # Clear the screen
+/session save|load|list [name]            # Session management
+/resume [name]                            # Resume a saved session (latest if no name)
+/sessions                                 # List saved sessions with details
+
+# Agent
+/cost                                     # Show token usage and cost
+/tools                                    # List available tools
+/status                                   # Show agent status, task, and iteration count
+/compact                                  # Compress conversation context to free memory
+/context                                  # Show context window usage breakdown
+/memory                                   # Show memory system stats
+/pin [n]                                  # Pin message to survive compression
+/unpin <n>                                # Unpin a message
+
+# Safety
+/safety                                   # Show current safety mode and stats
+/permissions [mode]                       # View or set approval mode (safe/cautious/paranoid/yolo)
+/audit show [n] | verify                  # Show audit log or verify Merkle chain integrity
+
+# Development
+/undo                                     # Undo last file operation via git checkpoint
+/diff                                     # Show recent file changes
+/review                                   # Review all session file changes
+
+# System
+/help (/?)                                # Show categorized help
+/config [key] [value]                     # View or modify runtime configuration
+/doctor                                   # Run diagnostic checks (LLM, tools, workspace)
+/setup                                    # Re-run provider setup wizard
+/workflows                                # List available workflow templates
 ```
 
 ## Configuration
@@ -347,7 +419,7 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting and security policy.
 cargo build --workspace
 cargo build --workspace --release
 
-# Test (1,819 tests)
+# Test (1,974+ tests)
 cargo test --workspace
 
 # Lint & Format

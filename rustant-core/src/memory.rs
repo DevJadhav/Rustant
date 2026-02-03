@@ -479,11 +479,7 @@ impl MemorySystem {
 
     /// Get a breakdown of context usage for the UI.
     pub fn context_breakdown(&self, context_window: usize) -> ContextBreakdown {
-        let summary_chars = self
-            .short_term
-            .summary()
-            .map(|s| s.len())
-            .unwrap_or(0);
+        let summary_chars = self.short_term.summary().map(|s| s.len()).unwrap_or(0);
         let message_chars: usize = self
             .short_term
             .messages()
