@@ -17,6 +17,11 @@ pub fn list_builtin_names() -> Vec<&'static str> {
         "security_scan",
         "deployment",
         "incident_response",
+        // Daily workflow automation templates
+        "morning_briefing",
+        "pr_review",
+        "dependency_audit",
+        "changelog",
     ]
 }
 
@@ -31,6 +36,10 @@ pub fn get_builtin(name: &str) -> Option<WorkflowDefinition> {
         "security_scan" => SECURITY_SCAN_WORKFLOW,
         "deployment" => DEPLOYMENT_WORKFLOW,
         "incident_response" => INCIDENT_RESPONSE_WORKFLOW,
+        "morning_briefing" => MORNING_BRIEFING_WORKFLOW,
+        "pr_review" => PR_REVIEW_WORKFLOW,
+        "dependency_audit" => DEPENDENCY_AUDIT_WORKFLOW,
+        "changelog" => CHANGELOG_WORKFLOW,
         _ => return None,
     };
     parse_workflow(yaml).ok()
@@ -302,6 +311,197 @@ outputs:
     value: "{{ steps.report.output }}"
 "#;
 
+// ---------------------------------------------------------------------------
+// Daily Workflow Automation Templates
+// ---------------------------------------------------------------------------
+
+const MORNING_BRIEFING_WORKFLOW: &str = r#"
+name: morning_briefing
+description: "Daily morning briefing: git log, open PRs, pending reviews, and project status"
+version: "1.0"
+author: rustant
+inputs:
+  - name: days
+    type: number
+    optional: true
+    default: 1
+    description: Number of days of history to include
+  - name: branch
+    type: string
+    optional: true
+    default: "main"
+    description: Main branch to summarize against
+steps:
+  - id: git_log
+    tool: shell_exec
+    params:
+      command: "git log --oneline --since='{{ inputs.days }} days ago' --all"
+    on_error:
+      action: skip
+  - id: git_status
+    tool: git_status
+    params:
+      include_untracked: true
+  - id: open_branches
+    tool: shell_exec
+    params:
+      command: "git branch --no-merged {{ inputs.branch }}"
+    on_error:
+      action: skip
+  - id: recent_changes
+    tool: git_diff
+    params:
+      target: "HEAD~5"
+    on_error:
+      action: skip
+  - id: summary
+    tool: echo
+    params:
+      text: "Morning briefing complete. Recent commits, branch status, and changes have been collected."
+outputs:
+  - name: briefing
+    value: "{{ steps.summary.output }}"
+"#;
+
+const PR_REVIEW_WORKFLOW: &str = r#"
+name: pr_review
+description: "Review a pull request: fetch diff, analyze code quality, and generate review summary"
+version: "1.0"
+author: rustant
+inputs:
+  - name: branch
+    type: string
+    description: Branch name to review
+  - name: base
+    type: string
+    optional: true
+    default: "main"
+    description: Base branch to diff against
+steps:
+  - id: fetch_diff
+    tool: shell_exec
+    params:
+      command: "git diff {{ inputs.base }}...{{ inputs.branch }}"
+    on_error:
+      action: fail
+  - id: changed_files
+    tool: shell_exec
+    params:
+      command: "git diff --name-only {{ inputs.base }}...{{ inputs.branch }}"
+    on_error:
+      action: skip
+  - id: commit_log
+    tool: shell_exec
+    params:
+      command: "git log --oneline {{ inputs.base }}..{{ inputs.branch }}"
+    on_error:
+      action: skip
+  - id: line_stats
+    tool: shell_exec
+    params:
+      command: "git diff --stat {{ inputs.base }}...{{ inputs.branch }}"
+    on_error:
+      action: skip
+  - id: review_summary
+    tool: echo
+    params:
+      text: "PR review for {{ inputs.branch }} against {{ inputs.base }} complete. Diff, changed files, commits, and stats collected."
+outputs:
+  - name: review
+    value: "{{ steps.review_summary.output }}"
+"#;
+
+const DEPENDENCY_AUDIT_WORKFLOW: &str = r#"
+name: dependency_audit
+description: "Audit project dependencies for vulnerabilities and outdated packages"
+version: "1.0"
+author: rustant
+inputs:
+  - name: path
+    type: string
+    optional: true
+    default: "."
+    description: Project root path
+steps:
+  - id: check_lockfile
+    tool: file_search
+    params:
+      directory: "{{ inputs.path }}"
+      pattern: "*.lock"
+    on_error:
+      action: skip
+  - id: cargo_audit
+    tool: shell_exec
+    params:
+      command: "cargo audit 2>&1 || true"
+    on_error:
+      action: skip
+  - id: cargo_outdated
+    tool: shell_exec
+    params:
+      command: "cargo outdated 2>&1 || true"
+    on_error:
+      action: skip
+  - id: npm_audit
+    tool: shell_exec
+    params:
+      command: "npm audit --json 2>&1 || true"
+    condition: "{{ inputs.path }}"
+    on_error:
+      action: skip
+  - id: audit_report
+    tool: echo
+    params:
+      text: "Dependency audit complete. Vulnerabilities and outdated packages have been checked."
+outputs:
+  - name: report
+    value: "{{ steps.audit_report.output }}"
+"#;
+
+const CHANGELOG_WORKFLOW: &str = r#"
+name: changelog
+description: "Generate a changelog from git commits grouped by type (feat, fix, chore, etc.)"
+version: "1.0"
+author: rustant
+inputs:
+  - name: since
+    type: string
+    optional: true
+    default: "1 week ago"
+    description: Time period for changelog (e.g., '1 week ago', 'v1.0.0')
+  - name: format
+    type: string
+    optional: true
+    default: "grouped"
+    description: Output format (grouped, flat, conventional)
+steps:
+  - id: fetch_commits
+    tool: shell_exec
+    params:
+      command: "git log --pretty=format:'%h %s (%an, %ar)' --since='{{ inputs.since }}'"
+    on_error:
+      action: fail
+  - id: commit_stats
+    tool: shell_exec
+    params:
+      command: "git shortlog -sn --since='{{ inputs.since }}'"
+    on_error:
+      action: skip
+  - id: files_changed
+    tool: shell_exec
+    params:
+      command: "git diff --stat $(git rev-list -1 --before='{{ inputs.since }}' HEAD 2>/dev/null || echo HEAD~10)..HEAD 2>/dev/null || echo 'No stats available'"
+    on_error:
+      action: skip
+  - id: generate_changelog
+    tool: echo
+    params:
+      text: "Changelog generation complete. Commits since {{ inputs.since }} have been collected and categorized."
+outputs:
+  - name: changelog
+    value: "{{ steps.generate_changelog.output }}"
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -347,7 +547,7 @@ mod tests {
     #[test]
     fn test_list_builtin_names() {
         let names = list_builtin_names();
-        assert_eq!(names.len(), 8);
+        assert_eq!(names.len(), 12);
         assert!(names.contains(&"code_review"));
         assert!(names.contains(&"refactor"));
         assert!(names.contains(&"test_generation"));
@@ -356,5 +556,41 @@ mod tests {
         assert!(names.contains(&"security_scan"));
         assert!(names.contains(&"deployment"));
         assert!(names.contains(&"incident_response"));
+        // Daily workflow automation templates
+        assert!(names.contains(&"morning_briefing"));
+        assert!(names.contains(&"pr_review"));
+        assert!(names.contains(&"dependency_audit"));
+        assert!(names.contains(&"changelog"));
+    }
+
+    #[test]
+    fn test_builtin_morning_briefing_parses() {
+        let wf = parse_workflow(MORNING_BRIEFING_WORKFLOW).unwrap();
+        assert_eq!(wf.name, "morning_briefing");
+        assert!(!wf.steps.is_empty());
+        assert!(wf.inputs.iter().any(|i| i.name == "days"));
+    }
+
+    #[test]
+    fn test_builtin_pr_review_parses() {
+        let wf = parse_workflow(PR_REVIEW_WORKFLOW).unwrap();
+        assert_eq!(wf.name, "pr_review");
+        assert!(!wf.steps.is_empty());
+        assert!(wf.inputs.iter().any(|i| i.name == "branch"));
+    }
+
+    #[test]
+    fn test_builtin_dependency_audit_parses() {
+        let wf = parse_workflow(DEPENDENCY_AUDIT_WORKFLOW).unwrap();
+        assert_eq!(wf.name, "dependency_audit");
+        assert!(!wf.steps.is_empty());
+    }
+
+    #[test]
+    fn test_builtin_changelog_parses() {
+        let wf = parse_workflow(CHANGELOG_WORKFLOW).unwrap();
+        assert_eq!(wf.name, "changelog");
+        assert!(!wf.steps.is_empty());
+        assert!(wf.inputs.iter().any(|i| i.name == "since"));
     }
 }

@@ -15,6 +15,7 @@ pub mod credentials;
 pub mod error;
 pub mod explanation;
 pub mod gateway;
+pub mod indexer;
 pub mod injection;
 pub mod memory;
 pub mod merkle;
@@ -22,12 +23,14 @@ pub mod multi;
 pub mod nodes;
 pub mod oauth;
 pub mod pairing;
+pub mod project_detect;
 pub mod providers;
 pub mod replay;
 pub mod safety;
 pub mod sandbox;
 pub mod scheduler;
 pub mod search;
+pub mod session_manager;
 pub mod skills;
 pub mod summarizer;
 pub mod types;
@@ -69,8 +72,10 @@ pub use gateway::{
 pub use injection::{
     InjectionDetector, InjectionScanResult, InjectionType, Severity as InjectionSeverity,
 };
+pub use indexer::{IndexStats, IndexerConfig, ProjectIndexer};
 pub use memory::{
-    BehavioralRule, KnowledgeDistiller, KnowledgeStore, MemorySystem, Session, SessionMetadata,
+    BehavioralRule, ContextBreakdown, KnowledgeDistiller, KnowledgeStore, MemorySystem, Session,
+    SessionMetadata,
 };
 pub use merkle::{AuditNode, MerkleChain, VerificationResult};
 pub use multi::AgentStatus as MultiAgentStatus;
@@ -92,12 +97,14 @@ pub use safety::{
     AdaptiveTrust, ApprovalContext, ApprovalDecision, BehavioralFingerprint, ContractEnforcer,
     Invariant, Predicate, ResourceBounds, ReversibilityInfo, SafetyContract, SafetyGuardian,
 };
+pub use project_detect::{detect_project, example_tasks, recommended_allowed_commands, ProjectInfo, ProjectType};
 pub use sandbox::SandboxedFs;
 pub use scheduler::{
     BackgroundJob, CronJob, CronJobConfig, CronScheduler, HeartbeatConfig, HeartbeatManager,
     JobManager, JobStatus, WebhookEndpoint, WebhookHandler,
 };
 pub use search::{HybridSearchEngine, SearchConfig, SearchResult};
+pub use session_manager::{SessionEntry, SessionIndex, SessionManager};
 pub use skills::{
     parse_skill_md, validate_skill, ParseError as SkillParseError, SkillConfig, SkillDefinition,
     SkillLoader, SkillRegistry, SkillRequirement, SkillRiskLevel, SkillToolDef, ValidationError,
@@ -106,7 +113,8 @@ pub use skills::{
 pub use summarizer::{ContextSummarizer, ContextSummary, TokenAlert, TokenCostDisplay};
 pub use types::{
     AgentState, AgentStatus, Artifact, CompletionRequest, CompletionResponse, Content,
-    CostEstimate, Message, RiskLevel, Role, StreamEvent, TokenUsage, ToolDefinition, ToolOutput,
+    CostEstimate, Message, ProgressUpdate, RiskLevel, Role, StreamEvent, TokenUsage,
+    ToolDefinition, ToolOutput,
 };
 pub use voice::{
     audio_convert, AudioChunk, AudioFormat, MockSttProvider, MockTtsProvider, MockWakeDetector,

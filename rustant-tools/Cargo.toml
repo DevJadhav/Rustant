@@ -18,11 +18,14 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 async-trait = "0.1"
 base64 = { workspace = true }
-walkdir = "2.5"
-ignore = "0.4"
+walkdir = { workspace = true }
+ignore = { workspace = true }
 globset = "0.4"
 git2 = { workspace = true }
 wasmi = { workspace = true }
+reqwest = { workspace = true }
+urlencoding = { workspace = true }
+similar = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

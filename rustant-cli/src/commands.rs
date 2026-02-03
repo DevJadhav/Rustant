@@ -20,6 +20,9 @@ pub async fn handle_command(command: Commands, workspace: &Path) -> anyhow::Resu
     match command {
         Commands::Config { action } => handle_config(action, workspace).await,
         Commands::Setup => crate::setup::run_setup(workspace).await,
+        Commands::Init => handle_init(workspace).await,
+        Commands::Resume { session } => handle_resume(session.as_deref(), workspace).await,
+        Commands::Sessions { limit } => handle_sessions(limit, workspace),
         Commands::Channel { action } => handle_channel(action, workspace).await,
         Commands::Auth { action } => handle_auth(action, workspace).await,
         Commands::Workflow { action } => handle_workflow(action, workspace).await,
@@ -66,6 +69,322 @@ async fn handle_config(action: ConfigAction, workspace: &Path) -> anyhow::Result
             Ok(())
         }
     }
+}
+
+async fn handle_init(workspace: &Path) -> anyhow::Result<()> {
+    use rustant_core::project_detect::{detect_project, example_tasks, recommended_allowed_commands};
+
+    println!("\n  \x1b[1mRustant Smart Init\x1b[0m\n");
+
+    // Step 1: Detect project type
+    println!("  Scanning workspace...");
+    let info = detect_project(workspace);
+
+    println!("  Project type: \x1b[36m{}\x1b[0m", info.project_type);
+    if let Some(ref fw) = info.framework {
+        println!("  Framework:    \x1b[36m{}\x1b[0m", fw);
+    }
+    if let Some(ref pm) = info.package_manager {
+        println!("  Package mgr:  \x1b[36m{}\x1b[0m", pm);
+    }
+    if info.has_git {
+        let status = if info.git_clean { "clean" } else { "dirty" };
+        println!("  Git:          \x1b[36m{}\x1b[0m", status);
+    }
+    if info.has_ci {
+        println!("  CI:           \x1b[36mdetected\x1b[0m");
+    }
+    println!();
+
+    // Step 2: Check for existing config
+    let config_dir = workspace.join(".rustant");
+    let config_path = config_dir.join("config.toml");
+
+    if config_path.exists() {
+        println!(
+            "  Config already exists at: {}\n",
+            config_path.display()
+        );
+        let overwrite = dialoguer::Confirm::new()
+            .with_prompt("  Overwrite with project-optimized config?")
+            .default(false)
+            .interact()?;
+        if !overwrite {
+            println!("  Keeping existing config. Done.\n");
+            return Ok(());
+        }
+    }
+
+    // Step 3: Detect existing API keys or run setup wizard
+    let detected_keys = crate::setup::detect_env_api_keys();
+    let mut config = rustant_core::AgentConfig::default();
+
+    if !detected_keys.is_empty() {
+        println!(
+            "  Detected API key(s): {}",
+            detected_keys
+                .iter()
+                .map(|(_, name)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        // Use the first detected provider
+        let (provider_name, display_name) = &detected_keys[0];
+        println!("  Using: \x1b[36m{}\x1b[0m", display_name);
+        config.llm.provider = provider_name.clone();
+        config.llm.api_key_env = match provider_name.as_str() {
+            "openai" => "OPENAI_API_KEY".to_string(),
+            "anthropic" => "ANTHROPIC_API_KEY".to_string(),
+            "gemini" => "GEMINI_API_KEY".to_string(),
+            _ => format!("{}_API_KEY", provider_name.to_uppercase()),
+        };
+        config.llm.model = match provider_name.as_str() {
+            "anthropic" => "claude-sonnet-4-20250514".to_string(),
+            "gemini" => "gemini-2.0-flash".to_string(),
+            _ => "gpt-4o".to_string(),
+        };
+        println!();
+    } else {
+        // Check for Ollama
+        let ollama_running = reqwest::Client::new()
+            .get("http://localhost:11434/api/tags")
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await
+            .is_ok();
+
+        if ollama_running {
+            println!("  Detected \x1b[36mOllama\x1b[0m running locally (no API key needed)");
+            config.llm.provider = "openai".to_string();
+            config.llm.base_url = Some("http://localhost:11434/v1".to_string());
+            config.llm.model = "llama3.2".to_string();
+            config.llm.api_key_env = "OLLAMA_API_KEY".to_string();
+            println!();
+        } else {
+            println!("  No API keys detected. Starting provider setup...\n");
+            if let Err(e) = crate::setup::run_setup(workspace).await {
+                eprintln!("  Setup failed: {}. Generating config with defaults.\n", e);
+            } else {
+                // Reload config after setup wizard
+                if config_path.exists() {
+                    if let Ok(content) = std::fs::read_to_string(&config_path) {
+                        if let Ok(loaded) = toml::from_str::<rustant_core::AgentConfig>(&content) {
+                            config = loaded;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Step 4: Apply project-specific safety settings
+    let allowed_cmds = recommended_allowed_commands(&info);
+    config.safety.allowed_commands = allowed_cmds;
+
+    // Set approval mode based on git status
+    config.safety.approval_mode = if info.has_git && info.git_clean {
+        rustant_core::ApprovalMode::Safe
+    } else {
+        rustant_core::ApprovalMode::Cautious
+    };
+
+    // Add source dirs to allowed paths
+    if !info.source_dirs.is_empty() {
+        config.safety.allowed_paths = info
+            .source_dirs
+            .iter()
+            .map(|d| format!("{}/**", d))
+            .collect();
+        config
+            .safety
+            .allowed_paths
+            .extend(["tests/**".to_string(), "docs/**".to_string()]);
+    }
+
+    // Step 5: Write config
+    std::fs::create_dir_all(&config_dir)?;
+    let toml_str = toml::to_string_pretty(&config)?;
+    std::fs::write(&config_path, &toml_str)?;
+    println!(
+        "  Config saved to: \x1b[36m{}\x1b[0m\n",
+        config_path.display()
+    );
+
+    // Step 6: Print quick-start guide
+    println!("  \x1b[1m--- Quick Start ---\x1b[0m\n");
+    println!("  \x1b[33mInteractive mode:\x1b[0m  rustant");
+    println!("  \x1b[33mSingle task:\x1b[0m       rustant \"your task here\"");
+    println!("  \x1b[33mTUI mode:\x1b[0m          rustant --no-tui=false");
+    println!();
+    println!("  \x1b[33mSlash commands:\x1b[0m");
+    println!("    /help     Show available commands");
+    println!("    /tools    List available tools");
+    println!("    /safety   Show current safety settings");
+    println!("    /cost     Show token usage and cost");
+    println!("    /session  Save or load sessions");
+    println!();
+
+    // Build/test commands
+    if !info.build_commands.is_empty() || !info.test_commands.is_empty() {
+        println!("  \x1b[33mDetected project commands:\x1b[0m");
+        for cmd in &info.build_commands {
+            println!("    Build: {}", cmd);
+        }
+        for cmd in &info.test_commands {
+            println!("    Test:  {}", cmd);
+        }
+        println!();
+    }
+
+    // Example tasks
+    let examples = example_tasks(&info);
+    if !examples.is_empty() {
+        println!("  \x1b[33mTry these tasks:\x1b[0m");
+        for task in &examples {
+            println!("    rustant {}", task);
+        }
+        println!();
+    }
+
+    println!(
+        "  Approval mode: \x1b[36m{}\x1b[0m (reads auto-approved, writes ask first)",
+        config.safety.approval_mode
+    );
+    println!("  Provider: \x1b[36m{}\x1b[0m | Model: \x1b[36m{}\x1b[0m\n",
+        config.llm.provider, config.llm.model
+    );
+
+    Ok(())
+}
+
+async fn handle_resume(session: Option<&str>, workspace: &Path) -> anyhow::Result<()> {
+    let mut mgr = rustant_core::SessionManager::new(workspace)
+        .map_err(|e| anyhow::anyhow!("Failed to initialize session manager: {}", e))?;
+
+    let (memory, continuation) = if let Some(query) = session {
+        mgr.resume_session(query)
+    } else {
+        mgr.resume_latest()
+    }
+    .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+    let goal = memory.working.current_goal.clone().unwrap_or_default();
+    let msg_count = memory.short_term.len();
+
+    println!("\x1b[1;32mSession resumed!\x1b[0m");
+    if !goal.is_empty() {
+        println!("  Last goal: \x1b[36m{}\x1b[0m", goal);
+    }
+    println!("  Messages restored: \x1b[36m{}\x1b[0m", msg_count);
+    println!("  Facts in memory: \x1b[36m{}\x1b[0m", memory.long_term.facts.len());
+    println!();
+
+    // Load config and start interactive session with resumed memory
+    let config = rustant_core::config::load_config(Some(workspace), None)
+        .map_err(|e| anyhow::anyhow!("Configuration error: {}", e))?;
+
+    let provider = match rustant_core::create_provider(&config.llm) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("LLM provider init failed: {}. Using mock.", e);
+            std::sync::Arc::new(rustant_core::MockLlmProvider::new())
+        }
+    };
+
+    let callback = std::sync::Arc::new(crate::repl::CliCallback);
+    let mut agent = rustant_core::Agent::new(provider, config, callback);
+    *agent.memory_mut() = memory;
+
+    // Inject the continuation context
+    agent
+        .memory_mut()
+        .add_message(rustant_core::types::Message::system(continuation));
+
+    // Run in interactive REPL mode
+    println!("  Type your next instruction to continue, or /quit to exit.\n");
+
+    let stdin = std::io::stdin();
+    loop {
+        print!("\x1b[1;34m> \x1b[0m");
+        std::io::Write::flush(&mut std::io::stdout())?;
+
+        let mut input = String::new();
+        if std::io::BufRead::read_line(&mut stdin.lock(), &mut input).is_err() || input.is_empty() {
+            break;
+        }
+        let input = input.trim();
+        if input.is_empty() {
+            continue;
+        }
+        if input == "/quit" || input == "/exit" || input == "/q" {
+            println!("Goodbye!");
+            break;
+        }
+
+        match agent.process_task(input).await {
+            Ok(result) => {
+                println!(
+                    "\x1b[90m  [{} iterations, {} tokens, ${:.4}]\x1b[0m",
+                    result.iterations,
+                    result.total_usage.total(),
+                    result.total_cost.total()
+                );
+            }
+            Err(e) => {
+                println!("\x1b[31mError: {}\x1b[0m", e);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_sessions(limit: usize, workspace: &Path) -> anyhow::Result<()> {
+    let mgr = rustant_core::SessionManager::new(workspace)
+        .map_err(|e| anyhow::anyhow!("Failed to initialize session manager: {}", e))?;
+
+    let sessions = mgr.list_sessions(limit);
+    if sessions.is_empty() {
+        println!("No saved sessions found.");
+        println!("Sessions are saved automatically when using the agent.");
+        return Ok(());
+    }
+
+    println!("\x1b[1mSaved Sessions\x1b[0m (most recent first):\n");
+    for entry in &sessions {
+        let status = if entry.completed {
+            "\x1b[32mdone\x1b[0m"
+        } else {
+            "\x1b[33min progress\x1b[0m"
+        };
+        let goal = entry
+            .last_goal
+            .as_deref()
+            .unwrap_or("(no goal recorded)");
+
+        println!(
+            "  \x1b[1;36m{}\x1b[0m  [{}]",
+            entry.name, status
+        );
+        println!(
+            "    Goal: {}",
+            if goal.len() > 60 {
+                format!("{}...", &goal[..60])
+            } else {
+                goal.to_string()
+            }
+        );
+        println!(
+            "    Messages: {} | Tokens: {} | Updated: {}",
+            entry.message_count,
+            entry.total_tokens,
+            entry.updated_at.format("%Y-%m-%d %H:%M UTC")
+        );
+        println!();
+    }
+
+    println!("Resume with: \x1b[36mrustant resume [name]\x1b[0m");
+    Ok(())
 }
 
 async fn handle_channel(action: ChannelAction, workspace: &Path) -> anyhow::Result<()> {

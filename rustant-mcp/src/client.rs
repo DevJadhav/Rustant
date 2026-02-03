@@ -290,11 +290,11 @@ mod tests {
         client.initialize(&mut client_transport).await.unwrap();
 
         let tools = client.discover_tools(&mut client_transport).await.unwrap();
-        // 12 base tools + 3 iMessage tools on macOS
+        // 12 base + 3 web + 1 smart_edit + 1 codebase_search + 3 iMessage on macOS
         #[cfg(target_os = "macos")]
-        let expected_tools = 15;
+        let expected_tools = 20;
         #[cfg(not(target_os = "macos"))]
-        let expected_tools = 12;
+        let expected_tools = 17;
         assert_eq!(tools.len(), expected_tools);
         assert_eq!(client.available_tools().len(), expected_tools);
 

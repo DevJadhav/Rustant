@@ -63,6 +63,19 @@ enum Commands {
     },
     /// Interactive provider setup wizard
     Setup,
+    /// Smart project initialization: detects project type, generates optimal config
+    Init,
+    /// Resume a previous session (most recent, or by name)
+    Resume {
+        /// Session name or ID to resume (omit for most recent)
+        session: Option<String>,
+    },
+    /// List saved sessions
+    Sessions {
+        /// Maximum number of sessions to show
+        #[arg(short, long, default_value = "10")]
+        limit: usize,
+    },
     /// Manage messaging channels
     Channel {
         #[command(subcommand)]

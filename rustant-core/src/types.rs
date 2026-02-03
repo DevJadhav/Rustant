@@ -145,6 +145,30 @@ impl Message {
         self.metadata.insert(key.into(), value);
         self
     }
+
+    /// Approximate character length of the message content.
+    pub fn content_length(&self) -> usize {
+        match &self.content {
+            Content::Text { text } => text.len(),
+            Content::ToolCall {
+                name, arguments, ..
+            } => name.len() + arguments.to_string().len(),
+            Content::ToolResult { output, .. } => output.len(),
+            Content::MultiPart { parts } => parts.iter().map(content_char_len).sum(),
+        }
+    }
+}
+
+/// Helper to compute char length for a Content variant.
+fn content_char_len(c: &Content) -> usize {
+    match c {
+        Content::Text { text } => text.len(),
+        Content::ToolCall {
+            name, arguments, ..
+        } => name.len() + arguments.to_string().len(),
+        Content::ToolResult { output, .. } => output.len(),
+        Content::MultiPart { parts } => parts.iter().map(content_char_len).sum(),
+    }
 }
 
 /// A definition describing a tool for the LLM.
@@ -226,6 +250,29 @@ pub enum Artifact {
     FileModified { path: PathBuf, diff: String },
     FileDeleted { path: PathBuf },
     Data { mime_type: String, data: String },
+}
+
+/// Progress update from a running tool execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ProgressUpdate {
+    /// A tool execution is at a particular stage.
+    ToolProgress {
+        tool: String,
+        stage: String,
+        /// Optional completion percentage (0.0 to 1.0).
+        percent: Option<f32>,
+    },
+    /// A file operation is in progress.
+    FileOperation {
+        path: PathBuf,
+        operation: String,
+        bytes_processed: Option<u64>,
+    },
+    /// A line of shell output arrived.
+    ShellOutput {
+        line: String,
+        is_stderr: bool,
+    },
 }
 
 /// The current state of the agent.

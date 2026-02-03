@@ -14,8 +14,8 @@ use crate::safety::{
 };
 use crate::summarizer::ContextSummarizer;
 use crate::types::{
-    AgentState, AgentStatus, CompletionResponse, Content, CostEstimate, Message, RiskLevel, Role,
-    StreamEvent, TokenUsage, ToolDefinition, ToolOutput,
+    AgentState, AgentStatus, CompletionResponse, Content, CostEstimate, Message, ProgressUpdate,
+    RiskLevel, Role, StreamEvent, TokenUsage, ToolDefinition, ToolOutput,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -90,6 +90,10 @@ pub trait AgentCallback: Send + Sync {
     /// Notify about a budget warning or exceeded condition.
     /// Default is a no-op for backward compatibility.
     async fn on_budget_warning(&self, _message: &str, _severity: BudgetSeverity) {}
+
+    /// Notify about progress during tool execution (streaming output, file operations, etc.).
+    /// Default is a no-op for backward compatibility.
+    async fn on_progress(&self, _progress: &ProgressUpdate) {}
 }
 
 /// A tool executor function type. The agent holds tool executors and their definitions.

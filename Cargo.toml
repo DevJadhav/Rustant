@@ -105,6 +105,10 @@ sha2 = "0.10"
 hmac = "0.12"
 rand = "0.8"
 
+# File system traversal
+walkdir = "2.5"
+ignore = "0.4"
+
 # Full-text search
 tantivy = "0.22"
 

@@ -224,11 +224,11 @@ mod tests {
         .to_string();
         let resp = server.process_message(&list_req).await.unwrap().unwrap();
         let tools = resp.result.unwrap()["tools"].as_array().unwrap().clone();
-        // 12 base tools + 3 iMessage tools on macOS
+        // 12 base + 3 web + 1 smart_edit + 1 codebase_search + 3 iMessage on macOS
         #[cfg(target_os = "macos")]
-        assert_eq!(tools.len(), 15);
+        assert_eq!(tools.len(), 20);
         #[cfg(not(target_os = "macos"))]
-        assert_eq!(tools.len(), 12);
+        assert_eq!(tools.len(), 17);
     }
 
     #[tokio::test]
@@ -314,11 +314,11 @@ mod tests {
         let resp_str = client.read_message().await.unwrap().unwrap();
         let resp: JsonRpcResponse = serde_json::from_str(&resp_str).unwrap();
         let tools = resp.result.unwrap()["tools"].as_array().unwrap().clone();
-        // 12 base tools + 3 iMessage tools on macOS
+        // 12 base + 3 web + 1 smart_edit + 1 codebase_search + 3 iMessage on macOS
         #[cfg(target_os = "macos")]
-        assert_eq!(tools.len(), 15);
+        assert_eq!(tools.len(), 20);
         #[cfg(not(target_os = "macos"))]
-        assert_eq!(tools.len(), 12);
+        assert_eq!(tools.len(), 17);
 
         // 4. Call echo tool
         let call_req = json!({

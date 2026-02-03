@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// A CLI callback that prints to stdout and reads approval from stdin.
-struct CliCallback;
+pub(crate) struct CliCallback;
 
 #[async_trait::async_trait]
 impl AgentCallback for CliCallback {
@@ -248,12 +248,36 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     handle_session_command(arg1, arg2, &mut agent, &workspace);
                     continue;
                 }
+                "/resume" => {
+                    handle_resume_command(arg1, &mut agent, &workspace);
+                    continue;
+                }
+                "/sessions" => {
+                    handle_sessions_command(&workspace);
+                    continue;
+                }
                 "/safety" => {
                     handle_safety_command(&agent);
                     continue;
                 }
                 "/memory" => {
                     handle_memory_command(&agent);
+                    continue;
+                }
+                "/pin" => {
+                    handle_pin_command(arg1, &mut agent);
+                    continue;
+                }
+                "/unpin" => {
+                    handle_unpin_command(arg1, &mut agent);
+                    continue;
+                }
+                "/context" => {
+                    handle_context_command(&agent);
+                    continue;
+                }
+                "/workflows" => {
+                    handle_workflows_command();
                     continue;
                 }
                 _ => {
@@ -650,6 +674,220 @@ fn handle_memory_command(agent: &Agent) {
     println!("    Preferences: {}", mem.long_term.preferences.len());
 }
 
+/// Handle `/pin <n>` command to pin a message by position.
+fn handle_pin_command(arg: &str, agent: &mut Agent) {
+    if arg.is_empty() {
+        // List pinned messages
+        let mem = agent.memory();
+        let count = mem.short_term.pinned_count();
+        if count == 0 {
+            println!("No pinned messages. Use /pin <n> to pin a message by position.");
+        } else {
+            println!("Pinned messages ({}):", count);
+            for i in 0..mem.short_term.len() {
+                if mem.short_term.is_pinned(i) {
+                    let msgs = mem.short_term.messages();
+                    if let Some(msg) = msgs.get(i) {
+                        let preview = match &msg.content {
+                            rustant_core::types::Content::Text { text } => {
+                                if text.len() > 60 {
+                                    format!("{}...", &text[..60])
+                                } else {
+                                    text.clone()
+                                }
+                            }
+                            _ => "(non-text)".to_string(),
+                        };
+                        println!("  [{}] {} - {}", i, msg.role, preview);
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    match arg.parse::<usize>() {
+        Ok(n) => {
+            let mem = agent.memory_mut();
+            if mem.short_term.pin(n) {
+                println!("Pinned message #{} (will survive context compression).", n);
+            } else {
+                println!(
+                    "Invalid message index {}. Current messages: 0..{}",
+                    n,
+                    mem.short_term.len().saturating_sub(1)
+                );
+            }
+        }
+        Err(_) => {
+            println!("Usage: /pin <message_number>");
+        }
+    }
+}
+
+/// Handle `/unpin <n>` command.
+fn handle_unpin_command(arg: &str, agent: &mut Agent) {
+    match arg.parse::<usize>() {
+        Ok(n) => {
+            let mem = agent.memory_mut();
+            if mem.short_term.unpin(n) {
+                println!("Unpinned message #{}.", n);
+            } else {
+                println!("Message #{} was not pinned.", n);
+            }
+        }
+        Err(_) => {
+            println!("Usage: /unpin <message_number>");
+        }
+    }
+}
+
+/// Handle `/context` command to show context window breakdown.
+fn handle_context_command(agent: &Agent) {
+    let context_window = agent.brain().context_window();
+    let mem = agent.memory();
+    let ctx = mem.context_breakdown(context_window);
+
+    println!("Context Window Breakdown:");
+    println!("  Window size: {} tokens", ctx.context_window);
+    println!("  ──────────────────────────");
+    if ctx.has_summary {
+        println!("  Summary:    ~{} tokens", ctx.summary_tokens);
+    }
+    println!("  Messages:   ~{} tokens ({} messages)", ctx.message_tokens, ctx.message_count);
+    if ctx.pinned_count > 0 {
+        println!("  Pinned:     {} messages (survive compression)", ctx.pinned_count);
+    }
+    println!("  ──────────────────────────");
+    println!("  Total used: ~{} tokens ({:.0}%)", ctx.total_tokens, ctx.usage_ratio() * 100.0);
+    println!("  Remaining:  ~{} tokens", ctx.remaining_tokens);
+    println!("  ──────────────────────────");
+    println!("  Session stats:");
+    println!("    Total messages seen: {}", ctx.total_messages_seen);
+    println!("    Facts stored: {}", ctx.facts_count);
+
+    if ctx.is_warning() {
+        println!("\n  WARNING: Context usage is above 80%. Consider using /pin to preserve");
+        println!("  important messages before they are compressed.");
+    }
+}
+
+/// Handle `/workflows` command to list available workflow templates.
+fn handle_workflows_command() {
+    let names = rustant_core::workflow::list_builtin_names();
+    println!("Available Workflow Templates ({}):", names.len());
+    println!("  ──────────────────────────────────");
+
+    for name in &names {
+        if let Some(wf) = rustant_core::workflow::get_builtin(name) {
+            println!(
+                "  \x1b[36m{:<22}\x1b[0m {}",
+                wf.name, wf.description
+            );
+            if !wf.inputs.is_empty() {
+                let inputs: Vec<String> = wf
+                    .inputs
+                    .iter()
+                    .map(|i| {
+                        if i.optional {
+                            format!("[{}]", i.name)
+                        } else {
+                            i.name.clone()
+                        }
+                    })
+                    .collect();
+                println!("    Inputs: {}", inputs.join(", "));
+            }
+        } else {
+            println!("  {}", name);
+        }
+    }
+
+    println!();
+    println!("  Daily automation templates:");
+    println!("    morning_briefing  — Schedule with: rustant cron add briefing \"0 0 9 * * MON-FRI *\" \"workflow run morning_briefing\"");
+    println!("    pr_review         — Run: rustant workflow run pr_review --input branch=feature-xyz");
+    println!("    dependency_audit  — Schedule weekly: rustant cron add audit \"0 0 10 * * MON *\" \"workflow run dependency_audit\"");
+    println!("    changelog         — Run: rustant workflow run changelog --input since=\"1 week ago\"");
+}
+
+/// Handle `/resume` REPL command.
+fn handle_resume_command(query: &str, agent: &mut Agent, workspace: &Path) {
+    let mut mgr = match rustant_core::SessionManager::new(workspace) {
+        Ok(m) => m,
+        Err(e) => {
+            println!("Failed to initialize session manager: {}", e);
+            return;
+        }
+    };
+
+    let result = if query.is_empty() {
+        mgr.resume_latest()
+    } else {
+        mgr.resume_session(query)
+    };
+
+    match result {
+        Ok((memory, continuation)) => {
+            let goal = memory.working.current_goal.clone().unwrap_or_default();
+            let msg_count = memory.short_term.len();
+            *agent.memory_mut() = memory;
+            agent
+                .memory_mut()
+                .add_message(rustant_core::types::Message::system(continuation));
+            println!("\x1b[32mSession resumed!\x1b[0m");
+            if !goal.is_empty() {
+                println!("  Goal: {}", goal);
+            }
+            println!("  Messages restored: {}", msg_count);
+        }
+        Err(e) => {
+            println!("Failed to resume: {}", e);
+            println!("Use /sessions to list available sessions.");
+        }
+    }
+}
+
+/// Handle `/sessions` REPL command.
+fn handle_sessions_command(workspace: &Path) {
+    let mgr = match rustant_core::SessionManager::new(workspace) {
+        Ok(m) => m,
+        Err(e) => {
+            println!("Failed to initialize session manager: {}", e);
+            return;
+        }
+    };
+
+    let sessions = mgr.list_sessions(10);
+    if sessions.is_empty() {
+        println!("No saved sessions found.");
+        return;
+    }
+
+    println!("Saved sessions:");
+    for entry in &sessions {
+        let status = if entry.completed { "done" } else { "..." };
+        let goal = entry
+            .last_goal
+            .as_deref()
+            .unwrap_or("(no goal)");
+        let goal_display = if goal.len() > 50 {
+            format!("{}...", &goal[..50])
+        } else {
+            goal.to_string()
+        };
+        println!(
+            "  \x1b[36m{}\x1b[0m [{}] - {} ({} msgs, {})",
+            entry.name,
+            status,
+            goal_display,
+            entry.message_count,
+            entry.updated_at.format("%m/%d %H:%M")
+        );
+    }
+    println!("\nResume with: /resume <name>");
+}
+
 fn print_help() {
     println!(
         r#"
@@ -667,6 +905,12 @@ Available commands:
   /session save [name] Save current session
   /session load [name] Load a saved session
   /session list        List saved sessions
+  /resume [name]       Resume a saved session (latest if no name)
+  /sessions            List saved sessions with details
+  /pin [n]             Pin message #n (survives compression) or list pinned
+  /unpin <n>           Unpin message #n
+  /context             Show context window usage breakdown
+  /workflows           List available workflow templates
 
 Input:
   Type your task or question and press Enter.

@@ -7,11 +7,14 @@ use crate::tui::widgets::autocomplete::AutocompleteState;
 use crate::tui::widgets::command_palette::CommandPalette;
 use crate::tui::widgets::conversation::{render_conversation, ConversationState, DisplayMessage};
 use crate::tui::widgets::diff_view::DiffView;
+use crate::tui::widgets::explanation_panel::{render_explanation_panel, ExplanationPanel};
 use crate::tui::widgets::header::{render_header, HeaderData};
 use crate::tui::widgets::input_area::{InputAction, InputWidget};
+use crate::tui::widgets::progress_bar::{render_progress_bar, ProgressState};
 use crate::tui::widgets::markdown::SyntaxHighlighter;
 use crate::tui::widgets::sidebar::{render_sidebar, FileEntry, FileStatus, SidebarData};
 use crate::tui::widgets::status_bar::{render_status_bar, InputMode};
+use crate::tui::widgets::task_board::{render_task_board, TaskBoard};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::Frame;
@@ -22,7 +25,7 @@ use rustant_core::{
     Agent, AgentConfig, MockLlmProvider, RegisteredTool, TaskResult, TokenAlert, TokenCostDisplay,
 };
 use rustant_tools::checkpoint::CheckpointManager;
-use rustant_tools::register_builtin_tools;
+use rustant_tools::register_builtin_tools_with_progress;
 use rustant_tools::registry::ToolRegistry;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -63,6 +66,16 @@ pub struct App {
     audit_store: AuditStore,
     replay_session: ReplaySession,
 
+    // Safety Transparency Dashboard
+    pub explanation_panel: ExplanationPanel,
+
+    // Streaming Progress Pipeline
+    pub progress: ProgressState,
+    progress_rx: tokio::sync::mpsc::UnboundedReceiver<rustant_core::types::ProgressUpdate>,
+
+    // Multi-Agent Task Board
+    pub task_board: TaskBoard,
+
     // App state
     pub should_quit: bool,
     is_processing: bool,
@@ -86,9 +99,10 @@ impl App {
         let callback_arc = Arc::new(callback);
         let mut agent = Agent::new(provider, config.clone(), callback_arc);
 
-        // Register tools
+        // Register tools with progress channel for streaming shell output
+        let (progress_tx, progress_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut registry = ToolRegistry::new();
-        register_builtin_tools(&mut registry, workspace.clone());
+        register_builtin_tools_with_progress(&mut registry, workspace.clone(), Some(progress_tx));
         register_agent_tools(&mut agent, &registry, &workspace);
 
         let header = HeaderData {
@@ -129,6 +143,10 @@ impl App {
             pending_approval: None,
             audit_store: AuditStore::new(),
             replay_session: ReplaySession::new(),
+            explanation_panel: ExplanationPanel::new(),
+            progress: ProgressState::new(),
+            progress_rx,
+            task_board: TaskBoard::new(),
             should_quit: false,
             is_processing: false,
             vim_mode,
@@ -168,9 +186,16 @@ impl App {
                         self.handle_tui_event(event);
                     }
                 }
+                // Tool progress events (streaming shell output)
+                update = self.progress_rx.recv() => {
+                    if let Some(update) = update {
+                        self.progress.apply_progress(&update);
+                    }
+                }
                 // Tick
                 _ = tokio::time::sleep(tick_rate) => {
                     // Tick for spinners/animation updates
+                    self.progress.tick();
                 }
             }
 
@@ -187,9 +212,19 @@ impl App {
 
     /// Draw the full UI.
     pub fn draw(&self, frame: &mut Frame) {
-        let [header_area, main_area, input_area, status_area] = Layout::vertical([
+        // Dynamic layout: include progress bar area when a tool is executing
+        let progress_height = if self.progress.is_active() {
+            let base = 2_u16;
+            let shell_lines = self.progress.shell_lines.len() as u16;
+            base + shell_lines.min(5) // Up to 5 lines of shell output
+        } else {
+            0
+        };
+
+        let [header_area, main_area, progress_area, input_area, status_area] = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(8),
+            Constraint::Length(progress_height),
             Constraint::Length(5),
             Constraint::Length(1),
         ])
@@ -222,6 +257,11 @@ impl App {
             );
         }
 
+        // Progress bar (visible during tool execution)
+        if self.progress.is_active() {
+            render_progress_bar(frame, progress_area, &self.progress, &self.theme);
+        }
+
         // Input area
         self.input.render(frame, input_area);
 
@@ -240,6 +280,16 @@ impl App {
         if self.diff_view.is_visible() {
             self.diff_view.render(frame, frame.area(), &self.theme);
         }
+
+        // Explanation panel overlay (Safety Transparency Dashboard)
+        if self.explanation_panel.is_visible() {
+            render_explanation_panel(frame, frame.area(), &self.explanation_panel, &self.theme);
+        }
+
+        // Multi-Agent Task Board overlay
+        if self.task_board.is_visible() {
+            render_task_board(frame, frame.area(), &self.task_board, &self.theme);
+        }
     }
 
     /// Handle a terminal event (keyboard, mouse, resize).
@@ -256,6 +306,14 @@ impl App {
     fn handle_key_event(&mut self, key: KeyEvent) {
         // Escape key: cancel streaming, close popups, or exit vim insert
         if key.code == KeyCode::Esc {
+            if self.task_board.is_visible() {
+                self.task_board.toggle();
+                return;
+            }
+            if self.explanation_panel.is_visible() {
+                self.explanation_panel.toggle();
+                return;
+            }
             if self.diff_view.is_visible() {
                 self.diff_view.hide();
                 return;
@@ -299,6 +357,56 @@ impl App {
         if let Some(action) = map_global_key(&key) {
             self.execute_action(action);
             return;
+        }
+
+        // Ctrl+E: Toggle explanation panel (Safety Transparency Dashboard)
+        if key.code == KeyCode::Char('e') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.explanation_panel.toggle();
+            return;
+        }
+
+        // Ctrl+T: Toggle multi-agent task board
+        if key.code == KeyCode::Char('t') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.task_board.toggle();
+            return;
+        }
+
+        // Task board navigation when visible
+        if self.task_board.is_visible() {
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.task_board.select_prev();
+                    return;
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.task_board.select_next();
+                    return;
+                }
+                _ => {} // Other keys pass through
+            }
+        }
+
+        // Explanation panel navigation when visible
+        if self.explanation_panel.is_visible() {
+            match key.code {
+                KeyCode::Left => {
+                    self.explanation_panel.select_prev();
+                    return;
+                }
+                KeyCode::Right => {
+                    self.explanation_panel.select_next();
+                    return;
+                }
+                KeyCode::Up => {
+                    self.explanation_panel.scroll_up();
+                    return;
+                }
+                KeyCode::Down => {
+                    self.explanation_panel.scroll_down();
+                    return;
+                }
+                _ => {} // Other keys pass through
+            }
         }
 
         // Diff view mode: intercept scroll keys when visible
@@ -1043,6 +1151,9 @@ impl App {
                         .create_checkpoint(&format!("before {}", name));
                 }
 
+                // Start progress tracking
+                self.progress.tool_started(&name);
+
                 let args_str = args.to_string();
                 let args_preview = if args_str.len() > 100 {
                     format!("{}...", &args_str[..100])
@@ -1062,6 +1173,9 @@ impl App {
                 output,
                 duration_ms,
             } => {
+                // Stop progress tracking
+                self.progress.tool_finished();
+
                 self.conversation.push_message(DisplayMessage {
                     role: Role::Tool,
                     text: format!("Completed in {}ms: {}", duration_ms, output.content),
@@ -1133,6 +1247,8 @@ impl App {
                     is_error: false,
                     timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                 });
+                // Store in explanation panel for Safety Dashboard
+                self.explanation_panel.push(explanation);
             }
             TuiEvent::BudgetWarning { message, severity } => {
                 let prefix = match severity {
@@ -1146,6 +1262,12 @@ impl App {
                     is_error: severity == rustant_core::BudgetSeverity::Exceeded,
                     timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                 });
+            }
+            TuiEvent::Progress(update) => {
+                self.progress.apply_progress(&update);
+            }
+            TuiEvent::MultiAgentUpdate(agents) => {
+                self.task_board.update_agents(agents);
             }
         }
     }

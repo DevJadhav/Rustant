@@ -9,7 +9,7 @@
 
 use rustant_core::explanation::DecisionExplanation;
 use rustant_core::safety::{ActionRequest, ApprovalDecision};
-use rustant_core::types::{AgentStatus, CostEstimate, TokenUsage, ToolOutput};
+use rustant_core::types::{AgentStatus, CostEstimate, ProgressUpdate, TokenUsage, ToolOutput};
 use rustant_core::AgentCallback;
 use tokio::sync::{mpsc, oneshot};
 
@@ -50,6 +50,11 @@ pub enum TuiEvent {
         message: String,
         severity: rustant_core::BudgetSeverity,
     },
+    /// Progress update during tool execution (streaming output, etc.).
+    Progress(ProgressUpdate),
+    /// Multi-agent status update for the task board.
+    #[allow(dead_code)]
+    MultiAgentUpdate(Vec<crate::tui::widgets::task_board::AgentSummary>),
 }
 
 /// Implements AgentCallback by forwarding events through an mpsc channel.
@@ -133,6 +138,10 @@ impl AgentCallback for TuiCallback {
             message: message.to_string(),
             severity,
         });
+    }
+
+    async fn on_progress(&self, progress: &ProgressUpdate) {
+        let _ = self.tx.send(TuiEvent::Progress(progress.clone()));
     }
 }
 

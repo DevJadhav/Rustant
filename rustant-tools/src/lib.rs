@@ -6,6 +6,7 @@
 pub mod browser;
 pub mod canvas;
 pub mod checkpoint;
+pub mod codebase_search;
 pub mod file;
 pub mod git;
 pub mod imessage;
@@ -13,14 +14,33 @@ pub mod lsp;
 pub mod registry;
 pub mod sandbox;
 pub mod shell;
+pub mod smart_edit;
 pub mod utils;
+pub mod web;
 
 use registry::{Tool, ToolRegistry};
+use rustant_core::types::ProgressUpdate;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 
 /// Register all built-in tools with the given workspace path.
 pub fn register_builtin_tools(registry: &mut ToolRegistry, workspace: PathBuf) {
+    register_builtin_tools_with_progress(registry, workspace, None);
+}
+
+/// Register all built-in tools, optionally with a progress channel for streaming output.
+pub fn register_builtin_tools_with_progress(
+    registry: &mut ToolRegistry,
+    workspace: PathBuf,
+    progress_tx: Option<mpsc::UnboundedSender<ProgressUpdate>>,
+) {
+    let shell_tool: Arc<dyn Tool> = if let Some(tx) = progress_tx {
+        Arc::new(shell::ShellExecTool::with_progress(workspace.clone(), tx))
+    } else {
+        Arc::new(shell::ShellExecTool::new(workspace.clone()))
+    };
+
     let mut tools: Vec<Arc<dyn Tool>> = vec![
         Arc::new(file::FileReadTool::new(workspace.clone())),
         Arc::new(file::FileListTool::new(workspace.clone())),
@@ -30,10 +50,18 @@ pub fn register_builtin_tools(registry: &mut ToolRegistry, workspace: PathBuf) {
         Arc::new(git::GitStatusTool::new(workspace.clone())),
         Arc::new(git::GitDiffTool::new(workspace.clone())),
         Arc::new(git::GitCommitTool::new(workspace.clone())),
-        Arc::new(shell::ShellExecTool::new(workspace.clone())),
+        shell_tool,
         Arc::new(utils::EchoTool),
         Arc::new(utils::DateTimeTool),
         Arc::new(utils::CalculatorTool),
+        // Web tools — search, fetch, and document reading
+        Arc::new(web::WebSearchTool::new()),
+        Arc::new(web::WebFetchTool::new()),
+        Arc::new(web::DocumentReadTool::new(workspace.clone())),
+        // Smart editing with fuzzy matching and auto-checkpoint
+        Arc::new(smart_edit::SmartEditTool::new(workspace.clone())),
+        // Codebase search with auto-indexing
+        Arc::new(codebase_search::CodebaseSearchTool::new(workspace.clone())),
     ];
 
     // iMessage tools — macOS only
@@ -78,11 +106,11 @@ mod tests {
         let mut registry = ToolRegistry::new();
         register_builtin_tools(&mut registry, dir.path().to_path_buf());
 
-        // 12 base tools + 3 iMessage tools on macOS
+        // 17 base tools (12 original + 3 web + 1 smart_edit + 1 codebase_search) + 3 iMessage on macOS
         #[cfg(target_os = "macos")]
-        assert_eq!(registry.len(), 15);
+        assert_eq!(registry.len(), 20);
         #[cfg(not(target_os = "macos"))]
-        assert_eq!(registry.len(), 12);
+        assert_eq!(registry.len(), 17);
 
         // Verify all expected tools are registered
         let names = registry.list_names();

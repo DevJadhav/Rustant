@@ -45,6 +45,8 @@ hmac = { workspace = true }
 rand = { workspace = true }
 tantivy = { workspace = true }
 rusqlite = { workspace = true }
+walkdir = { workspace = true }
+ignore = { workspace = true }
 axum = { workspace = true }
 axum-server = { workspace = true }
 tower = { workspace = true }

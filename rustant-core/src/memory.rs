@@ -9,7 +9,7 @@ use crate::search::{HybridSearchEngine, SearchConfig};
 use crate::types::Message;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use uuid::Uuid;
 
@@ -58,6 +58,10 @@ pub struct ShortTermMemory {
     window_size: usize,
     summarized_prefix: Option<String>,
     total_messages_seen: usize,
+    /// Set of absolute message indices that are pinned (survive compression).
+    pinned: std::collections::HashSet<usize>,
+    /// Running count of messages removed by compression (for index mapping).
+    compressed_offset: usize,
 }
 
 impl ShortTermMemory {
@@ -67,6 +71,8 @@ impl ShortTermMemory {
             window_size,
             summarized_prefix: None,
             total_messages_seen: 0,
+            pinned: std::collections::HashSet::new(),
+            compressed_offset: 0,
         }
     }
 
@@ -88,15 +94,18 @@ impl ShortTermMemory {
             )));
         }
 
-        // Include recent messages within the window
+        // Include recent messages within the window.
+        // Pinned messages that fall before the window start are still included.
         let start = if self.messages.len() > self.window_size {
             self.messages.len() - self.window_size
         } else {
             0
         };
 
-        for msg in self.messages.iter().skip(start) {
-            result.push(msg.clone());
+        for (i, msg) in self.messages.iter().enumerate() {
+            if i >= start || self.is_pinned(i) {
+                result.push(msg.clone());
+            }
         }
 
         result
@@ -108,6 +117,7 @@ impl ShortTermMemory {
     }
 
     /// Compress older messages by replacing them with a summary.
+    /// Pinned messages are preserved and moved to the front of the window.
     /// Returns the number of messages that were compressed.
     pub fn compress(&mut self, summary: String) -> usize {
         if self.messages.len() <= self.window_size {
@@ -115,7 +125,54 @@ impl ShortTermMemory {
         }
 
         let to_remove = self.messages.len() - self.window_size;
-        let removed: Vec<Message> = self.messages.drain(..to_remove).collect();
+
+        // Separate pinned messages from those to be removed, and collect
+        // the absolute indices of messages that survive the window (not removed).
+        let mut preserved = Vec::new();
+        let mut removed_count = 0;
+
+        for i in 0..to_remove {
+            let abs_idx = self.compressed_offset + i;
+            if self.pinned.contains(&abs_idx) {
+                if let Some(msg) = self.messages.get(i) {
+                    preserved.push(msg.clone());
+                }
+            } else {
+                removed_count += 1;
+            }
+        }
+
+        // Collect absolute indices that are pinned and remain in the window
+        // (i.e. messages beyond to_remove that were pinned).
+        let mut surviving_pinned: Vec<usize> = Vec::new();
+        for i in to_remove..self.messages.len() {
+            let abs_idx = self.compressed_offset + i;
+            if self.pinned.contains(&abs_idx) {
+                surviving_pinned.push(i - to_remove);
+            }
+        }
+
+        // Remove the to_remove oldest messages
+        self.messages.drain(..to_remove);
+        self.compressed_offset += to_remove;
+
+        // Re-insert pinned messages at the front of the window
+        let preserved_count = preserved.len();
+        for (i, msg) in preserved.into_iter().enumerate() {
+            self.messages.insert(i, msg);
+        }
+
+        // Rebuild the pinned set with correct absolute indices.
+        // Preserved messages are at positions 0..preserved_count.
+        // Surviving pinned messages shifted by preserved_count.
+        let mut new_pinned = HashSet::new();
+        for i in 0..preserved_count {
+            new_pinned.insert(self.compressed_offset + i);
+        }
+        for pos in surviving_pinned {
+            new_pinned.insert(self.compressed_offset + preserved_count + pos);
+        }
+        self.pinned = new_pinned;
 
         // Merge with existing summary
         if let Some(ref existing) = self.summarized_prefix {
@@ -124,7 +181,38 @@ impl ShortTermMemory {
             self.summarized_prefix = Some(summary);
         }
 
-        removed.len()
+        removed_count
+    }
+
+    /// Pin a message by its position in the current message list (0-based).
+    /// Pinned messages survive compression.
+    pub fn pin(&mut self, position: usize) -> bool {
+        if position >= self.messages.len() {
+            return false;
+        }
+        let abs_idx = self.compressed_offset + position;
+        self.pinned.insert(abs_idx);
+        true
+    }
+
+    /// Unpin a message by its position in the current message list.
+    pub fn unpin(&mut self, position: usize) -> bool {
+        let abs_idx = self.compressed_offset + position;
+        self.pinned.remove(&abs_idx)
+    }
+
+    /// Check if a message at the given position is pinned.
+    pub fn is_pinned(&self, position: usize) -> bool {
+        let abs_idx = self.compressed_offset + position;
+        self.pinned.contains(&abs_idx)
+    }
+
+    /// Number of currently pinned messages.
+    pub fn pinned_count(&self) -> usize {
+        // Count pinned messages that are still in the current window
+        (0..self.messages.len())
+            .filter(|&i| self.is_pinned(i))
+            .count()
     }
 
     /// Get messages that should be summarized (older than window).
@@ -156,6 +244,8 @@ impl ShortTermMemory {
         self.messages.clear();
         self.summarized_prefix = None;
         self.total_messages_seen = 0;
+        self.pinned.clear();
+        self.compressed_offset = 0;
     }
 
     /// Get a reference to all current messages.
@@ -385,6 +475,94 @@ impl MemorySystem {
     pub fn clear_session(&mut self) {
         self.working.clear();
         self.short_term.clear();
+    }
+
+    /// Get a breakdown of context usage for the UI.
+    pub fn context_breakdown(&self, context_window: usize) -> ContextBreakdown {
+        let summary_chars = self
+            .short_term
+            .summary()
+            .map(|s| s.len())
+            .unwrap_or(0);
+        let message_chars: usize = self
+            .short_term
+            .messages()
+            .iter()
+            .map(|m| m.content_length())
+            .sum();
+        let total_chars = summary_chars + message_chars;
+
+        // Rough token estimate: ~4 chars per token
+        let summary_tokens = summary_chars / 4;
+        let message_tokens = message_chars / 4;
+        let total_tokens = total_chars / 4;
+        let remaining_tokens = context_window.saturating_sub(total_tokens);
+
+        ContextBreakdown {
+            summary_tokens,
+            message_tokens,
+            total_tokens,
+            context_window,
+            remaining_tokens,
+            message_count: self.short_term.len(),
+            total_messages_seen: self.short_term.total_messages_seen(),
+            pinned_count: self.short_term.pinned_count(),
+            has_summary: self.short_term.summary().is_some(),
+            facts_count: self.long_term.facts.len(),
+            rules_count: 0, // Populated separately if knowledge distiller is available
+        }
+    }
+
+    /// Pin a message in short-term memory by position.
+    pub fn pin_message(&mut self, position: usize) -> bool {
+        self.short_term.pin(position)
+    }
+
+    /// Unpin a message in short-term memory by position.
+    pub fn unpin_message(&mut self, position: usize) -> bool {
+        self.short_term.unpin(position)
+    }
+}
+
+/// Breakdown of context window usage for the UI.
+#[derive(Debug, Clone, Default)]
+pub struct ContextBreakdown {
+    /// Estimated tokens used by the summarized prefix.
+    pub summary_tokens: usize,
+    /// Estimated tokens used by active messages.
+    pub message_tokens: usize,
+    /// Total estimated tokens in use.
+    pub total_tokens: usize,
+    /// Total context window size (from config).
+    pub context_window: usize,
+    /// Remaining available tokens.
+    pub remaining_tokens: usize,
+    /// Number of messages currently in the window.
+    pub message_count: usize,
+    /// Total messages seen in the session.
+    pub total_messages_seen: usize,
+    /// Number of pinned messages.
+    pub pinned_count: usize,
+    /// Whether a summary prefix exists.
+    pub has_summary: bool,
+    /// Number of facts in long-term memory.
+    pub facts_count: usize,
+    /// Number of active behavioral rules.
+    pub rules_count: usize,
+}
+
+impl ContextBreakdown {
+    /// Context usage as a ratio (0.0 to 1.0).
+    pub fn usage_ratio(&self) -> f32 {
+        if self.context_window == 0 {
+            return 0.0;
+        }
+        (self.total_tokens as f32 / self.context_window as f32).clamp(0.0, 1.0)
+    }
+
+    /// Whether context is at warning level (>= 80%).
+    pub fn is_warning(&self) -> bool {
+        self.usage_ratio() >= 0.8
     }
 }
 
@@ -870,7 +1048,7 @@ impl KnowledgeDistiller {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::Role;
+    use crate::types::{Content, Role};
 
     #[test]
     fn test_working_memory_lifecycle() {
@@ -1155,6 +1333,123 @@ mod tests {
     fn test_short_term_window_size() {
         let stm = ShortTermMemory::new(7);
         assert_eq!(stm.window_size(), 7);
+    }
+
+    // --- Pinning tests ---
+
+    #[test]
+    fn test_pin_message() {
+        let mut stm = ShortTermMemory::new(5);
+        stm.add(Message::user("msg 0"));
+        stm.add(Message::user("msg 1"));
+        stm.add(Message::user("msg 2"));
+
+        assert!(stm.pin(1));
+        assert!(stm.is_pinned(1));
+        assert!(!stm.is_pinned(0));
+        assert_eq!(stm.pinned_count(), 1);
+    }
+
+    #[test]
+    fn test_pin_out_of_bounds() {
+        let mut stm = ShortTermMemory::new(5);
+        stm.add(Message::user("msg 0"));
+        assert!(!stm.pin(5)); // out of bounds
+    }
+
+    #[test]
+    fn test_unpin_message() {
+        let mut stm = ShortTermMemory::new(5);
+        stm.add(Message::user("msg 0"));
+        stm.add(Message::user("msg 1"));
+
+        stm.pin(0);
+        assert!(stm.is_pinned(0));
+        assert!(stm.unpin(0));
+        assert!(!stm.is_pinned(0));
+    }
+
+    #[test]
+    fn test_pinned_survives_compression() {
+        let mut stm = ShortTermMemory::new(3);
+        // Add enough messages to trigger compression
+        stm.add(Message::user("old 0"));
+        stm.add(Message::user("old 1"));
+        stm.add(Message::user("important pinned"));
+        stm.add(Message::user("msg 3"));
+        stm.add(Message::user("msg 4"));
+        stm.add(Message::user("msg 5"));
+
+        // Pin the third message (index 2)
+        stm.pin(2);
+        assert!(stm.needs_compression());
+
+        let removed = stm.compress("Summary of old messages".to_string());
+        // The pinned message should be preserved
+        assert!(removed < 3); // Not all 3 were removed because one was pinned
+
+        // The pinned message should still be in the window
+        let msgs = stm.to_messages();
+        let has_pinned = msgs
+            .iter()
+            .any(|m| matches!(&m.content, Content::Text { text } if text == "important pinned"));
+        assert!(has_pinned, "Pinned message should survive compression");
+    }
+
+    #[test]
+    fn test_clear_resets_pins() {
+        let mut stm = ShortTermMemory::new(5);
+        stm.add(Message::user("msg 0"));
+        stm.pin(0);
+        assert_eq!(stm.pinned_count(), 1);
+
+        stm.clear();
+        assert_eq!(stm.pinned_count(), 0);
+    }
+
+    // --- Context Breakdown tests ---
+
+    #[test]
+    fn test_context_breakdown() {
+        let mut memory = MemorySystem::new(10);
+        memory.add_message(Message::user("hello world"));
+        memory.add_message(Message::assistant("hi there!"));
+
+        let ctx = memory.context_breakdown(8000);
+        assert!(ctx.message_tokens > 0);
+        assert_eq!(ctx.message_count, 2);
+        assert_eq!(ctx.context_window, 8000);
+        assert!(ctx.remaining_tokens > 0);
+        assert!(!ctx.has_summary);
+        assert_eq!(ctx.pinned_count, 0);
+    }
+
+    #[test]
+    fn test_context_breakdown_ratio() {
+        let ctx = ContextBreakdown {
+            total_tokens: 4000,
+            context_window: 8000,
+            ..Default::default()
+        };
+        assert!((ctx.usage_ratio() - 0.5).abs() < 0.01);
+        assert!(!ctx.is_warning());
+
+        let ctx_high = ContextBreakdown {
+            total_tokens: 7000,
+            context_window: 8000,
+            ..Default::default()
+        };
+        assert!(ctx_high.is_warning());
+    }
+
+    #[test]
+    fn test_pin_message_via_memory_system() {
+        let mut memory = MemorySystem::new(10);
+        memory.add_message(Message::user("msg 0"));
+        memory.add_message(Message::user("msg 1"));
+
+        assert!(memory.pin_message(0));
+        assert!(memory.short_term.is_pinned(0));
     }
 
     // --- Memory Flusher tests ---
