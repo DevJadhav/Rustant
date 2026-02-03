@@ -196,11 +196,26 @@ async fn test_safety_denies_unknown_tool() {
 async fn test_context_compression_during_task() {
     let provider = Arc::new(MockLlmProvider::new());
 
-    // Create enough tool call iterations to trigger compression
-    // Default window_size is 12, compression at 2x = 24 messages
-    // Each iteration adds ~2 messages (tool call + tool result)
-    // With user message + each iteration, we need many iterations
-    for _ in 0..14 {
+    // Create enough tool call iterations to trigger compression.
+    // Default window_size is 12, compression at 2x = 24 messages.
+    // Each iteration adds ~2 messages (assistant tool_call + tool_result).
+    // After 12 tool iterations: 1 (user) + 24 (12*2) = 25 >= 24, triggers compression.
+    // The LLM-based ContextSummarizer consumes one provider response when
+    // compression triggers, so we insert a text response at position 12.
+    //
+    // Queue order: 12 tool calls, 1 summarizer text, 2 tool calls, 1 final text
+    // = 16 total responses, 15 agent iterations (14 tool + 1 text).
+    for _ in 0..12 {
+        provider.queue_response(MockLlmProvider::tool_call_response(
+            "echo",
+            serde_json::json!({"text": "iteration"}),
+        ));
+    }
+    // Response consumed by ContextSummarizer when compression triggers
+    provider.queue_response(MockLlmProvider::text_response(
+        "Summary of previous context.",
+    ));
+    for _ in 0..2 {
         provider.queue_response(MockLlmProvider::tool_call_response(
             "echo",
             serde_json::json!({"text": "iteration"}),

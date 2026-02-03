@@ -1,7 +1,8 @@
 //! REPL (Read-Eval-Print Loop) for interactive and single-task modes.
 
-use rustant_core::safety::ActionRequest;
-use rustant_core::types::{AgentStatus, RiskLevel, ToolOutput};
+use rustant_core::explanation::DecisionExplanation;
+use rustant_core::safety::{ActionRequest, ApprovalDecision};
+use rustant_core::types::{AgentStatus, CostEstimate, RiskLevel, TokenUsage, ToolOutput};
 use rustant_core::{Agent, AgentCallback, AgentConfig, MockLlmProvider, RegisteredTool};
 use rustant_tools::register_builtin_tools;
 use rustant_tools::registry::ToolRegistry;
@@ -23,21 +24,45 @@ impl AgentCallback for CliCallback {
         let _ = io::stdout().flush();
     }
 
-    async fn request_approval(&self, action: &ActionRequest) -> bool {
+    async fn request_approval(&self, action: &ActionRequest) -> ApprovalDecision {
         println!(
             "\n\x1b[33m[Approval Required]\x1b[0m {} (risk: {})",
             action.description, action.risk_level
         );
-        print!("  [y]es / [n]o > ");
+
+        // Show rich context if available
+        if let Some(ref reasoning) = action.approval_context.reasoning {
+            println!("  \x1b[90mReason:\x1b[0m {}", reasoning);
+        }
+        for consequence in &action.approval_context.consequences {
+            println!("  \x1b[90mConsequence:\x1b[0m {}", consequence);
+        }
+        if let Some(ref rev) = action.approval_context.reversibility {
+            let rev_label = if rev.is_reversible {
+                "\x1b[32mreversible\x1b[0m"
+            } else {
+                "\x1b[31mirreversible\x1b[0m"
+            };
+            print!("  \x1b[90mReversible:\x1b[0m {}", rev_label);
+            if let Some(ref desc) = rev.undo_description {
+                print!(" ({})", desc);
+            }
+            println!();
+        }
+
+        print!("  [y]es / [n]o / [a]pprove all similar > ");
         let _ = io::stdout().flush();
 
         let stdin = io::stdin();
         let mut line = String::new();
         if stdin.lock().read_line(&mut line).is_ok() {
-            let answer = line.trim().to_lowercase();
-            matches!(answer.as_str(), "y" | "yes")
+            match line.trim().to_lowercase().as_str() {
+                "y" | "yes" => ApprovalDecision::Approve,
+                "a" | "all" => ApprovalDecision::ApproveAllSimilar,
+                _ => ApprovalDecision::Deny,
+            }
         } else {
-            false
+            ApprovalDecision::Deny
         }
     }
 
@@ -63,6 +88,48 @@ impl AgentCallback for CliCallback {
             AgentStatus::Executing => {}
             AgentStatus::Complete => println!("\x1b[90m  done.\x1b[0m"),
             _ => {}
+        }
+        let _ = io::stdout().flush();
+    }
+
+    async fn on_usage_update(&self, usage: &TokenUsage, cost: &CostEstimate) {
+        let input = usage.input_tokens;
+        let output = usage.output_tokens;
+        let total_cost = cost.total();
+        print!(
+            "\r\x1b[90m  [tokens: {}/{} | cost: ${:.4}]\x1b[0m",
+            input, output, total_cost
+        );
+        let _ = io::stdout().flush();
+    }
+
+    async fn on_decision_explanation(&self, explanation: &DecisionExplanation) {
+        let tool = match &explanation.decision_type {
+            rustant_core::explanation::DecisionType::ToolSelection { selected_tool } => {
+                selected_tool.as_str()
+            }
+            _ => "decision",
+        };
+        print!(
+            "\n\x1b[90m  [why: {} | confidence: {:.0}%",
+            tool,
+            explanation.confidence * 100.0
+        );
+        if !explanation.reasoning_chain.is_empty() {
+            print!(" | {}", explanation.reasoning_chain[0].description);
+        }
+        println!("]\x1b[0m");
+        let _ = io::stdout().flush();
+    }
+
+    async fn on_budget_warning(&self, message: &str, severity: rustant_core::BudgetSeverity) {
+        match severity {
+            rustant_core::BudgetSeverity::Warning => {
+                println!("\x1b[33m  [Budget Warning] {}\x1b[0m", message);
+            }
+            rustant_core::BudgetSeverity::Exceeded => {
+                println!("\x1b[31m  [Budget Exceeded] {}\x1b[0m", message);
+            }
         }
         let _ = io::stdout().flush();
     }
@@ -129,7 +196,12 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
 
         // Handle commands
         if input.starts_with('/') {
-            match input {
+            let parts: Vec<&str> = input.splitn(3, ' ').collect();
+            let cmd = parts[0];
+            let arg1 = parts.get(1).copied().unwrap_or("");
+            let arg2 = parts.get(2).copied().unwrap_or("");
+
+            match cmd {
                 "/quit" | "/exit" | "/q" => {
                     println!("Goodbye!");
                     break;
@@ -160,6 +232,28 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     for def in &defs {
                         println!("  - {}: {}", def.name, def.description);
                     }
+                    continue;
+                }
+                "/setup" => {
+                    if let Err(e) = crate::setup::run_setup(&workspace).await {
+                        println!("Setup failed: {}", e);
+                    }
+                    continue;
+                }
+                "/audit" => {
+                    handle_audit_command(arg1, arg2, &agent);
+                    continue;
+                }
+                "/session" => {
+                    handle_session_command(arg1, arg2, &mut agent, &workspace);
+                    continue;
+                }
+                "/safety" => {
+                    handle_safety_command(&agent);
+                    continue;
+                }
+                "/memory" => {
+                    handle_memory_command(&agent);
                     continue;
                 }
                 _ => {
@@ -402,15 +496,177 @@ fn tool_risk_level(name: &str) -> RiskLevel {
     }
 }
 
+/// Handle `/audit` subcommands.
+fn handle_audit_command(sub: &str, _arg: &str, agent: &Agent) {
+    match sub {
+        "show" | "" => {
+            let n: usize = _arg.parse().unwrap_or(10);
+            let log = agent.safety().audit_log();
+            if log.is_empty() {
+                println!("No audit entries recorded yet.");
+                return;
+            }
+            let start = log.len().saturating_sub(n);
+            println!("Audit log (last {}):", log.len().min(n));
+            for entry in log.iter().skip(start) {
+                let ts = entry.timestamp.format("%H:%M:%S");
+                let desc = match &entry.event {
+                    rustant_core::safety::AuditEvent::ActionRequested {
+                        tool, risk_level, ..
+                    } => format!("REQUESTED {} ({})", tool, risk_level),
+                    rustant_core::safety::AuditEvent::ActionApproved { tool } => {
+                        format!("APPROVED  {}", tool)
+                    }
+                    rustant_core::safety::AuditEvent::ActionDenied { tool, reason } => {
+                        format!("DENIED    {} ({})", tool, reason)
+                    }
+                    rustant_core::safety::AuditEvent::ActionExecuted {
+                        tool,
+                        success,
+                        duration_ms,
+                    } => {
+                        let status = if *success { "ok" } else { "FAIL" };
+                        format!("EXECUTED  {} [{}] {}ms", tool, status, duration_ms)
+                    }
+                    rustant_core::safety::AuditEvent::ApprovalRequested { tool, .. } => {
+                        format!("APPROVAL? {}", tool)
+                    }
+                    rustant_core::safety::AuditEvent::ApprovalDecision { tool, approved } => {
+                        let decision = if *approved { "yes" } else { "no" };
+                        format!("DECISION  {} -> {}", tool, decision)
+                    }
+                };
+                println!("  [{}] {}", ts, desc);
+            }
+        }
+        "verify" => {
+            println!("Merkle chain verification is available for persisted audit stores.");
+            println!(
+                "Session audit log has {} entries.",
+                agent.safety().audit_log().len()
+            );
+        }
+        _ => {
+            println!("Usage: /audit show [n] | /audit verify");
+        }
+    }
+}
+
+/// Handle `/session` subcommands.
+fn handle_session_command(sub: &str, name: &str, agent: &mut Agent, workspace: &Path) {
+    let sessions_dir = workspace.join(".rustant").join("sessions");
+    match sub {
+        "save" => {
+            let session_name = if name.is_empty() {
+                chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string()
+            } else {
+                name.to_string()
+            };
+            let _ = std::fs::create_dir_all(&sessions_dir);
+            let path = sessions_dir.join(format!("{}.json", session_name));
+            match agent.memory().save_session(&path) {
+                Ok(()) => println!("Session saved to {}", path.display()),
+                Err(e) => println!("Failed to save session: {}", e),
+            }
+        }
+        "load" => {
+            if name.is_empty() {
+                println!("Usage: /session load <name>");
+                return;
+            }
+            let path = sessions_dir.join(format!("{}.json", name));
+            match rustant_core::memory::MemorySystem::load_session(&path) {
+                Ok(mem) => {
+                    *agent.memory_mut() = mem;
+                    println!("Session '{}' loaded.", name);
+                }
+                Err(e) => println!("Failed to load session: {}", e),
+            }
+        }
+        "list" => {
+            if !sessions_dir.exists() {
+                println!("No saved sessions found.");
+                return;
+            }
+            let mut entries: Vec<_> = std::fs::read_dir(&sessions_dir)
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
+                .collect();
+            if entries.is_empty() {
+                println!("No saved sessions found.");
+                return;
+            }
+            entries.sort_by_key(|e| e.file_name());
+            println!("Saved sessions:");
+            for entry in &entries {
+                let name = entry
+                    .path()
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                println!("  - {} ({} bytes)", name, size);
+            }
+        }
+        _ => {
+            println!("Usage: /session save [name] | /session load <name> | /session list");
+        }
+    }
+}
+
+/// Handle `/safety` command.
+fn handle_safety_command(agent: &Agent) {
+    let safety = agent.safety();
+    println!("Safety Configuration:");
+    println!("  Approval mode: {}", safety.approval_mode());
+    println!("  Max iterations: {}", safety.max_iterations());
+    println!("  Session ID: {}", safety.session_id());
+    println!("  Audit entries: {}", safety.audit_log().len());
+}
+
+/// Handle `/memory` command.
+fn handle_memory_command(agent: &Agent) {
+    let mem = agent.memory();
+    println!("Memory System Stats:");
+    println!("  Working memory:");
+    println!(
+        "    Goal: {}",
+        mem.working.current_goal.as_deref().unwrap_or("(none)")
+    );
+    println!("    Sub-tasks: {}", mem.working.sub_tasks.len());
+    println!("    Active files: {}", mem.working.active_files.len());
+    println!("    Scratchpad entries: {}", mem.working.scratchpad.len());
+    println!("  Short-term memory:");
+    println!("    Messages: {}", mem.short_term.len());
+    println!("    Total seen: {}", mem.short_term.total_messages_seen());
+    println!("    Window size: {}", mem.short_term.window_size());
+    println!("    Has summary: {}", mem.short_term.summary().is_some());
+    println!("  Long-term memory:");
+    println!("    Facts: {}", mem.long_term.facts.len());
+    println!("    Corrections: {}", mem.long_term.corrections.len());
+    println!("    Preferences: {}", mem.long_term.preferences.len());
+}
+
 fn print_help() {
     println!(
         r#"
 Available commands:
-  /help, /?     Show this help message
-  /quit, /exit  Exit Rustant
-  /clear        Clear the screen
-  /cost         Show token usage and cost
-  /tools        List available tools
+  /help, /?            Show this help message
+  /quit, /exit         Exit Rustant
+  /clear               Clear the screen
+  /cost                Show token usage and cost
+  /tools               List available tools
+  /setup               Re-run provider setup wizard
+  /safety              Show current safety mode and stats
+  /memory              Show memory system stats
+  /audit show [n]      Show last N audit entries (default: 10)
+  /audit verify        Verify Merkle chain integrity
+  /session save [name] Save current session
+  /session load [name] Load a saved session
+  /session list        List saved sessions
 
 Input:
   Type your task or question and press Enter.

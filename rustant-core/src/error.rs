@@ -185,6 +185,9 @@ pub enum AgentError {
 
     #[error("Invalid state transition: {from} -> {to}")]
     InvalidStateTransition { from: String, to: String },
+
+    #[error("Budget exceeded: {message}")]
+    BudgetExceeded { message: String },
 }
 
 /// Errors from the channel system.

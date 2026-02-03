@@ -36,7 +36,9 @@ pub mod voice;
 pub mod workflow;
 
 // Re-export commonly used types at the crate root.
-pub use agent::{Agent, AgentCallback, AgentMessage, NoOpCallback, RegisteredTool, TaskResult};
+pub use agent::{
+    Agent, AgentCallback, AgentMessage, BudgetSeverity, NoOpCallback, RegisteredTool, TaskResult,
+};
 pub use brain::{Brain, LlmProvider, MockLlmProvider, TokenCounter};
 #[cfg(feature = "browser")]
 pub use browser::ChromiumCdpClient;
@@ -50,7 +52,8 @@ pub use channels::{
     TeamsChannel, TeamsConfig, ThreadId, WebhookChannel, WebhookConfig,
 };
 pub use config::MultiAgentConfig;
-pub use config::{AgentConfig, ApprovalMode};
+pub use config::{config_exists, AgentConfig, ApprovalMode, KnowledgeConfig};
+
 pub use credentials::{
     CredentialError, CredentialStore, InMemoryCredentialStore, KeyringCredentialStore,
 };
@@ -66,7 +69,9 @@ pub use gateway::{
 pub use injection::{
     InjectionDetector, InjectionScanResult, InjectionType, Severity as InjectionSeverity,
 };
-pub use memory::{MemorySystem, Session, SessionMetadata};
+pub use memory::{
+    BehavioralRule, KnowledgeDistiller, KnowledgeStore, MemorySystem, Session, SessionMetadata,
+};
 pub use merkle::{AuditNode, MerkleChain, VerificationResult};
 pub use multi::AgentStatus as MultiAgentStatus;
 pub use multi::{
@@ -83,7 +88,10 @@ pub use providers::{
     create_provider, create_provider_with_auth, CircuitBreaker, CircuitState, FailoverProvider,
     GeminiProvider, ModelInfo,
 };
-pub use safety::{ApprovalContext, ReversibilityInfo, SafetyGuardian};
+pub use safety::{
+    AdaptiveTrust, ApprovalContext, ApprovalDecision, BehavioralFingerprint, ContractEnforcer,
+    Invariant, Predicate, ResourceBounds, ReversibilityInfo, SafetyContract, SafetyGuardian,
+};
 pub use sandbox::SandboxedFs;
 pub use scheduler::{
     BackgroundJob, CronJob, CronJobConfig, CronScheduler, HeartbeatConfig, HeartbeatManager,

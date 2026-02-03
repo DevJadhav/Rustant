@@ -15,9 +15,9 @@ Rustant is an LLM-powered agent that executes complex tasks through a Think-Act-
 
 ### Core Differentiators
 
-- **Transparent Autonomy** — Every decision is logged and reviewable via Merkle-chain audit trail
+- **Transparent Autonomy** — Every tool call, safety denial, and contract violation produces a reviewable `DecisionExplanation`, logged via Merkle-chain audit trail
 - **Progressive Control** — From "suggest only" to "full autonomy with audit" across four approval modes
-- **Adaptive Context Engineering** — Three-tier memory with smart compression for long sessions
+- **Adaptive Context Engineering** — Three-tier memory with smart compression, structure-preserving fallback summarization, and cross-session learning via facts and corrections
 - **Git-Native Safety** — All file operations are reversible through automatic checkpointing
 - **Zero-Cloud Option** — Complete functionality with local LLMs (Ollama, vLLM) — no data leaves your machine
 - **Rust Performance** — Sub-millisecond tool dispatch, minimal memory footprint
@@ -89,8 +89,8 @@ rustant/
 | Component | Description |
 |-----------|-------------|
 | **Brain** | LLM provider abstraction with 6 providers, streaming, cost tracking, failover |
-| **Memory** | Three-tier system: working (task), short-term (session), long-term (persistent) |
-| **Safety Guardian** | 5-layer defense with 4 approval modes and prompt injection detection |
+| **Memory** | Three-tier system: working (task), short-term (session), long-term (persistent) with cross-session learning via facts and corrections |
+| **Safety Guardian** | 5-layer defense with 4 approval modes, prompt injection detection, typed ActionDetails, and rich approval context |
 | **Tool Registry** | Dynamic registration with JSON schema validation, timeouts, and risk levels |
 | **Agent Loop** | ReAct pattern (Think → Act → Observe) with async execution |
 | **Channels** | 13 platform integrations with unified `Channel` trait |
@@ -211,6 +211,8 @@ Additional safety layers:
 - **Merkle audit trail** — Tamper-evident, cryptographically verified execution history
 - **WASM sandboxing** — Plugin isolation via wasmi
 - **Filesystem sandboxing** — Path restrictions via cap-std
+- **Budget tracking** — Real-time budget warnings and exceeded notifications surfaced to users via CLI and TUI
+- **Decision explanations** — Every tool call, safety denial, and contract violation produces a reviewable `DecisionExplanation` with reasoning, confidence, and alternatives
 
 ## CLI Reference
 
@@ -345,7 +347,7 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting and security policy.
 cargo build --workspace
 cargo build --workspace --release
 
-# Test (1,733 tests)
+# Test (1,819 tests)
 cargo test --workspace
 
 # Lint & Format

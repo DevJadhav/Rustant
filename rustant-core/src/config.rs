@@ -63,6 +63,12 @@ pub struct AgentConfig {
     /// Optional voice and audio configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice: Option<VoiceConfig>,
+    /// Optional token budget configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<BudgetConfig>,
+    /// Optional cross-session knowledge distillation configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub knowledge: Option<KnowledgeConfig>,
 }
 
 /// Configuration for the workflow engine.
@@ -411,6 +417,9 @@ pub struct SafetyConfig {
     /// Prompt injection detection settings.
     #[serde(default)]
     pub injection_detection: InjectionDetectionConfig,
+    /// Optional adaptive trust configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adaptive_trust: Option<AdaptiveTrustConfig>,
 }
 
 /// Configuration for the prompt injection detection system.
@@ -430,6 +439,27 @@ impl Default for InjectionDetectionConfig {
             enabled: true,
             threshold: 0.5,
             scan_tool_outputs: true,
+        }
+    }
+}
+
+/// Configuration for the adaptive trust gradient system.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdaptiveTrustConfig {
+    /// Whether adaptive trust is enabled.
+    pub enabled: bool,
+    /// Number of consecutive approvals required before a tool is auto-promoted.
+    pub trust_escalation_threshold: usize,
+    /// Anomaly score [0, 1] above which trust is de-escalated.
+    pub anomaly_threshold: f64,
+}
+
+impl Default for AdaptiveTrustConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            trust_escalation_threshold: 5,
+            anomaly_threshold: 0.7,
         }
     }
 }
@@ -474,6 +504,7 @@ impl Default for SafetyConfig {
             ],
             max_iterations: 25,
             injection_detection: InjectionDetectionConfig::default(),
+            adaptive_trust: None,
         }
     }
 }
@@ -547,6 +578,55 @@ impl Default for ToolsConfig {
     }
 }
 
+/// Token budget configuration for cost control.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BudgetConfig {
+    /// Maximum cost in USD per session (0.0 = unlimited).
+    pub session_limit_usd: f64,
+    /// Maximum cost in USD per task (0.0 = unlimited).
+    pub task_limit_usd: f64,
+    /// Maximum total tokens per session (0 = unlimited).
+    pub session_token_limit: usize,
+    /// Whether to warn (false) or halt (true) when budget is exceeded.
+    pub halt_on_exceed: bool,
+}
+
+impl Default for BudgetConfig {
+    fn default() -> Self {
+        Self {
+            session_limit_usd: 0.0,
+            task_limit_usd: 0.0,
+            session_token_limit: 0,
+            halt_on_exceed: false,
+        }
+    }
+}
+
+/// Configuration for cross-session knowledge distillation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnowledgeConfig {
+    /// Whether knowledge distillation is enabled.
+    pub enabled: bool,
+    /// Maximum number of distilled rules to inject into the system prompt.
+    pub max_rules: usize,
+    /// Minimum number of corrections/facts before distillation is triggered.
+    pub min_entries_for_distillation: usize,
+    /// Path to the local knowledge store file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub knowledge_path: Option<PathBuf>,
+}
+
+impl Default for KnowledgeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_rules: 20,
+            min_entries_for_distillation: 3,
+            knowledge_path: None,
+        }
+    }
+}
+
 /// Load configuration from layered sources.
 ///
 /// Priority (highest to lowest):
@@ -586,6 +666,29 @@ pub fn load_config(
     }
 
     figment.extract().map_err(Box::new)
+}
+
+/// Check whether any Rustant configuration file exists (user-level or workspace-level).
+///
+/// Returns `true` if a config file is found at either:
+/// - `~/.config/rustant/config.toml` (user-level, via `directories` crate)
+/// - `<workspace>/.rustant/config.toml` (workspace-level)
+pub fn config_exists(workspace: Option<&Path>) -> bool {
+    // Check user-level config
+    if let Some(config_dir) = directories::ProjectDirs::from("dev", "rustant", "rustant") {
+        if config_dir.config_dir().join("config.toml").exists() {
+            return true;
+        }
+    }
+
+    // Check workspace-level config
+    if let Some(ws) = workspace {
+        if ws.join(".rustant").join("config.toml").exists() {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Update a specific channel's configuration in the workspace config file.

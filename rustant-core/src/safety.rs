@@ -12,7 +12,7 @@ use crate::injection::{InjectionDetector, InjectionScanResult, Severity as Injec
 use crate::types::RiskLevel;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -79,6 +79,17 @@ pub struct ReversibilityInfo {
     /// Time window for reversal, if applicable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub undo_window: Option<String>,
+}
+
+/// The decision from an approval request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalDecision {
+    /// Approve this single action.
+    Approve,
+    /// Deny this action.
+    Deny,
+    /// Approve this action AND all future actions with the same tool+risk level in this session.
+    ApproveAllSimilar,
 }
 
 /// An action that the agent wants to perform.
@@ -185,6 +196,451 @@ pub enum AuditEvent {
     },
 }
 
+// ---------------------------------------------------------------------------
+// Safety Contracts — Formal Verification Layer
+// ---------------------------------------------------------------------------
+
+/// A predicate that evaluates to true or false against an action context.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Predicate {
+    /// Tool name must match exactly.
+    ToolNameIs(String),
+    /// Tool name must NOT match.
+    ToolNameIsNot(String),
+    /// Risk level must be at most this value.
+    MaxRiskLevel(RiskLevel),
+    /// Argument must contain a key matching this string.
+    ArgumentContainsKey(String),
+    /// Argument must NOT contain a key matching this string.
+    ArgumentNotContainsKey(String),
+    /// Always true.
+    AlwaysTrue,
+    /// Always false.
+    AlwaysFalse,
+}
+
+impl Predicate {
+    /// Evaluate this predicate against a tool call context.
+    pub fn evaluate(
+        &self,
+        tool_name: &str,
+        risk_level: RiskLevel,
+        arguments: &serde_json::Value,
+    ) -> bool {
+        match self {
+            Predicate::ToolNameIs(name) => tool_name == name,
+            Predicate::ToolNameIsNot(name) => tool_name != name,
+            Predicate::MaxRiskLevel(max) => risk_level <= *max,
+            Predicate::ArgumentContainsKey(key) => arguments
+                .as_object()
+                .is_some_and(|obj| obj.contains_key(key)),
+            Predicate::ArgumentNotContainsKey(key) => arguments
+                .as_object()
+                .is_some_and(|obj| !obj.contains_key(key)),
+            Predicate::AlwaysTrue => true,
+            Predicate::AlwaysFalse => false,
+        }
+    }
+}
+
+/// A session-scoped invariant that must hold for every tool execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Invariant {
+    /// Human-readable description of the invariant.
+    pub description: String,
+    /// The predicate that must evaluate to true.
+    pub predicate: Predicate,
+}
+
+/// Resource bounds for a safety contract session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceBounds {
+    /// Maximum total tool calls allowed in the session.
+    pub max_tool_calls: usize,
+    /// Maximum destructive tool calls allowed.
+    pub max_destructive_calls: usize,
+    /// Maximum total cost in USD.
+    pub max_cost_usd: f64,
+}
+
+impl Default for ResourceBounds {
+    fn default() -> Self {
+        Self {
+            max_tool_calls: 0, // 0 = unlimited
+            max_destructive_calls: 0,
+            max_cost_usd: 0.0,
+        }
+    }
+}
+
+/// A safety contract defining formal constraints for a session.
+///
+/// Contracts are composed of:
+/// - **Invariants**: predicates that must hold for every tool execution
+/// - **Pre-conditions**: per-tool predicates checked before execution
+/// - **Post-conditions**: per-tool predicates checked after execution
+/// - **Resource bounds**: session-level limits on tool calls and cost
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SafetyContract {
+    /// Description of the contract.
+    pub name: String,
+    /// Invariants that must hold for ALL tool calls.
+    pub invariants: Vec<Invariant>,
+    /// Pre-conditions per tool name. Checked before execution.
+    pub pre_conditions: HashMap<String, Vec<Predicate>>,
+    /// Post-conditions per tool name. Checked after execution (success only).
+    pub post_conditions: HashMap<String, Vec<Predicate>>,
+    /// Resource bounds for the session.
+    pub resource_bounds: ResourceBounds,
+}
+
+/// The result of a contract check.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ContractCheckResult {
+    /// Contract is satisfied.
+    Satisfied,
+    /// Contract invariant was violated.
+    InvariantViolation { invariant: String },
+    /// Pre-condition was violated.
+    PreConditionViolation { tool: String, condition: String },
+    /// Resource bound was exceeded.
+    ResourceBoundExceeded { bound: String },
+}
+
+/// Runtime contract enforcer that tracks state and validates tool calls.
+#[derive(Debug, Clone)]
+pub struct ContractEnforcer {
+    contract: Option<SafetyContract>,
+    total_tool_calls: usize,
+    destructive_calls: usize,
+    total_cost: f64,
+    violations: Vec<ContractCheckResult>,
+}
+
+impl ContractEnforcer {
+    /// Create a new enforcer. If `contract` is None, all checks pass.
+    pub fn new(contract: Option<SafetyContract>) -> Self {
+        Self {
+            contract,
+            total_tool_calls: 0,
+            destructive_calls: 0,
+            total_cost: 0.0,
+            violations: Vec::new(),
+        }
+    }
+
+    /// Check pre-conditions and invariants BEFORE a tool execution.
+    ///
+    /// Returns `ContractCheckResult::Satisfied` if all checks pass.
+    pub fn check_pre(
+        &mut self,
+        tool_name: &str,
+        risk_level: RiskLevel,
+        arguments: &serde_json::Value,
+    ) -> ContractCheckResult {
+        let contract = match &self.contract {
+            Some(c) => c,
+            None => return ContractCheckResult::Satisfied,
+        };
+
+        // Check resource bounds
+        if contract.resource_bounds.max_tool_calls > 0
+            && self.total_tool_calls >= contract.resource_bounds.max_tool_calls
+        {
+            let result = ContractCheckResult::ResourceBoundExceeded {
+                bound: format!(
+                    "Max tool calls ({}) exceeded",
+                    contract.resource_bounds.max_tool_calls
+                ),
+            };
+            self.violations.push(result.clone());
+            return result;
+        }
+
+        if contract.resource_bounds.max_destructive_calls > 0
+            && risk_level == RiskLevel::Destructive
+            && self.destructive_calls >= contract.resource_bounds.max_destructive_calls
+        {
+            let result = ContractCheckResult::ResourceBoundExceeded {
+                bound: format!(
+                    "Max destructive calls ({}) exceeded",
+                    contract.resource_bounds.max_destructive_calls
+                ),
+            };
+            self.violations.push(result.clone());
+            return result;
+        }
+
+        // Check invariants
+        for invariant in &contract.invariants {
+            if !invariant
+                .predicate
+                .evaluate(tool_name, risk_level, arguments)
+            {
+                let result = ContractCheckResult::InvariantViolation {
+                    invariant: invariant.description.clone(),
+                };
+                self.violations.push(result.clone());
+                return result;
+            }
+        }
+
+        // Check per-tool pre-conditions
+        if let Some(conditions) = contract.pre_conditions.get(tool_name) {
+            for cond in conditions {
+                if !cond.evaluate(tool_name, risk_level, arguments) {
+                    let result = ContractCheckResult::PreConditionViolation {
+                        tool: tool_name.to_string(),
+                        condition: format!("{:?}", cond),
+                    };
+                    self.violations.push(result.clone());
+                    return result;
+                }
+            }
+        }
+
+        ContractCheckResult::Satisfied
+    }
+
+    /// Record a completed tool call (updates resource tracking).
+    pub fn record_execution(&mut self, risk_level: RiskLevel, cost: f64) {
+        self.total_tool_calls += 1;
+        if risk_level == RiskLevel::Destructive {
+            self.destructive_calls += 1;
+        }
+        self.total_cost += cost;
+    }
+
+    /// Check if resource cost bound is violated.
+    pub fn check_cost_bound(&self) -> ContractCheckResult {
+        if let Some(ref contract) = self.contract {
+            if contract.resource_bounds.max_cost_usd > 0.0
+                && self.total_cost > contract.resource_bounds.max_cost_usd
+            {
+                return ContractCheckResult::ResourceBoundExceeded {
+                    bound: format!(
+                        "Max cost ${:.4} exceeded (current: ${:.4})",
+                        contract.resource_bounds.max_cost_usd, self.total_cost
+                    ),
+                };
+            }
+        }
+        ContractCheckResult::Satisfied
+    }
+
+    /// Get the list of violations recorded during this session.
+    pub fn violations(&self) -> &[ContractCheckResult] {
+        &self.violations
+    }
+
+    /// Whether any contract is active.
+    pub fn has_contract(&self) -> bool {
+        self.contract.is_some()
+    }
+
+    /// Get the contract, if any.
+    pub fn contract(&self) -> Option<&SafetyContract> {
+        self.contract.as_ref()
+    }
+
+    /// Get total tool calls tracked.
+    pub fn total_tool_calls(&self) -> usize {
+        self.total_tool_calls
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Adaptive Trust Gradient — Behavioral Fingerprinting
+// ---------------------------------------------------------------------------
+
+/// Rolling statistics for a single tool, used for behavioral fingerprinting.
+#[derive(Debug, Clone, Default)]
+pub struct ToolStats {
+    /// Total invocation count this session.
+    pub call_count: usize,
+    /// Number of successful executions.
+    pub success_count: usize,
+    /// Number of failed executions.
+    pub error_count: usize,
+    /// Number of times this tool was approved by the user.
+    pub approval_count: usize,
+    /// Number of times this tool was denied by the user.
+    pub denial_count: usize,
+}
+
+impl ToolStats {
+    /// Error rate as a fraction [0, 1].
+    pub fn error_rate(&self) -> f64 {
+        if self.call_count == 0 {
+            0.0
+        } else {
+            self.error_count as f64 / self.call_count as f64
+        }
+    }
+
+    /// Approval rate as a fraction [0, 1]. Returns 1.0 if never asked.
+    pub fn approval_rate(&self) -> f64 {
+        let total = self.approval_count + self.denial_count;
+        if total == 0 {
+            1.0
+        } else {
+            self.approval_count as f64 / total as f64
+        }
+    }
+}
+
+/// Behavioral fingerprint of the current session, tracking rolling statistics
+/// across all tool invocations for anomaly detection and trust adjustment.
+#[derive(Debug, Clone, Default)]
+pub struct BehavioralFingerprint {
+    /// Per-tool rolling statistics.
+    pub tool_stats: HashMap<String, ToolStats>,
+    /// Distribution of risk levels seen (count per level).
+    pub risk_distribution: HashMap<RiskLevel, usize>,
+    /// Total tool calls in the session.
+    pub total_calls: usize,
+    /// Consecutive error count (resets on success).
+    pub consecutive_errors: usize,
+}
+
+impl BehavioralFingerprint {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record a tool call outcome.
+    pub fn record_call(&mut self, tool_name: &str, risk_level: RiskLevel, success: bool) {
+        self.total_calls += 1;
+        *self.risk_distribution.entry(risk_level).or_insert(0) += 1;
+
+        let stats = self.tool_stats.entry(tool_name.to_string()).or_default();
+        stats.call_count += 1;
+        if success {
+            stats.success_count += 1;
+            self.consecutive_errors = 0;
+        } else {
+            stats.error_count += 1;
+            self.consecutive_errors += 1;
+        }
+    }
+
+    /// Record an approval decision for a tool.
+    pub fn record_approval(&mut self, tool_name: &str, approved: bool) {
+        let stats = self.tool_stats.entry(tool_name.to_string()).or_default();
+        if approved {
+            stats.approval_count += 1;
+        } else {
+            stats.denial_count += 1;
+        }
+    }
+
+    /// Compute the overall anomaly score [0, 1]. Higher = more anomalous.
+    ///
+    /// Factors:
+    /// - High consecutive error count
+    /// - Sudden shift toward higher risk levels
+    /// - High denial rate across tools
+    pub fn anomaly_score(&self) -> f64 {
+        let mut score = 0.0;
+
+        // Consecutive errors: 3+ errors is concerning
+        if self.consecutive_errors >= 3 {
+            score += 0.3 * (self.consecutive_errors as f64 / 10.0).min(1.0);
+        }
+
+        // High-risk concentration: if >50% of calls are Execute/Destructive
+        if self.total_calls > 0 {
+            let high_risk = self
+                .risk_distribution
+                .iter()
+                .filter(|(r, _)| matches!(r, RiskLevel::Execute | RiskLevel::Destructive))
+                .map(|(_, c)| c)
+                .sum::<usize>();
+            let ratio = high_risk as f64 / self.total_calls as f64;
+            if ratio > 0.5 {
+                score += 0.3 * ratio;
+            }
+        }
+
+        // High denial rate across all tools
+        let total_approvals: usize = self.tool_stats.values().map(|s| s.approval_count).sum();
+        let total_denials: usize = self.tool_stats.values().map(|s| s.denial_count).sum();
+        let total_decisions = total_approvals + total_denials;
+        if total_decisions >= 3 && total_denials > total_approvals {
+            score += 0.4;
+        }
+
+        score.min(1.0)
+    }
+
+    /// Whether a specific tool has been repeatedly approved (trust escalation candidate).
+    pub fn is_trusted_tool(&self, tool_name: &str, min_approvals: usize) -> bool {
+        self.tool_stats.get(tool_name).is_some_and(|s| {
+            s.approval_count >= min_approvals && s.denial_count == 0 && s.error_rate() < 0.1
+        })
+    }
+}
+
+/// Adaptive trust engine that adjusts permission requirements based on
+/// session behavior. Integrates with `SafetyGuardian::check_permission`.
+#[derive(Debug, Clone)]
+pub struct AdaptiveTrust {
+    /// Minimum approvals before a tool can be auto-promoted.
+    pub trust_escalation_threshold: usize,
+    /// Anomaly score above which trust is de-escalated.
+    pub anomaly_threshold: f64,
+    /// Whether adaptive trust is enabled.
+    pub enabled: bool,
+    /// The behavioral fingerprint for this session.
+    pub fingerprint: BehavioralFingerprint,
+}
+
+impl AdaptiveTrust {
+    pub fn new(config: Option<&crate::config::AdaptiveTrustConfig>) -> Self {
+        match config {
+            Some(cfg) if cfg.enabled => Self {
+                trust_escalation_threshold: cfg.trust_escalation_threshold,
+                anomaly_threshold: cfg.anomaly_threshold,
+                enabled: true,
+                fingerprint: BehavioralFingerprint::new(),
+            },
+            _ => Self {
+                trust_escalation_threshold: 5,
+                anomaly_threshold: 0.7,
+                enabled: false,
+                fingerprint: BehavioralFingerprint::new(),
+            },
+        }
+    }
+
+    /// Check if adaptive trust should auto-approve a tool (trust escalation).
+    ///
+    /// Returns `true` if the tool has been approved enough times to skip
+    /// future approval prompts for this session.
+    pub fn should_auto_approve(&self, tool_name: &str) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        // Don't escalate if anomaly is high
+        if self.fingerprint.anomaly_score() > self.anomaly_threshold {
+            return false;
+        }
+        self.fingerprint
+            .is_trusted_tool(tool_name, self.trust_escalation_threshold)
+    }
+
+    /// Check if adaptive trust should force an approval prompt (de-escalation).
+    ///
+    /// Returns `true` if the session is behaving anomalously and even
+    /// normally-auto-approved actions should require human review.
+    pub fn should_force_approval(&self) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        self.fingerprint.anomaly_score() > self.anomaly_threshold
+    }
+}
+
 /// The Safety Guardian enforcing all safety policies.
 pub struct SafetyGuardian {
     config: SafetyConfig,
@@ -192,6 +648,12 @@ pub struct SafetyGuardian {
     audit_log: VecDeque<AuditEntry>,
     max_audit_entries: usize,
     injection_detector: Option<InjectionDetector>,
+    /// Session-scoped allowlist: tool+risk combinations that were approved via "approve all similar".
+    session_allowlist: HashSet<(String, RiskLevel)>,
+    /// Adaptive trust engine for dynamic permission adjustment.
+    adaptive_trust: AdaptiveTrust,
+    /// Contract enforcer for formal safety verification.
+    contract_enforcer: ContractEnforcer,
 }
 
 impl SafetyGuardian {
@@ -203,12 +665,17 @@ impl SafetyGuardian {
         } else {
             None
         };
+        let adaptive_trust = AdaptiveTrust::new(config.adaptive_trust.as_ref());
+        let contract_enforcer = ContractEnforcer::new(None);
         Self {
             config,
             session_id: Uuid::new_v4(),
             audit_log: VecDeque::new(),
             max_audit_entries: 10_000,
             injection_detector,
+            session_allowlist: HashSet::new(),
+            adaptive_trust,
+            contract_enforcer,
         }
     }
 
@@ -262,6 +729,42 @@ impl SafetyGuardian {
                     return PermissionResult::RequiresApproval { context };
                 }
             }
+        }
+
+        // Layer 1.9: Check session-scoped allowlist ("approve all similar")
+        if self
+            .session_allowlist
+            .contains(&(action.tool_name.clone(), action.risk_level))
+        {
+            self.log_event(AuditEvent::ActionApproved {
+                tool: action.tool_name.clone(),
+            });
+            return PermissionResult::Allowed;
+        }
+
+        // Layer 1.95: Adaptive trust — de-escalation override
+        // If anomaly score is high, force approval even for normally-allowed actions
+        if self.adaptive_trust.should_force_approval() {
+            let context = format!(
+                "{} (risk: {}) — adaptive trust de-escalated due to anomalous session behavior (anomaly score: {:.2})",
+                action.description,
+                action.risk_level,
+                self.adaptive_trust.fingerprint.anomaly_score()
+            );
+            self.log_event(AuditEvent::ApprovalRequested {
+                tool: action.tool_name.clone(),
+                context: context.clone(),
+            });
+            return PermissionResult::RequiresApproval { context };
+        }
+
+        // Layer 1.96: Adaptive trust — escalation
+        // If tool has been repeatedly approved with no issues, auto-approve
+        if self.adaptive_trust.should_auto_approve(&action.tool_name) {
+            self.log_event(AuditEvent::ActionApproved {
+                tool: action.tool_name.clone(),
+            });
+            return PermissionResult::Allowed;
         }
 
         // Layer 2: Check based on approval mode and risk level
@@ -478,12 +981,23 @@ impl SafetyGuardian {
         });
     }
 
+    /// Record a tool execution outcome in the behavioral fingerprint.
+    pub fn record_behavioral_outcome(&mut self, tool: &str, risk_level: RiskLevel, success: bool) {
+        self.adaptive_trust
+            .fingerprint
+            .record_call(tool, risk_level, success);
+    }
+
     /// Record a user approval decision.
     pub fn log_approval_decision(&mut self, tool: &str, approved: bool) {
         self.log_event(AuditEvent::ApprovalDecision {
             tool: tool.to_string(),
             approved,
         });
+        // Feed into behavioral fingerprint
+        self.adaptive_trust
+            .fingerprint
+            .record_approval(tool, approved);
     }
 
     /// Get the audit log entries.
@@ -504,6 +1018,43 @@ impl SafetyGuardian {
     /// Get the maximum iterations allowed.
     pub fn max_iterations(&self) -> usize {
         self.config.max_iterations
+    }
+
+    /// Add a tool+risk combination to the session-scoped allowlist.
+    /// Future actions with the same tool name and risk level will be auto-approved.
+    pub fn add_session_allowlist(&mut self, tool_name: String, risk_level: RiskLevel) {
+        self.session_allowlist.insert((tool_name, risk_level));
+    }
+
+    /// Check if a tool+risk combination is in the session allowlist.
+    pub fn is_session_allowed(&self, tool_name: &str, risk_level: RiskLevel) -> bool {
+        self.session_allowlist
+            .contains(&(tool_name.to_string(), risk_level))
+    }
+
+    /// Get the adaptive trust state (for diagnostics/REPL).
+    pub fn adaptive_trust(&self) -> &AdaptiveTrust {
+        &self.adaptive_trust
+    }
+
+    /// Get the behavioral fingerprint (for diagnostics/REPL).
+    pub fn fingerprint(&self) -> &BehavioralFingerprint {
+        &self.adaptive_trust.fingerprint
+    }
+
+    /// Set an active safety contract for this session.
+    pub fn set_contract(&mut self, contract: SafetyContract) {
+        self.contract_enforcer = ContractEnforcer::new(Some(contract));
+    }
+
+    /// Get the contract enforcer (for pre/post checks and diagnostics).
+    pub fn contract_enforcer(&self) -> &ContractEnforcer {
+        &self.contract_enforcer
+    }
+
+    /// Get a mutable reference to the contract enforcer.
+    pub fn contract_enforcer_mut(&mut self) -> &mut ContractEnforcer {
+        &mut self.contract_enforcer
     }
 
     /// Create an action request helper.
@@ -1167,5 +1718,321 @@ mod tests {
         let action: ActionRequest = serde_json::from_value(json).unwrap();
         assert!(action.approval_context.reasoning.is_none());
         assert!(action.approval_context.alternatives.is_empty());
+    }
+
+    // --- Behavioral Fingerprint & Adaptive Trust Tests ---
+
+    #[test]
+    fn test_behavioral_fingerprint_empty() {
+        let fp = BehavioralFingerprint::new();
+        assert_eq!(fp.total_calls, 0);
+        assert_eq!(fp.consecutive_errors, 0);
+        assert!(fp.anomaly_score() < 0.01);
+    }
+
+    #[test]
+    fn test_behavioral_fingerprint_records_calls() {
+        let mut fp = BehavioralFingerprint::new();
+        fp.record_call("echo", RiskLevel::ReadOnly, true);
+        fp.record_call("echo", RiskLevel::ReadOnly, true);
+        fp.record_call("file_write", RiskLevel::Write, true);
+
+        assert_eq!(fp.total_calls, 3);
+        assert_eq!(fp.consecutive_errors, 0);
+        let stats = fp.tool_stats.get("echo").unwrap();
+        assert_eq!(stats.call_count, 2);
+        assert_eq!(stats.success_count, 2);
+    }
+
+    #[test]
+    fn test_behavioral_fingerprint_error_tracking() {
+        let mut fp = BehavioralFingerprint::new();
+        fp.record_call("shell_exec", RiskLevel::Execute, false);
+        fp.record_call("shell_exec", RiskLevel::Execute, false);
+        fp.record_call("shell_exec", RiskLevel::Execute, false);
+
+        assert_eq!(fp.consecutive_errors, 3);
+        let stats = fp.tool_stats.get("shell_exec").unwrap();
+        assert!((stats.error_rate() - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_behavioral_fingerprint_consecutive_errors_reset() {
+        let mut fp = BehavioralFingerprint::new();
+        fp.record_call("echo", RiskLevel::ReadOnly, false);
+        fp.record_call("echo", RiskLevel::ReadOnly, false);
+        assert_eq!(fp.consecutive_errors, 2);
+        fp.record_call("echo", RiskLevel::ReadOnly, true);
+        assert_eq!(fp.consecutive_errors, 0);
+    }
+
+    #[test]
+    fn test_behavioral_fingerprint_anomaly_score_increases() {
+        let mut fp = BehavioralFingerprint::new();
+        // Many consecutive errors increase anomaly
+        for _ in 0..10 {
+            fp.record_call("shell_exec", RiskLevel::Execute, false);
+        }
+        assert!(fp.anomaly_score() > 0.1);
+    }
+
+    #[test]
+    fn test_behavioral_fingerprint_trusted_tool() {
+        let mut fp = BehavioralFingerprint::new();
+        for _ in 0..5 {
+            fp.record_approval("echo", true);
+            fp.record_call("echo", RiskLevel::ReadOnly, true);
+        }
+        assert!(fp.is_trusted_tool("echo", 5));
+        assert!(!fp.is_trusted_tool("echo", 6)); // threshold not met
+    }
+
+    #[test]
+    fn test_behavioral_fingerprint_not_trusted_after_denial() {
+        let mut fp = BehavioralFingerprint::new();
+        for _ in 0..5 {
+            fp.record_approval("shell_exec", true);
+            fp.record_call("shell_exec", RiskLevel::Execute, true);
+        }
+        fp.record_approval("shell_exec", false); // one denial
+        assert!(!fp.is_trusted_tool("shell_exec", 5));
+    }
+
+    #[test]
+    fn test_adaptive_trust_disabled() {
+        let trust = AdaptiveTrust::new(None);
+        assert!(!trust.enabled);
+        assert!(!trust.should_auto_approve("echo"));
+        assert!(!trust.should_force_approval());
+    }
+
+    #[test]
+    fn test_adaptive_trust_escalation() {
+        let config = crate::config::AdaptiveTrustConfig {
+            enabled: true,
+            trust_escalation_threshold: 3,
+            anomaly_threshold: 0.7,
+        };
+        let mut trust = AdaptiveTrust::new(Some(&config));
+
+        // Not yet trusted
+        assert!(!trust.should_auto_approve("echo"));
+
+        // Build trust
+        for _ in 0..3 {
+            trust.fingerprint.record_approval("echo", true);
+            trust
+                .fingerprint
+                .record_call("echo", RiskLevel::ReadOnly, true);
+        }
+        assert!(trust.should_auto_approve("echo"));
+    }
+
+    #[test]
+    fn test_adaptive_trust_de_escalation() {
+        let config = crate::config::AdaptiveTrustConfig {
+            enabled: true,
+            trust_escalation_threshold: 3,
+            anomaly_threshold: 0.3,
+        };
+        let mut trust = AdaptiveTrust::new(Some(&config));
+
+        // Build trust
+        for _ in 0..3 {
+            trust.fingerprint.record_approval("echo", true);
+            trust
+                .fingerprint
+                .record_call("echo", RiskLevel::ReadOnly, true);
+        }
+
+        // Now trigger anomalous behavior (many errors + denials)
+        for _ in 0..10 {
+            trust
+                .fingerprint
+                .record_call("danger", RiskLevel::Destructive, false);
+        }
+        // 4 denials vs 3 approvals
+        trust.fingerprint.record_approval("danger", false);
+        trust.fingerprint.record_approval("danger", false);
+        trust.fingerprint.record_approval("danger", false);
+        trust.fingerprint.record_approval("danger", false);
+
+        // Should force approval now even for previously trusted tools
+        assert!(trust.should_force_approval());
+        // Auto-approve blocked due to anomaly
+        assert!(!trust.should_auto_approve("echo"));
+    }
+
+    #[test]
+    fn test_guardian_records_behavioral_outcome() {
+        let mut guardian = default_guardian();
+        guardian.record_behavioral_outcome("echo", RiskLevel::ReadOnly, true);
+        guardian.record_behavioral_outcome("echo", RiskLevel::ReadOnly, true);
+
+        let stats = guardian.fingerprint().tool_stats.get("echo").unwrap();
+        assert_eq!(stats.call_count, 2);
+        assert_eq!(stats.success_count, 2);
+    }
+
+    // --- Safety Contract Tests ---
+
+    #[test]
+    fn test_predicate_tool_name_is() {
+        let pred = Predicate::ToolNameIs("echo".into());
+        assert!(pred.evaluate("echo", RiskLevel::ReadOnly, &serde_json::json!({})));
+        assert!(!pred.evaluate("file_write", RiskLevel::ReadOnly, &serde_json::json!({})));
+    }
+
+    #[test]
+    fn test_predicate_max_risk_level() {
+        let pred = Predicate::MaxRiskLevel(RiskLevel::Write);
+        assert!(pred.evaluate("x", RiskLevel::ReadOnly, &serde_json::json!({})));
+        assert!(pred.evaluate("x", RiskLevel::Write, &serde_json::json!({})));
+        assert!(!pred.evaluate("x", RiskLevel::Execute, &serde_json::json!({})));
+    }
+
+    #[test]
+    fn test_predicate_argument_contains_key() {
+        let pred = Predicate::ArgumentContainsKey("path".into());
+        assert!(pred.evaluate(
+            "x",
+            RiskLevel::ReadOnly,
+            &serde_json::json!({"path": "/tmp"})
+        ));
+        assert!(!pred.evaluate("x", RiskLevel::ReadOnly, &serde_json::json!({"text": "hi"})));
+    }
+
+    #[test]
+    fn test_contract_enforcer_no_contract() {
+        let mut enforcer = ContractEnforcer::new(None);
+        assert!(!enforcer.has_contract());
+        assert_eq!(
+            enforcer.check_pre("anything", RiskLevel::Destructive, &serde_json::json!({})),
+            ContractCheckResult::Satisfied
+        );
+    }
+
+    #[test]
+    fn test_contract_invariant_violation() {
+        let contract = SafetyContract {
+            name: "read-only contract".into(),
+            invariants: vec![Invariant {
+                description: "Only read-only tools allowed".into(),
+                predicate: Predicate::MaxRiskLevel(RiskLevel::ReadOnly),
+            }],
+            ..Default::default()
+        };
+        let mut enforcer = ContractEnforcer::new(Some(contract));
+
+        // ReadOnly passes
+        assert_eq!(
+            enforcer.check_pre("echo", RiskLevel::ReadOnly, &serde_json::json!({})),
+            ContractCheckResult::Satisfied
+        );
+
+        // Write violates
+        assert!(matches!(
+            enforcer.check_pre("file_write", RiskLevel::Write, &serde_json::json!({})),
+            ContractCheckResult::InvariantViolation { .. }
+        ));
+    }
+
+    #[test]
+    fn test_contract_resource_bounds() {
+        let contract = SafetyContract {
+            name: "limited contract".into(),
+            resource_bounds: ResourceBounds {
+                max_tool_calls: 3,
+                max_destructive_calls: 0,
+                max_cost_usd: 0.0,
+            },
+            ..Default::default()
+        };
+        let mut enforcer = ContractEnforcer::new(Some(contract));
+
+        // First 3 calls pass
+        for _ in 0..3 {
+            assert_eq!(
+                enforcer.check_pre("echo", RiskLevel::ReadOnly, &serde_json::json!({})),
+                ContractCheckResult::Satisfied
+            );
+            enforcer.record_execution(RiskLevel::ReadOnly, 0.0);
+        }
+
+        // 4th call exceeds bound
+        assert!(matches!(
+            enforcer.check_pre("echo", RiskLevel::ReadOnly, &serde_json::json!({})),
+            ContractCheckResult::ResourceBoundExceeded { .. }
+        ));
+    }
+
+    #[test]
+    fn test_contract_pre_condition_per_tool() {
+        let mut pre_conditions = HashMap::new();
+        pre_conditions.insert(
+            "shell_exec".to_string(),
+            vec![Predicate::ArgumentContainsKey("command".into())],
+        );
+
+        let contract = SafetyContract {
+            name: "shell needs command".into(),
+            pre_conditions,
+            ..Default::default()
+        };
+        let mut enforcer = ContractEnforcer::new(Some(contract));
+
+        // Without "command" key → violation
+        assert!(matches!(
+            enforcer.check_pre(
+                "shell_exec",
+                RiskLevel::Execute,
+                &serde_json::json!({"text": "hi"})
+            ),
+            ContractCheckResult::PreConditionViolation { .. }
+        ));
+
+        // With "command" key → satisfied
+        assert_eq!(
+            enforcer.check_pre(
+                "shell_exec",
+                RiskLevel::Execute,
+                &serde_json::json!({"command": "ls"})
+            ),
+            ContractCheckResult::Satisfied
+        );
+    }
+
+    #[test]
+    fn test_contract_violations_recorded() {
+        let contract = SafetyContract {
+            name: "test".into(),
+            invariants: vec![Invariant {
+                description: "no destructive".into(),
+                predicate: Predicate::MaxRiskLevel(RiskLevel::Execute),
+            }],
+            ..Default::default()
+        };
+        let mut enforcer = ContractEnforcer::new(Some(contract));
+
+        // Trigger a violation
+        let _ = enforcer.check_pre("rm_rf", RiskLevel::Destructive, &serde_json::json!({}));
+        assert_eq!(enforcer.violations().len(), 1);
+
+        // Another violation
+        let _ = enforcer.check_pre("rm_rf", RiskLevel::Destructive, &serde_json::json!({}));
+        assert_eq!(enforcer.violations().len(), 2);
+    }
+
+    #[test]
+    fn test_guardian_set_contract() {
+        let mut guardian = default_guardian();
+        assert!(!guardian.contract_enforcer().has_contract());
+
+        let contract = SafetyContract {
+            name: "test contract".into(),
+            ..Default::default()
+        };
+        guardian.set_contract(contract);
+        assert!(guardian.contract_enforcer().has_contract());
     }
 }

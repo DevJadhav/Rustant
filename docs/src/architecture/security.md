@@ -19,6 +19,7 @@ The `SafetyGuardian` controls what actions are permitted:
 - **Approval modes** govern user interaction requirements
 - **Deny lists** block specific paths and commands
 - **Risk levels** categorize tools as read-only, write, or execute
+- **Typed ActionDetails** — Tool arguments are parsed into specific variants (FileRead, FileWrite, ShellCommand, GitOperation) via `parse_action_details()`, producing `ApprovalContext` with reasoning, alternatives, consequences, and reversibility info instead of generic fallbacks
 
 ### 3. Sandboxing
 
@@ -51,6 +52,8 @@ Every action is recorded in a tamper-evident audit log:
 | Cautious | Prompt | Prompt | Prompt | Prompt for most operations |
 | Paranoid | Prompt | Prompt | Prompt | Prompt for everything |
 | Yolo | Auto | Auto | Auto | Auto-approve all (development only) |
+
+Budget warnings and exceeded notifications are surfaced to users in real-time via the `AgentCallback` interface. The CLI displays colored warnings (yellow for warnings, red for exceeded), and the TUI shows budget events in the conversation stream.
 
 ## Prompt Injection Detection
 

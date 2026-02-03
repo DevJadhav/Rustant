@@ -18,9 +18,20 @@ Dependency flow: `rustant-cli` depends on all other crates. `rustant-mcp` depend
 
 The core of Rustant is the Think-Act-Observe (ReAct) loop in `Agent`:
 
-1. **Think** — Send conversation context to the LLM via `Brain`, receive tool calls or text response
-2. **Act** — Execute tool calls through `ToolRegistry`, gated by `SafetyGuardian` approval
-3. **Observe** — Feed tool results back into memory, repeat until task complete or max iterations
+1. **Think** — Send conversation context to the LLM via `Brain`, receive tool calls or text response. A `DecisionExplanation` is built for each tool call decision, capturing reasoning and confidence.
+2. **Act** — Execute tool calls through `ToolRegistry`, gated by `SafetyGuardian` approval. Tool arguments are parsed into typed `ActionDetails` (FileRead, FileWrite, ShellCommand, GitOperation) to produce rich `ApprovalContext` with reasoning, alternatives, consequences, and reversibility info. Budget checks emit user-facing warnings via `BudgetSeverity::Warning`/`Exceeded`. Safety denials and contract violations also produce `DecisionExplanation` entries.
+3. **Observe** — Feed tool results back into memory. Successful tool results (10-5000 chars) are recorded as `Fact` entries in long-term memory for cross-session learning. User denials are recorded as `Correction` entries. Repeat until task complete or max iterations.
+
+## Decision Transparency
+
+Every significant action point in the agent loop emits a `DecisionExplanation` via the `AgentCallback` interface:
+
+- **Tool calls** (single and multipart) — reasoning about which tool to use and why
+- **Safety denials** — explanation of why a tool was blocked by the safety guardian
+- **User denials** — records the user's decision to deny a proposed action
+- **Contract violations** — explanation when a safety contract invariant is violated
+
+Budget tracking surfaces real-time cost information to users through `BudgetSeverity` events (Warning and Exceeded), displayed in both CLI (colored terminal output) and TUI interfaces.
 
 ## Brain / LLM Providers
 

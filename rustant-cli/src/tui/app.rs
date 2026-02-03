@@ -57,7 +57,7 @@ pub struct App {
     workspace: PathBuf,
 
     // Approval state
-    pending_approval: Option<oneshot::Sender<bool>>,
+    pending_approval: Option<oneshot::Sender<rustant_core::safety::ApprovalDecision>>,
 
     // Audit & Replay (Week 12)
     audit_store: AuditStore,
@@ -289,7 +289,7 @@ impl App {
                 return;
             }
             if self.mode == InputMode::Approval {
-                self.resolve_approval(false);
+                self.resolve_approval(rustant_core::safety::ApprovalDecision::Deny);
                 return;
             }
             return;
@@ -528,7 +528,7 @@ impl App {
                     self.header.is_streaming = false;
                 }
                 if self.mode == InputMode::Approval {
-                    self.resolve_approval(false);
+                    self.resolve_approval(rustant_core::safety::ApprovalDecision::Deny);
                 }
             }
             Action::ScrollUp => self.conversation.scroll_up(1),
@@ -546,8 +546,13 @@ impl App {
                 };
             }
             Action::CopyLastResponse => self.copy_last_response(),
-            Action::Approve => self.resolve_approval(true),
-            Action::Deny => self.resolve_approval(false),
+            Action::Approve => {
+                self.resolve_approval(rustant_core::safety::ApprovalDecision::Approve)
+            }
+            Action::ApproveAllSimilar => {
+                self.resolve_approval(rustant_core::safety::ApprovalDecision::ApproveAllSimilar)
+            }
+            Action::Deny => self.resolve_approval(rustant_core::safety::ApprovalDecision::Deny),
             Action::ShowDiff => {
                 if self.diff_view.is_visible() {
                     self.diff_view.hide();
@@ -1001,12 +1006,30 @@ impl App {
             TuiEvent::ApprovalRequest { action, reply } => {
                 self.mode = InputMode::Approval;
                 self.pending_approval = Some(reply);
+
+                // Build rich approval dialog text
+                let mut text = format!(
+                    "[Approval Required] {} (risk: {})",
+                    action.description, action.risk_level
+                );
+                if let Some(ref reasoning) = action.approval_context.reasoning {
+                    text.push_str(&format!("\n  Reason: {}", reasoning));
+                }
+                for consequence in &action.approval_context.consequences {
+                    text.push_str(&format!("\n  Consequence: {}", consequence));
+                }
+                if let Some(ref rev) = action.approval_context.reversibility {
+                    let rev_label = if rev.is_reversible { "yes" } else { "no" };
+                    text.push_str(&format!("\n  Reversible: {}", rev_label));
+                    if let Some(ref desc) = rev.undo_description {
+                        text.push_str(&format!(" ({})", desc));
+                    }
+                }
+                text.push_str("\n  Press [y] approve, [n] deny, [a] approve all similar, [d] diff");
+
                 self.conversation.push_message(DisplayMessage {
                     role: Role::System,
-                    text: format!(
-                        "[Approval Required] {} (risk: {})\n  Press [y] approve, [n] deny, [d] diff",
-                        action.description, action.risk_level
-                    ),
+                    text,
                     tool_name: None,
                     is_error: false,
                     timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
@@ -1080,13 +1103,57 @@ impl App {
                     _ => {}
                 }
             }
+            TuiEvent::UsageUpdate { usage, cost } => {
+                self.header.tokens_used = usage.total();
+                self.header.cost_usd = cost.total();
+            }
+            TuiEvent::DecisionExplanation(explanation) => {
+                // Display a compact decision trace in the conversation
+                let tool = match &explanation.decision_type {
+                    rustant_core::explanation::DecisionType::ToolSelection { selected_tool } => {
+                        selected_tool.clone()
+                    }
+                    _ => "decision".to_string(),
+                };
+                let reasoning = explanation
+                    .reasoning_chain
+                    .first()
+                    .map(|s| s.description.as_str())
+                    .unwrap_or("");
+                let trace = format!(
+                    "[decision: {} | confidence: {:.0}% | {}]",
+                    tool,
+                    explanation.confidence * 100.0,
+                    reasoning
+                );
+                self.conversation.push_message(DisplayMessage {
+                    role: rustant_core::types::Role::System,
+                    text: trace,
+                    tool_name: None,
+                    is_error: false,
+                    timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                });
+            }
+            TuiEvent::BudgetWarning { message, severity } => {
+                let prefix = match severity {
+                    rustant_core::BudgetSeverity::Warning => "⚠ Budget Warning",
+                    rustant_core::BudgetSeverity::Exceeded => "🛑 Budget Exceeded",
+                };
+                self.conversation.push_message(DisplayMessage {
+                    role: rustant_core::types::Role::System,
+                    text: format!("[{}: {}]", prefix, message),
+                    tool_name: None,
+                    is_error: severity == rustant_core::BudgetSeverity::Exceeded,
+                    timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                });
+            }
         }
     }
 
     /// Resolve a pending approval request.
-    pub fn resolve_approval(&mut self, approved: bool) {
+    pub fn resolve_approval(&mut self, decision: rustant_core::safety::ApprovalDecision) {
         if let Some(reply) = self.pending_approval.take() {
-            let _ = reply.send(approved);
+            let _ = reply.send(decision);
         }
         self.mode = if self.vim_mode {
             InputMode::VimNormal
@@ -1583,8 +1650,11 @@ mod tests {
         let (tx, rx) = oneshot::channel();
         app.pending_approval = Some(tx);
         app.mode = InputMode::Approval;
-        app.resolve_approval(true);
-        assert!(rx.blocking_recv().unwrap());
+        app.resolve_approval(rustant_core::safety::ApprovalDecision::Approve);
+        assert_eq!(
+            rx.blocking_recv().unwrap(),
+            rustant_core::safety::ApprovalDecision::Approve
+        );
         assert_eq!(app.mode, InputMode::Normal);
     }
 

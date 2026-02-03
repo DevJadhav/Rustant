@@ -7,8 +7,9 @@
 //! For approval requests, a oneshot channel is used so the agent
 //! suspends until the user responds in the TUI.
 
-use rustant_core::safety::ActionRequest;
-use rustant_core::types::{AgentStatus, ToolOutput};
+use rustant_core::explanation::DecisionExplanation;
+use rustant_core::safety::{ActionRequest, ApprovalDecision};
+use rustant_core::types::{AgentStatus, CostEstimate, TokenUsage, ToolOutput};
 use rustant_core::AgentCallback;
 use tokio::sync::{mpsc, oneshot};
 
@@ -22,7 +23,7 @@ pub enum TuiEvent {
     /// An approval is needed. The TUI must send the decision via the oneshot.
     ApprovalRequest {
         action: ActionRequest,
-        reply: oneshot::Sender<bool>,
+        reply: oneshot::Sender<ApprovalDecision>,
     },
     /// A tool started executing.
     ToolStart {
@@ -37,6 +38,18 @@ pub enum TuiEvent {
     },
     /// The agent status changed.
     StatusChange(AgentStatus),
+    /// Token usage and cost update after an LLM call.
+    UsageUpdate {
+        usage: TokenUsage,
+        cost: CostEstimate,
+    },
+    /// Decision explanation for a tool selection.
+    DecisionExplanation(DecisionExplanation),
+    /// Budget warning or exceeded notification.
+    BudgetWarning {
+        message: String,
+        severity: rustant_core::BudgetSeverity,
+    },
 }
 
 /// Implements AgentCallback by forwarding events through an mpsc channel.
@@ -70,17 +83,17 @@ impl AgentCallback for TuiCallback {
         let _ = self.tx.send(TuiEvent::StreamToken(token.to_string()));
     }
 
-    async fn request_approval(&self, action: &ActionRequest) -> bool {
+    async fn request_approval(&self, action: &ActionRequest) -> ApprovalDecision {
         let (reply_tx, reply_rx) = oneshot::channel();
         let sent = self.tx.send(TuiEvent::ApprovalRequest {
             action: action.clone(),
             reply: reply_tx,
         });
         if sent.is_err() {
-            return false;
+            return ApprovalDecision::Deny;
         }
         // Block (async) until the TUI sends a decision.
-        reply_rx.await.unwrap_or(false)
+        reply_rx.await.unwrap_or(ApprovalDecision::Deny)
     }
 
     async fn on_tool_start(&self, tool_name: &str, args: &serde_json::Value) {
@@ -100,6 +113,26 @@ impl AgentCallback for TuiCallback {
 
     async fn on_status_change(&self, status: AgentStatus) {
         let _ = self.tx.send(TuiEvent::StatusChange(status));
+    }
+
+    async fn on_usage_update(&self, usage: &TokenUsage, cost: &CostEstimate) {
+        let _ = self.tx.send(TuiEvent::UsageUpdate {
+            usage: *usage,
+            cost: *cost,
+        });
+    }
+
+    async fn on_decision_explanation(&self, explanation: &DecisionExplanation) {
+        let _ = self
+            .tx
+            .send(TuiEvent::DecisionExplanation(explanation.clone()));
+    }
+
+    async fn on_budget_warning(&self, message: &str, severity: rustant_core::BudgetSeverity) {
+        let _ = self.tx.send(TuiEvent::BudgetWarning {
+            message: message.to_string(),
+            severity,
+        });
     }
 }
 
@@ -173,13 +206,13 @@ mod tests {
         // Simulate the TUI resolving the approval
         match rx.recv().await.unwrap() {
             TuiEvent::ApprovalRequest { reply, .. } => {
-                reply.send(true).unwrap();
+                reply.send(ApprovalDecision::Approve).unwrap();
             }
             other => panic!("Expected ApprovalRequest, got {:?}", other),
         }
 
         let result = approval_task.await.unwrap();
-        assert!(result);
+        assert_eq!(result, ApprovalDecision::Approve);
     }
 
     #[tokio::test]
@@ -200,13 +233,13 @@ mod tests {
 
         match rx.recv().await.unwrap() {
             TuiEvent::ApprovalRequest { reply, .. } => {
-                reply.send(false).unwrap();
+                reply.send(ApprovalDecision::Deny).unwrap();
             }
             other => panic!("Expected ApprovalRequest, got {:?}", other),
         }
 
         let result = approval_task.await.unwrap();
-        assert!(!result);
+        assert_eq!(result, ApprovalDecision::Deny);
     }
 
     #[tokio::test]

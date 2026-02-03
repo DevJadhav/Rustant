@@ -122,6 +122,23 @@ pub fn update_config(
     Ok(())
 }
 
+/// Detect API keys present in environment variables.
+///
+/// Returns a list of `(provider_name, display_name)` for providers whose
+/// API key environment variable is set and non-empty.
+pub fn detect_env_api_keys() -> Vec<(String, String)> {
+    let providers = available_providers();
+    let mut found = Vec::new();
+    for p in &providers {
+        if let Ok(key) = std::env::var(&p.api_key_env) {
+            if !key.trim().is_empty() {
+                found.push((p.name.clone(), p.display_name.clone()));
+            }
+        }
+    }
+    found
+}
+
 /// Run the interactive provider setup wizard.
 ///
 /// Guides the user through provider selection, auth method choice, model selection,

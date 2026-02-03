@@ -464,6 +464,29 @@ async fn main() -> anyhow::Result<()> {
     let mut config = rustant_core::config::load_config(Some(&workspace), None)
         .map_err(|e| anyhow::anyhow!("Configuration error: {}", e))?;
 
+    // First-run detection: if no config file exists, prompt setup wizard
+    if !rustant_core::config_exists(Some(&workspace)) {
+        let detected = setup::detect_env_api_keys();
+        if !detected.is_empty() {
+            println!(
+                "\n  Detected API key(s) in environment: {}",
+                detected
+                    .iter()
+                    .map(|(_, name)| name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        println!("\n  No configuration found. Starting setup wizard...\n");
+        if let Err(e) = setup::run_setup(&workspace).await {
+            eprintln!("  Setup failed: {}. Using defaults.\n", e);
+        } else {
+            // Reload configuration after setup
+            config = rustant_core::config::load_config(Some(&workspace), None)
+                .map_err(|e| anyhow::anyhow!("Configuration error: {}", e))?;
+        }
+    }
+
     // Apply CLI overrides
     if let Some(model) = &cli.model {
         config.llm.model = model.clone();

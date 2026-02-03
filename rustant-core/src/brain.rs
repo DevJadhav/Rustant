@@ -111,6 +111,8 @@ pub struct Brain {
     total_usage: TokenUsage,
     total_cost: CostEstimate,
     token_counter: TokenCounter,
+    /// Optional knowledge addendum appended to system prompt from distilled rules.
+    knowledge_addendum: String,
 }
 
 impl Brain {
@@ -122,7 +124,13 @@ impl Brain {
             total_usage: TokenUsage::default(),
             total_cost: CostEstimate::default(),
             token_counter: TokenCounter::for_model(&model_name),
+            knowledge_addendum: String::new(),
         }
+    }
+
+    /// Set knowledge addendum (distilled rules) to append to the system prompt.
+    pub fn set_knowledge_addendum(&mut self, addendum: String) {
+        self.knowledge_addendum = addendum;
     }
 
     /// Estimate token count for messages using tiktoken-rs.
@@ -131,9 +139,17 @@ impl Brain {
     }
 
     /// Construct messages for the LLM with system prompt prepended.
+    ///
+    /// If a knowledge addendum has been set via `set_knowledge_addendum()`,
+    /// it is automatically appended to the system prompt.
     pub fn build_messages(&self, conversation: &[Message]) -> Vec<Message> {
         let mut messages = Vec::with_capacity(conversation.len() + 1);
-        messages.push(Message::system(&self.system_prompt));
+        if self.knowledge_addendum.is_empty() {
+            messages.push(Message::system(&self.system_prompt));
+        } else {
+            let augmented = format!("{}{}", self.system_prompt, self.knowledge_addendum);
+            messages.push(Message::system(&augmented));
+        }
         messages.extend_from_slice(conversation);
         messages
     }
@@ -287,6 +303,11 @@ impl Brain {
         self.provider.context_window()
     }
 
+    /// Get cost rates (input_per_token, output_per_token) from the provider.
+    pub fn provider_cost_rates(&self) -> (f64, f64) {
+        self.provider.cost_per_token()
+    }
+
     /// Get a reference to the underlying LLM provider.
     pub fn provider(&self) -> &dyn LlmProvider {
         &*self.provider
@@ -356,6 +377,32 @@ impl MockLlmProvider {
             usage: TokenUsage {
                 input_tokens: 100,
                 output_tokens: 30,
+            },
+            model: "mock-model".to_string(),
+            finish_reason: Some("tool_calls".to_string()),
+        }
+    }
+
+    /// Create a multipart response (text + tool call) for testing.
+    pub fn multipart_response(
+        text: &str,
+        tool_name: &str,
+        arguments: serde_json::Value,
+    ) -> CompletionResponse {
+        let call_id = format!("call_{}", uuid::Uuid::new_v4());
+        CompletionResponse {
+            message: Message::new(
+                Role::Assistant,
+                Content::MultiPart {
+                    parts: vec![
+                        Content::text(text),
+                        Content::tool_call(&call_id, tool_name, arguments),
+                    ],
+                },
+            ),
+            usage: TokenUsage {
+                input_tokens: 100,
+                output_tokens: 50,
             },
             model: "mock-model".to_string(),
             finish_reason: Some("tool_calls".to_string()),
@@ -450,6 +497,161 @@ Key behaviors:
 - Prefer small, focused changes over large rewrites
 
 You have access to tools for file operations, search, and shell execution. Use them judiciously."#;
+
+// ---------------------------------------------------------------------------
+// Token Budget Manager
+// ---------------------------------------------------------------------------
+
+/// Tracks token usage against configurable budgets and predicts costs
+/// before execution. Can warn or halt when budgets are exceeded.
+pub struct TokenBudgetManager {
+    session_limit_usd: f64,
+    task_limit_usd: f64,
+    session_token_limit: usize,
+    halt_on_exceed: bool,
+    session_cost: f64,
+    task_cost: f64,
+    session_tokens: usize,
+}
+
+/// The result of a pre-call budget check.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BudgetCheckResult {
+    /// Budget is within limits, proceed.
+    Ok,
+    /// Budget warning — approaching limit but not exceeded.
+    Warning { message: String, usage_pct: f64 },
+    /// Budget exceeded — should halt if configured.
+    Exceeded { message: String },
+}
+
+impl TokenBudgetManager {
+    /// Create a new budget manager from config. Passing `None` creates
+    /// an unlimited manager that always returns `Ok`.
+    pub fn new(config: Option<&crate::config::BudgetConfig>) -> Self {
+        match config {
+            Some(cfg) => Self {
+                session_limit_usd: cfg.session_limit_usd,
+                task_limit_usd: cfg.task_limit_usd,
+                session_token_limit: cfg.session_token_limit,
+                halt_on_exceed: cfg.halt_on_exceed,
+                session_cost: 0.0,
+                task_cost: 0.0,
+                session_tokens: 0,
+            },
+            None => Self {
+                session_limit_usd: 0.0,
+                task_limit_usd: 0.0,
+                session_token_limit: 0,
+                halt_on_exceed: false,
+                session_cost: 0.0,
+                task_cost: 0.0,
+                session_tokens: 0,
+            },
+        }
+    }
+
+    /// Reset task-level tracking (call at start of each new task).
+    pub fn reset_task(&mut self) {
+        self.task_cost = 0.0;
+    }
+
+    /// Record usage after an LLM call completes.
+    pub fn record_usage(&mut self, usage: &TokenUsage, cost: &CostEstimate) {
+        self.session_cost += cost.total();
+        self.task_cost += cost.total();
+        self.session_tokens += usage.total();
+    }
+
+    /// Estimate cost for an upcoming LLM call and check against budgets.
+    ///
+    /// `estimated_input_tokens` is the count of tokens in the request.
+    /// `input_rate` and `output_rate` are the per-token costs from the provider.
+    /// Output tokens are estimated at 0.5x input as a heuristic.
+    pub fn check_budget(
+        &self,
+        estimated_input_tokens: usize,
+        input_rate: f64,
+        output_rate: f64,
+    ) -> BudgetCheckResult {
+        // Predict output tokens as ~50% of input (heuristic)
+        let predicted_output = estimated_input_tokens / 2;
+        let predicted_cost =
+            (estimated_input_tokens as f64 * input_rate) + (predicted_output as f64 * output_rate);
+
+        let projected_session_cost = self.session_cost + predicted_cost;
+        let projected_task_cost = self.task_cost + predicted_cost;
+        let projected_session_tokens =
+            self.session_tokens + estimated_input_tokens + predicted_output;
+
+        // Check session cost limit
+        if self.session_limit_usd > 0.0 && projected_session_cost > self.session_limit_usd {
+            return BudgetCheckResult::Exceeded {
+                message: format!(
+                    "Session cost ${:.4} would exceed limit ${:.4}",
+                    projected_session_cost, self.session_limit_usd
+                ),
+            };
+        }
+
+        // Check task cost limit
+        if self.task_limit_usd > 0.0 && projected_task_cost > self.task_limit_usd {
+            return BudgetCheckResult::Exceeded {
+                message: format!(
+                    "Task cost ${:.4} would exceed limit ${:.4}",
+                    projected_task_cost, self.task_limit_usd
+                ),
+            };
+        }
+
+        // Check session token limit
+        if self.session_token_limit > 0 && projected_session_tokens > self.session_token_limit {
+            return BudgetCheckResult::Exceeded {
+                message: format!(
+                    "Session tokens {} would exceed limit {}",
+                    projected_session_tokens, self.session_token_limit
+                ),
+            };
+        }
+
+        // Check if approaching limits (>80%)
+        if self.session_limit_usd > 0.0 {
+            let pct = projected_session_cost / self.session_limit_usd;
+            if pct > 0.8 {
+                return BudgetCheckResult::Warning {
+                    message: format!(
+                        "Session cost at {:.0}% of ${:.4} limit",
+                        pct * 100.0,
+                        self.session_limit_usd
+                    ),
+                    usage_pct: pct,
+                };
+            }
+        }
+
+        BudgetCheckResult::Ok
+    }
+
+    /// Whether budget enforcement should halt execution on exceed.
+    pub fn should_halt_on_exceed(&self) -> bool {
+        self.halt_on_exceed
+    }
+
+    /// Current session cost.
+    pub fn session_cost(&self) -> f64 {
+        self.session_cost
+    }
+
+    /// Current task cost.
+    pub fn task_cost(&self) -> f64 {
+        self.task_cost
+    }
+
+    /// Current session token count.
+    pub fn session_tokens(&self) -> usize {
+        self.session_tokens
+    }
+}
 
 #[cfg(test)]
 mod tests {

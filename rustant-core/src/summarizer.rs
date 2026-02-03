@@ -247,6 +247,67 @@ impl TokenCostDisplay {
     }
 }
 
+/// Truncate a string to at most `max` characters (byte-safe via char boundary).
+fn truncate_str(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    // Find a valid char boundary at or before `max`
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+/// Smart fallback summary that preserves structured information when LLM-based
+/// summarization fails. Instead of naive truncation, it extracts tool names,
+/// results, and preserves the first/last messages for continuity.
+pub fn smart_fallback_summary(messages: &[Message], max_chars: usize) -> String {
+    if messages.is_empty() {
+        return String::new();
+    }
+
+    let quarter = max_chars / 4;
+    let mut parts = Vec::new();
+
+    // Always include first message (the initial request context)
+    if let Some(first) = messages.first() {
+        if let Some(text) = first.content.as_text() {
+            parts.push(format!("[Start] {}", truncate_str(text, quarter)));
+        }
+    }
+
+    // Extract tool call summaries (tool name + brief result)
+    for msg in messages.iter() {
+        match &msg.content {
+            Content::ToolCall { name, .. } => {
+                parts.push(format!("[Tool: {}]", name));
+            }
+            Content::ToolResult { output, .. } => {
+                parts.push(format!("[Result: {}]", truncate_str(output, 80)));
+            }
+            _ => {}
+        }
+    }
+
+    // Always include last message if different from first
+    if messages.len() > 1 {
+        if let Some(last) = messages.last() {
+            if let Some(text) = last.content.as_text() {
+                parts.push(format!("[Latest] {}", truncate_str(text, quarter)));
+            }
+        }
+    }
+
+    let joined = parts.join("\n");
+    if joined.len() > max_chars {
+        format!("{}...", truncate_str(&joined, max_chars))
+    } else {
+        joined
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,5 +391,98 @@ mod tests {
         assert!(formatted.contains("500 out"));
         assert!(formatted.contains("$0.0123"));
         assert!(formatted.contains("OK"));
+    }
+
+    // --- Gap 2: Smart fallback summary tests ---
+
+    #[test]
+    fn test_smart_fallback_preserves_tool_names() {
+        let messages = vec![
+            Message::user("fix the bug"),
+            Message::new(
+                Role::Assistant,
+                Content::tool_call(
+                    "c1",
+                    "file_read",
+                    serde_json::json!({"path": "src/main.rs"}),
+                ),
+            ),
+            Message::new(
+                Role::Tool,
+                Content::tool_result("c1", "fn main() { println!(\"hello\"); }", false),
+            ),
+            Message::assistant("I found the issue."),
+        ];
+
+        let summary = smart_fallback_summary(&messages, 500);
+
+        assert!(
+            summary.contains("file_read"),
+            "Summary should contain tool name: {}",
+            summary
+        );
+        assert!(
+            summary.contains("fix the bug"),
+            "Summary should contain first message: {}",
+            summary
+        );
+    }
+
+    #[test]
+    fn test_smart_fallback_preserves_first_and_last() {
+        let messages = vec![
+            Message::user("initial request about authentication"),
+            Message::assistant("Let me look into that."),
+            Message::user("follow up about tokens"),
+            Message::assistant("Here is the solution for token handling"),
+        ];
+
+        let summary = smart_fallback_summary(&messages, 500);
+
+        assert!(
+            summary.contains("initial request"),
+            "Summary should contain first message: {}",
+            summary
+        );
+        assert!(
+            summary.contains("token handling"),
+            "Summary should contain last message: {}",
+            summary
+        );
+    }
+
+    #[test]
+    fn test_smart_fallback_respects_limit() {
+        let long_text = "a".repeat(1000);
+        let messages = vec![Message::user(&long_text)];
+
+        let summary = smart_fallback_summary(&messages, 100);
+
+        assert!(
+            summary.len() <= 110, // small margin for formatting
+            "Summary should respect limit: len={} > 110",
+            summary.len()
+        );
+    }
+
+    #[test]
+    fn test_smart_fallback_empty_messages() {
+        let summary = smart_fallback_summary(&[], 500);
+        assert!(
+            summary.is_empty(),
+            "Empty messages should give empty summary"
+        );
+    }
+
+    #[test]
+    fn test_smart_fallback_different_limits() {
+        let messages = vec![Message::user("x".repeat(1000))];
+
+        let short = smart_fallback_summary(&messages, 50);
+        let long = smart_fallback_summary(&messages, 800);
+
+        assert!(short.len() <= 60);
+        assert!(long.len() <= 810);
+        assert!(long.len() > short.len());
     }
 }

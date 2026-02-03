@@ -623,6 +623,250 @@ impl MemoryFlusher {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Knowledge Distiller — Cross-Session Learning
+// ---------------------------------------------------------------------------
+
+/// A distilled behavioral rule generated from accumulated corrections and facts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BehavioralRule {
+    /// Unique identifier.
+    pub id: Uuid,
+    /// Human-readable rule description (injected into system prompt).
+    pub rule: String,
+    /// Source entries (correction/fact IDs) that contributed to this rule.
+    pub source_ids: Vec<Uuid>,
+    /// How many source entries support this rule (higher = more confidence).
+    pub support_count: usize,
+    /// When this rule was distilled.
+    pub created_at: DateTime<Utc>,
+}
+
+/// Persistent knowledge store containing distilled behavioral rules.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct KnowledgeStore {
+    pub rules: Vec<BehavioralRule>,
+    /// Correction IDs already processed by the distiller.
+    pub processed_correction_ids: Vec<Uuid>,
+    /// Fact IDs already processed by the distiller.
+    pub processed_fact_ids: Vec<Uuid>,
+}
+
+impl KnowledgeStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Load a knowledge store from a JSON file.
+    pub fn load(path: &std::path::Path) -> Result<Self, MemoryError> {
+        if !path.exists() {
+            return Ok(Self::new());
+        }
+        let json = std::fs::read_to_string(path).map_err(|e| MemoryError::PersistenceError {
+            message: format!("Failed to read knowledge store: {}", e),
+        })?;
+        serde_json::from_str(&json).map_err(|e| MemoryError::PersistenceError {
+            message: format!("Failed to parse knowledge store: {}", e),
+        })
+    }
+
+    /// Save the knowledge store to a JSON file.
+    pub fn save(&self, path: &std::path::Path) -> Result<(), MemoryError> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| MemoryError::PersistenceError {
+                message: format!("Failed to create knowledge directory: {}", e),
+            })?;
+        }
+        let json =
+            serde_json::to_string_pretty(self).map_err(|e| MemoryError::PersistenceError {
+                message: format!("Failed to serialize knowledge store: {}", e),
+            })?;
+        std::fs::write(path, json).map_err(|e| MemoryError::PersistenceError {
+            message: format!("Failed to write knowledge store: {}", e),
+        })
+    }
+}
+
+/// The `KnowledgeDistiller` processes accumulated corrections and facts from
+/// `LongTermMemory` to generate compressed behavioral rules. These rules
+/// are injected into the system prompt to influence future agent behavior,
+/// creating a cross-session learning loop.
+pub struct KnowledgeDistiller {
+    store: KnowledgeStore,
+    max_rules: usize,
+    min_entries: usize,
+    store_path: Option<std::path::PathBuf>,
+}
+
+impl KnowledgeDistiller {
+    /// Create a new distiller from config. If `config` is None, creates a
+    /// disabled distiller that returns no rules.
+    pub fn new(config: Option<&crate::config::KnowledgeConfig>) -> Self {
+        match config {
+            Some(cfg) if cfg.enabled => {
+                let store = cfg
+                    .knowledge_path
+                    .as_ref()
+                    .and_then(|p| KnowledgeStore::load(p).ok())
+                    .unwrap_or_default();
+                Self {
+                    store,
+                    max_rules: cfg.max_rules,
+                    min_entries: cfg.min_entries_for_distillation,
+                    store_path: cfg.knowledge_path.clone(),
+                }
+            }
+            _ => Self {
+                store: KnowledgeStore::new(),
+                max_rules: 0,
+                min_entries: usize::MAX,
+                store_path: None,
+            },
+        }
+    }
+
+    /// Run the distillation process over long-term memory.
+    ///
+    /// Groups corrections by context patterns and generates compressed rules.
+    /// Only processes entries not yet seen by the distiller.
+    pub fn distill(&mut self, long_term: &LongTermMemory) {
+        // Collect new (unprocessed) corrections
+        let new_corrections: Vec<&Correction> = long_term
+            .corrections
+            .iter()
+            .filter(|c| !self.store.processed_correction_ids.contains(&c.id))
+            .collect();
+
+        // Collect new (unprocessed) facts
+        let new_facts: Vec<&Fact> = long_term
+            .facts
+            .iter()
+            .filter(|f| !self.store.processed_fact_ids.contains(&f.id))
+            .collect();
+
+        let total_new = new_corrections.len() + new_facts.len();
+        if total_new < self.min_entries {
+            return; // Not enough new data to distill
+        }
+
+        // --- Distill corrections into rules ---
+        // Group corrections by common patterns in their context field.
+        let mut context_groups: HashMap<String, Vec<&Correction>> = HashMap::new();
+        for correction in &new_corrections {
+            // Normalize the context to a group key (first 50 chars, lowercased)
+            let key = correction
+                .context
+                .chars()
+                .take(50)
+                .collect::<String>()
+                .to_lowercase();
+            context_groups.entry(key).or_default().push(correction);
+        }
+
+        // Generate a rule per group that has enough entries
+        for group in context_groups.values() {
+            if group.len() >= 2 {
+                // Multiple corrections with similar context → a behavioral rule
+                let corrected_patterns: Vec<&str> =
+                    group.iter().map(|c| c.corrected.as_str()).collect();
+                let rule_text = format!(
+                    "Based on {} previous corrections: prefer {}",
+                    group.len(),
+                    corrected_patterns.join("; ")
+                );
+                let source_ids: Vec<Uuid> = group.iter().map(|c| c.id).collect();
+                self.store.rules.push(BehavioralRule {
+                    id: Uuid::new_v4(),
+                    rule: rule_text,
+                    source_ids,
+                    support_count: group.len(),
+                    created_at: Utc::now(),
+                });
+            } else {
+                // Single correction → direct rule
+                for c in group {
+                    self.store.rules.push(BehavioralRule {
+                        id: Uuid::new_v4(),
+                        rule: format!("Instead of '{}', prefer '{}'", c.original, c.corrected),
+                        source_ids: vec![c.id],
+                        support_count: 1,
+                        created_at: Utc::now(),
+                    });
+                }
+            }
+        }
+
+        // --- Distill preferences from facts ---
+        // Facts tagged with "preference" or containing directive language get
+        // turned into rules directly.
+        for fact in &new_facts {
+            let is_preference = fact.tags.iter().any(|t| t == "preference")
+                || fact.content.starts_with("Prefer")
+                || fact.content.starts_with("Always")
+                || fact.content.starts_with("Never")
+                || fact.content.starts_with("Don't")
+                || fact.content.starts_with("Use ");
+            if is_preference {
+                self.store.rules.push(BehavioralRule {
+                    id: Uuid::new_v4(),
+                    rule: fact.content.clone(),
+                    source_ids: vec![fact.id],
+                    support_count: 1,
+                    created_at: Utc::now(),
+                });
+            }
+        }
+
+        // Mark all new entries as processed
+        for c in &new_corrections {
+            self.store.processed_correction_ids.push(c.id);
+        }
+        for f in &new_facts {
+            self.store.processed_fact_ids.push(f.id);
+        }
+
+        // Trim rules to max_rules, keeping highest support_count
+        if self.store.rules.len() > self.max_rules {
+            self.store
+                .rules
+                .sort_by(|a, b| b.support_count.cmp(&a.support_count));
+            self.store.rules.truncate(self.max_rules);
+        }
+
+        // Persist if a store path is configured
+        if let Some(ref path) = self.store_path {
+            let _ = self.store.save(path);
+        }
+    }
+
+    /// Get the current distilled rules formatted for system prompt injection.
+    ///
+    /// Returns an empty string if no rules exist.
+    pub fn rules_for_prompt(&self) -> String {
+        if self.store.rules.is_empty() {
+            return String::new();
+        }
+        let mut prompt = String::from(
+            "\n\n## Learned Behavioral Rules\n\
+             The following rules were distilled from previous sessions. Follow them:\n",
+        );
+        for (i, rule) in self.store.rules.iter().enumerate() {
+            prompt.push_str(&format!("{}. {}\n", i + 1, rule.rule));
+        }
+        prompt
+    }
+
+    /// Get the number of distilled rules.
+    pub fn rule_count(&self) -> usize {
+        self.store.rules.len()
+    }
+
+    /// Get the knowledge store reference (for diagnostics/REPL).
+    pub fn store(&self) -> &KnowledgeStore {
+        &self.store
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1228,5 +1472,185 @@ mod tests {
         let mut mem = MemorySystem::new(10);
         // Should be a no-op, not an error
         mem.force_flush().unwrap();
+    }
+
+    // --- Knowledge Distiller Tests ---
+
+    #[test]
+    fn test_knowledge_distiller_disabled() {
+        let distiller = KnowledgeDistiller::new(None);
+        assert_eq!(distiller.rule_count(), 0);
+        assert!(distiller.rules_for_prompt().is_empty());
+    }
+
+    #[test]
+    fn test_knowledge_distiller_no_data() {
+        let config = crate::config::KnowledgeConfig::default();
+        let mut distiller = KnowledgeDistiller::new(Some(&config));
+        let ltm = LongTermMemory::new();
+        distiller.distill(&ltm);
+        assert_eq!(distiller.rule_count(), 0);
+    }
+
+    #[test]
+    fn test_knowledge_distiller_corrections_below_threshold() {
+        let config = crate::config::KnowledgeConfig {
+            min_entries_for_distillation: 5,
+            ..Default::default()
+        };
+        let mut distiller = KnowledgeDistiller::new(Some(&config));
+
+        let mut ltm = LongTermMemory::new();
+        ltm.add_correction(
+            "unwrap()".into(),
+            "? operator".into(),
+            "error handling".into(),
+        );
+        ltm.add_correction("println!".into(), "tracing::info!".into(), "logging".into());
+
+        distiller.distill(&ltm);
+        // Only 2 entries, threshold is 5
+        assert_eq!(distiller.rule_count(), 0);
+    }
+
+    #[test]
+    fn test_knowledge_distiller_single_corrections() {
+        let config = crate::config::KnowledgeConfig {
+            min_entries_for_distillation: 2,
+            ..Default::default()
+        };
+        let mut distiller = KnowledgeDistiller::new(Some(&config));
+
+        let mut ltm = LongTermMemory::new();
+        ltm.add_correction(
+            "unwrap()".into(),
+            "? operator".into(),
+            "error handling".into(),
+        );
+        ltm.add_correction("println!".into(), "tracing::info!".into(), "logging".into());
+        // Both have different contexts → separate rules
+
+        distiller.distill(&ltm);
+        assert_eq!(distiller.rule_count(), 2);
+
+        let prompt = distiller.rules_for_prompt();
+        assert!(prompt.contains("Learned Behavioral Rules"));
+        assert!(prompt.contains("? operator"));
+        assert!(prompt.contains("tracing::info!"));
+    }
+
+    #[test]
+    fn test_knowledge_distiller_grouped_corrections() {
+        let config = crate::config::KnowledgeConfig {
+            min_entries_for_distillation: 2,
+            ..Default::default()
+        };
+        let mut distiller = KnowledgeDistiller::new(Some(&config));
+
+        let mut ltm = LongTermMemory::new();
+        // Two corrections with same context prefix → should group
+        ltm.add_correction(
+            "unwrap()".into(),
+            "? operator".into(),
+            "error handling in Rust code".into(),
+        );
+        ltm.add_correction(
+            "expect()".into(),
+            "map_err()?".into(),
+            "error handling in Rust code".into(),
+        );
+
+        distiller.distill(&ltm);
+        assert_eq!(distiller.rule_count(), 1);
+        let prompt = distiller.rules_for_prompt();
+        assert!(prompt.contains("2 previous corrections"));
+    }
+
+    #[test]
+    fn test_knowledge_distiller_preference_facts() {
+        let config = crate::config::KnowledgeConfig {
+            min_entries_for_distillation: 1,
+            ..Default::default()
+        };
+        let mut distiller = KnowledgeDistiller::new(Some(&config));
+
+        let mut ltm = LongTermMemory::new();
+        ltm.add_fact(Fact::new("Prefer async/await over threads", "user"));
+        ltm.add_fact(Fact::new("Project uses PostgreSQL", "session"));
+
+        distiller.distill(&ltm);
+        // Only the "Prefer..." fact becomes a rule
+        assert_eq!(distiller.rule_count(), 1);
+        let prompt = distiller.rules_for_prompt();
+        assert!(prompt.contains("async/await"));
+    }
+
+    #[test]
+    fn test_knowledge_distiller_max_rules_truncation() {
+        let config = crate::config::KnowledgeConfig {
+            min_entries_for_distillation: 1,
+            max_rules: 3,
+            ..Default::default()
+        };
+        let mut distiller = KnowledgeDistiller::new(Some(&config));
+
+        let mut ltm = LongTermMemory::new();
+        for i in 0..10 {
+            ltm.add_correction(
+                format!("old{}", i),
+                format!("new{}", i),
+                format!("context{}", i),
+            );
+        }
+
+        distiller.distill(&ltm);
+        assert!(distiller.rule_count() <= 3);
+    }
+
+    #[test]
+    fn test_knowledge_distiller_idempotent() {
+        let config = crate::config::KnowledgeConfig {
+            min_entries_for_distillation: 1,
+            ..Default::default()
+        };
+        let mut distiller = KnowledgeDistiller::new(Some(&config));
+
+        let mut ltm = LongTermMemory::new();
+        ltm.add_correction("old".into(), "new".into(), "ctx".into());
+
+        distiller.distill(&ltm);
+        let count_after_first = distiller.rule_count();
+
+        // Distill again with same data — should not add duplicate rules
+        distiller.distill(&ltm);
+        assert_eq!(distiller.rule_count(), count_after_first);
+    }
+
+    #[test]
+    fn test_knowledge_store_save_load_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("knowledge.json");
+
+        let mut store = KnowledgeStore::new();
+        store.rules.push(BehavioralRule {
+            id: Uuid::new_v4(),
+            rule: "Prefer ? over unwrap".into(),
+            source_ids: vec![Uuid::new_v4()],
+            support_count: 3,
+            created_at: Utc::now(),
+        });
+
+        store.save(&path).unwrap();
+        let loaded = KnowledgeStore::load(&path).unwrap();
+        assert_eq!(loaded.rules.len(), 1);
+        assert_eq!(loaded.rules[0].rule, "Prefer ? over unwrap");
+        assert_eq!(loaded.rules[0].support_count, 3);
+    }
+
+    #[test]
+    fn test_knowledge_store_load_nonexistent() {
+        let store =
+            KnowledgeStore::load(std::path::Path::new("/nonexistent/knowledge.json")).unwrap();
+        assert!(store.rules.is_empty());
     }
 }

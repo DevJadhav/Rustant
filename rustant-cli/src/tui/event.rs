@@ -20,6 +20,7 @@ pub enum Action {
     CopyLastResponse,
     OpenCommandPalette,
     Approve,
+    ApproveAllSimilar,
     Deny,
     ShowDiff,
     ShowHelp,
@@ -73,6 +74,7 @@ pub fn map_global_key(event: &KeyEvent) -> Option<Action> {
 pub fn map_approval_key(event: &KeyEvent) -> Option<Action> {
     match event.code {
         KeyCode::Char('y') | KeyCode::Char('Y') => Some(Action::Approve),
+        KeyCode::Char('a') | KeyCode::Char('A') => Some(Action::ApproveAllSimilar),
         KeyCode::Char('n') | KeyCode::Char('N') => Some(Action::Deny),
         KeyCode::Char('d') | KeyCode::Char('D') => Some(Action::ShowDiff),
         KeyCode::Char('?') => Some(Action::ShowHelp),
