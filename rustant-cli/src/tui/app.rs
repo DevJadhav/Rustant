@@ -1884,11 +1884,29 @@ impl App {
                 let arg = cmd.strip_prefix(prefix).unwrap_or("").trim();
                 match arg {
                     "" | "status" => {
-                        // TODO: Read actual config values and session stats from IntelligenceConfig
-                        // instead of displaying hardcoded placeholder strings.
-                        self.push_system_msg(
-                            "Channel Intelligence Status\n──────────────────────────\n  Status:       enabled\n  Default mode: full_auto\n  Digest freq:  daily\n  Scheduling:   enabled\n\nClassification stats (this session):\n  Messages: 0  |  Auto-replies: 0  |  Pending: 0  |  Reminders: 0  |  Digests: 0"
-                        );
+                        let intel = self.agent.config().intelligence.clone().unwrap_or_default();
+                        let status = if intel.enabled { "enabled" } else { "disabled" };
+                        let mode = format!("{:?}", intel.defaults.auto_reply);
+                        let digest = format!("{:?}", intel.defaults.digest);
+                        let scheduling = if intel.defaults.smart_scheduling {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        };
+                        let channels = if intel.channels.is_empty() {
+                            "none (using defaults)".to_string()
+                        } else {
+                            intel
+                                .channels
+                                .keys()
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        };
+                        self.push_system_msg(&format!(
+                            "Channel Intelligence Status\n──────────────────────────\n  Status:       {}\n  Default mode: {}\n  Digest freq:  {}\n  Scheduling:   {}\n  Channels:     {}",
+                            status, mode, digest, scheduling, channels
+                        ));
                     }
                     "on" => {
                         self.push_system_msg("Channel intelligence enabled. Messages will be classified and routed automatically.");

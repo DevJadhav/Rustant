@@ -624,6 +624,29 @@ impl Default for LlmConfig {
     }
 }
 
+impl LlmConfig {
+    /// Validate this LLM config and return any warnings.
+    ///
+    /// Returns an empty Vec if the config is valid. Returns human-readable
+    /// warning messages for problematic values (backward compatible — does not error).
+    pub fn validate(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+        if self.max_tokens >= self.context_window {
+            warnings.push(format!(
+                "max_tokens ({}) >= context_window ({}); responses may be truncated or fail",
+                self.max_tokens, self.context_window
+            ));
+        }
+        if self.temperature < 0.0 || self.temperature > 2.0 {
+            warnings.push(format!(
+                "temperature ({}) is outside the typical range 0.0–2.0",
+                self.temperature
+            ));
+        }
+        warnings
+    }
+}
+
 /// Approval mode controlling how much autonomy the agent has.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -731,6 +754,13 @@ impl Default for SafetyConfig {
                 ".env*".to_string(),
                 "**/*.key".to_string(),
                 "**/secrets/**".to_string(),
+                "**/*.pem".to_string(),
+                "**/credentials*".to_string(),
+                ".ssh/**".to_string(),
+                ".aws/**".to_string(),
+                ".docker/config.json".to_string(),
+                "**/*id_rsa*".to_string(),
+                "**/*id_ed25519*".to_string(),
             ],
             allowed_commands: vec![
                 "cargo".to_string(),
@@ -1112,6 +1142,51 @@ max_output_bytes = 1048576
         assert_eq!(config.context_window, 128_000);
         assert_eq!(config.max_tokens, 4096);
         assert!((config.temperature - 0.7).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_llm_config_validate_defaults_clean() {
+        let config = LlmConfig::default();
+        let warnings = config.validate();
+        assert!(
+            warnings.is_empty(),
+            "Default LlmConfig should have no warnings, got: {:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn test_llm_config_validate_max_tokens_exceeds_context() {
+        let config = LlmConfig {
+            max_tokens: 200_000,
+            context_window: 128_000,
+            ..Default::default()
+        };
+        let warnings = config.validate();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("max_tokens"));
+        assert!(warnings[0].contains("context_window"));
+    }
+
+    #[test]
+    fn test_llm_config_validate_bad_temperature() {
+        let config = LlmConfig {
+            temperature: 3.0,
+            ..Default::default()
+        };
+        let warnings = config.validate();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("temperature"));
+    }
+
+    #[test]
+    fn test_safety_denied_paths_include_sensitive_defaults() {
+        let config = SafetyConfig::default();
+        assert!(config.denied_paths.contains(&".ssh/**".to_string()));
+        assert!(config.denied_paths.contains(&".aws/**".to_string()));
+        assert!(config.denied_paths.contains(&"**/*.pem".to_string()));
+        assert!(config.denied_paths.contains(&"**/*id_rsa*".to_string()));
+        assert!(config.denied_paths.contains(&"**/*id_ed25519*".to_string()));
     }
 
     #[test]

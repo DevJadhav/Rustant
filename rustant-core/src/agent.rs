@@ -517,32 +517,13 @@ impl Agent {
                                 self.callback.on_decision_explanation(&explanation).await;
 
                                 let result = self.execute_tool(id, name, arguments).await;
+                                // Note: fact recording for cross-session learning is handled
+                                // inside execute_tool() — no need to duplicate it here.
                                 let result_tokens = match &result {
                                     Ok(output) => {
                                         let msg = Message::tool_result(id, &output.content, false);
                                         let tokens = output.content.len() / 4;
                                         self.memory.add_message(msg);
-
-                                        // Record fact for cross-session learning (same as single ToolCall path)
-                                        if output.content.len() > 10 && output.content.len() < 5000
-                                        {
-                                            let summary = if output.content.chars().count() > 200 {
-                                                format!("{}...", truncate_str(&output.content, 200))
-                                            } else {
-                                                output.content.clone()
-                                            };
-                                            self.memory.long_term.add_fact(
-                                                crate::memory::Fact::new(
-                                                    format!("Tool '{}' result: {}", name, summary),
-                                                    format!("tool:{}", name),
-                                                )
-                                                .with_tags(vec![
-                                                    "tool_result".to_string(),
-                                                    name.to_string(),
-                                                ]),
-                                            );
-                                        }
-
                                         tokens
                                     }
                                     Err(e) => {
@@ -843,7 +824,13 @@ impl Agent {
         }
 
         // Check safety contract pre-conditions
-        let risk_level = self.tools.get(tool_name).unwrap().risk_level;
+        let tool_entry = self
+            .tools
+            .get(tool_name)
+            .ok_or_else(|| ToolError::NotFound {
+                name: tool_name.to_string(),
+            })?;
+        let risk_level = tool_entry.risk_level;
         let contract_result = self
             .safety
             .contract_enforcer_mut()
@@ -877,8 +864,14 @@ impl Agent {
 
         let start = Instant::now();
 
-        // We need to get the executor without borrowing self
-        let executor = &self.tools.get(tool_name).unwrap().executor;
+        // Re-fetch the executor (borrow checker requires separate borrow from the one above)
+        let executor = &self
+            .tools
+            .get(tool_name)
+            .ok_or_else(|| ToolError::NotFound {
+                name: tool_name.to_string(),
+            })?
+            .executor;
         let result = (executor)(arguments.clone()).await;
         let duration_ms = start.elapsed().as_millis() as u64;
 

@@ -21,7 +21,7 @@ pub fn strip_ansi_escapes(input: &str) -> String {
             if i + 1 < len && bytes[i + 1] == b'[' {
                 // CSI sequence: \x1b[ ... <letter>
                 i += 2;
-                while i < len && !(bytes[i].is_ascii_alphabetic()) {
+                while i < len && !(bytes[i] >= 0x40 && bytes[i] <= 0x7E) {
                     i += 1;
                 }
                 if i < len {
@@ -107,7 +107,7 @@ pub fn escape_markdown(input: &str) -> String {
     let mut result = String::with_capacity(input.len() + input.len() / 4);
     for ch in input.chars() {
         match ch {
-            '[' | ']' | '(' | ')' | '#' | '*' | '_' | '`' | '|' | '~' => {
+            '[' | ']' | '(' | ')' | '#' | '*' | '_' | '`' | '|' | '~' | '!' | '>' | '-' | '+' => {
                 result.push('\\');
                 result.push(ch);
             }
@@ -283,5 +283,45 @@ mod tests {
     #[test]
     fn test_markdown_escape_empty() {
         assert_eq!(escape_markdown(""), "");
+    }
+
+    // ── Edge case: CSI sequences with non-alphabetic terminators ──
+
+    #[test]
+    fn test_strip_ansi_csi_tilde_terminator() {
+        // F5 key sends \x1b[15~
+        assert_eq!(strip_ansi_escapes("\x1b[15~"), "");
+    }
+
+    #[test]
+    fn test_strip_ansi_csi_at_terminator() {
+        // Insert chars: \x1b[2@
+        assert_eq!(strip_ansi_escapes("\x1b[2@"), "");
+    }
+
+    #[test]
+    fn test_strip_ansi_csi_tilde_with_surrounding_text() {
+        assert_eq!(strip_ansi_escapes("before\x1b[15~after"), "beforeafter");
+    }
+
+    // ── Edge case: markdown escapes for !, >, -, + ──
+
+    #[test]
+    fn test_markdown_escape_image_syntax() {
+        assert_eq!(
+            escape_markdown("![alt](http://evil.com/img.png)"),
+            "\\!\\[alt\\]\\(http://evil.com/img.png\\)"
+        );
+    }
+
+    #[test]
+    fn test_markdown_escape_blockquote() {
+        assert_eq!(escape_markdown("> quoted text"), "\\> quoted text");
+    }
+
+    #[test]
+    fn test_markdown_escape_list_markers() {
+        assert_eq!(escape_markdown("- item one"), "\\- item one");
+        assert_eq!(escape_markdown("+ item two"), "\\+ item two");
     }
 }

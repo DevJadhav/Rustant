@@ -2213,10 +2213,8 @@ mod tests {
         let command: String = "echo ".to_string() + &"日".repeat(70);
         assert!(command.len() > 200); // 5 + 210 = 215 bytes
 
-        let ctx = ApprovalContext::new().with_preview_from_tool(
-            "shell_exec",
-            &ActionDetails::ShellCommand { command },
-        );
+        let ctx = ApprovalContext::new()
+            .with_preview_from_tool("shell_exec", &ActionDetails::ShellCommand { command });
         let preview = ctx.preview.unwrap();
         assert!(preview.contains("$ echo"));
         assert!(preview.ends_with("..."));
