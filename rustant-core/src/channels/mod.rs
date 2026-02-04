@@ -5,14 +5,19 @@
 //! interface for sending and receiving messages across platforms.
 
 pub mod agent_bridge;
+pub mod auto_reply;
+pub mod digest;
 pub mod discord;
 pub mod email;
+pub mod email_intelligence;
 pub mod imessage;
+pub mod intelligence;
 pub mod irc;
 pub mod manager;
 pub mod matrix;
 pub mod normalize;
 pub mod routing;
+pub mod scheduler_bridge;
 pub mod signal;
 pub mod slack;
 pub mod sms;
@@ -24,11 +29,21 @@ pub mod webhook;
 pub mod whatsapp;
 
 pub use agent_bridge::ChannelAgentBridge;
+pub use auto_reply::{AutoReplyEngine, PendingReply, ReplyStatus};
+pub use digest::{ChannelDigest, DigestActionItem, DigestCollector, DigestHighlight};
+pub use email_intelligence::{
+    EmailCategory, EmailClassification, EmailIntelligence, SenderProfile,
+};
 pub use imessage::{IMessageChannel, IMessageConfig, ResolvedContact};
+pub use intelligence::{
+    ClassificationCache, ClassifiedMessage, IntelligenceResult, LlmClassificationResponse,
+    MessageClassifier, MessageType, SuggestedAction,
+};
 pub use irc::{IrcChannel, IrcConfig};
 pub use manager::{build_channel_manager, ChannelManager};
 pub use normalize::MessageNormalizer;
 pub use routing::{ChannelRouter, RoutingCondition, RoutingRule};
+pub use scheduler_bridge::{FollowUpReminder, ReminderStatus, SchedulerBridge};
 pub use sms::{SmsChannel, SmsConfig};
 pub use teams::{TeamsChannel, TeamsConfig};
 pub use types::{

@@ -28,6 +28,7 @@ pub mod providers;
 pub mod replay;
 pub mod safety;
 pub mod sandbox;
+pub mod sanitize;
 pub mod scheduler;
 pub mod search;
 pub mod session_manager;
@@ -50,13 +51,21 @@ pub use browser::{
     BrowserSecurityGuard, BrowserSession, CdpClient, MockCdpClient, PageSnapshot, SnapshotMode,
 };
 pub use channels::{
-    Channel, ChannelAgentBridge, ChannelCapabilities, ChannelManager, ChannelMessage,
-    ChannelStatus, ChannelType, ChannelUser, IMessageChannel, IMessageConfig, IrcChannel,
-    IrcConfig, MessageContent, MessageId, ResolvedContact, SmsChannel, SmsConfig, StreamingMode,
-    TeamsChannel, TeamsConfig, ThreadId, WebhookChannel, WebhookConfig,
+    AutoReplyEngine, Channel, ChannelAgentBridge, ChannelCapabilities, ChannelDigest,
+    ChannelManager, ChannelMessage, ChannelStatus, ChannelType, ChannelUser, ClassificationCache,
+    ClassifiedMessage, DigestActionItem, DigestCollector, DigestHighlight, EmailCategory,
+    EmailClassification, EmailIntelligence, FollowUpReminder, IMessageChannel, IMessageConfig,
+    IntelligenceResult, IrcChannel, IrcConfig, LlmClassificationResponse, MessageClassifier,
+    MessageContent, MessageId, MessageType, PendingReply, ReminderStatus, ReplyStatus,
+    ResolvedContact, SchedulerBridge, SenderProfile, SmsChannel, SmsConfig, StreamingMode,
+    SuggestedAction, TeamsChannel, TeamsConfig, ThreadId, WebhookChannel, WebhookConfig,
 };
 pub use config::MultiAgentConfig;
 pub use config::{config_exists, AgentConfig, ApprovalMode, KnowledgeConfig};
+pub use config::{
+    AutoReplyMode, ChannelIntelligenceConfig, DigestFrequency, IntelligenceConfig,
+    MessagePriority as ChannelMessagePriority,
+};
 
 pub use credentials::{
     CredentialError, CredentialStore, InMemoryCredentialStore, KeyringCredentialStore,

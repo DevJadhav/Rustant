@@ -62,6 +62,16 @@ pub enum TuiEvent {
     },
     /// Context window health notification (warnings, compression events).
     ContextHealth(rustant_core::ContextHealthEvent),
+    /// A channel digest has been generated.
+    ChannelDigest(serde_json::Value),
+    /// A channel message needs immediate user attention.
+    ChannelAlert {
+        channel: String,
+        sender: String,
+        summary: String,
+    },
+    /// A scheduled follow-up reminder has been triggered.
+    Reminder(serde_json::Value),
 }
 
 /// Implements AgentCallback by forwarding events through an mpsc channel.
@@ -166,6 +176,22 @@ impl AgentCallback for TuiCallback {
 
     async fn on_context_health(&self, event: &rustant_core::ContextHealthEvent) {
         let _ = self.tx.send(TuiEvent::ContextHealth(event.clone()));
+    }
+
+    async fn on_channel_digest(&self, digest: &serde_json::Value) {
+        let _ = self.tx.send(TuiEvent::ChannelDigest(digest.clone()));
+    }
+
+    async fn on_channel_alert(&self, channel: &str, sender: &str, summary: &str) {
+        let _ = self.tx.send(TuiEvent::ChannelAlert {
+            channel: channel.to_string(),
+            sender: sender.to_string(),
+            summary: summary.to_string(),
+        });
+    }
+
+    async fn on_reminder(&self, reminder: &serde_json::Value) {
+        let _ = self.tx.send(TuiEvent::Reminder(reminder.clone()));
     }
 }
 
@@ -333,6 +359,58 @@ mod tests {
                 assert_eq!(usage_percent, 75);
             }
             other => panic!("Expected ContextHealth Warning, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_callback_sends_channel_digest() {
+        let (callback, mut rx) = TuiCallback::new();
+        let digest = serde_json::json!({
+            "summary": "47 messages across 3 channels",
+            "total_messages": 47
+        });
+        callback.on_channel_digest(&digest).await;
+        match rx.recv().await.unwrap() {
+            TuiEvent::ChannelDigest(d) => {
+                assert_eq!(d["total_messages"], 47);
+            }
+            other => panic!("Expected ChannelDigest, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_callback_sends_channel_alert() {
+        let (callback, mut rx) = TuiCallback::new();
+        callback
+            .on_channel_alert("email", "boss@corp.com", "Urgent Q1 review")
+            .await;
+        match rx.recv().await.unwrap() {
+            TuiEvent::ChannelAlert {
+                channel,
+                sender,
+                summary,
+            } => {
+                assert_eq!(channel, "email");
+                assert_eq!(sender, "boss@corp.com");
+                assert_eq!(summary, "Urgent Q1 review");
+            }
+            other => panic!("Expected ChannelAlert, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_callback_sends_reminder() {
+        let (callback, mut rx) = TuiCallback::new();
+        let reminder = serde_json::json!({
+            "description": "Follow up on Q1 report",
+            "source_channel": "email"
+        });
+        callback.on_reminder(&reminder).await;
+        match rx.recv().await.unwrap() {
+            TuiEvent::Reminder(r) => {
+                assert_eq!(r["description"], "Follow up on Q1 report");
+            }
+            other => panic!("Expected Reminder, got {:?}", other),
         }
     }
 

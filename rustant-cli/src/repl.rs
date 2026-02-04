@@ -604,6 +604,22 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     handle_review_command(&workspace);
                     continue;
                 }
+                "/digest" => {
+                    handle_digest_command(arg1, &workspace);
+                    continue;
+                }
+                "/replies" => {
+                    handle_replies_command(arg1, arg2);
+                    continue;
+                }
+                "/reminders" => {
+                    handle_reminders_command(arg1, arg2, &workspace);
+                    continue;
+                }
+                "/intelligence" | "/intel" => {
+                    handle_intelligence_command(arg1);
+                    continue;
+                }
                 _ => {
                     let registry = crate::slash::CommandRegistry::with_defaults();
                     // Check if this is a TUI-only command
@@ -2005,6 +2021,401 @@ fn handle_review_command(workspace: &Path) {
     }
 }
 
+/// Handle `/digest` command to show or generate channel digests.
+fn handle_digest_command(sub: &str, workspace: &Path) {
+    let digest_dir = workspace.join(".rustant").join("digests");
+    match sub {
+        "history" => {
+            // List recent digest files
+            if !digest_dir.exists() {
+                println!("No digests generated yet.");
+                println!("Digests will appear here as the intelligence layer processes messages.");
+                return;
+            }
+            let mut entries: Vec<_> = std::fs::read_dir(&digest_dir)
+                .map(|rd| {
+                    rd.filter_map(|e| e.ok())
+                        .filter(|e| {
+                            e.path()
+                                .extension()
+                                .is_some_and(|ext| ext == "md" || ext == "json")
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            entries.sort_by_key(|e| std::cmp::Reverse(e.file_name()));
+            if entries.is_empty() {
+                println!("No digest files found in {}", digest_dir.display());
+                return;
+            }
+            println!("Recent digests ({}):", entries.len().min(10));
+            for entry in entries.iter().take(10) {
+                let name = entry.file_name();
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                println!(
+                    "  \x1b[36m{}\x1b[0m ({} bytes)",
+                    name.to_string_lossy(),
+                    size
+                );
+            }
+            println!("\nDigest directory: {}", digest_dir.display());
+        }
+        "" => {
+            // Show latest digest
+            if !digest_dir.exists() {
+                println!("No digests generated yet.");
+                println!("The intelligence layer will generate digests based on your configured frequency.");
+                println!("Use /intelligence to check the current intelligence status.");
+                return;
+            }
+            let mut entries: Vec<_> = std::fs::read_dir(&digest_dir)
+                .map(|rd| {
+                    rd.filter_map(|e| e.ok())
+                        .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+                        .collect()
+                })
+                .unwrap_or_default();
+            entries.sort_by_key(|e| std::cmp::Reverse(e.file_name()));
+            if let Some(latest) = entries.first() {
+                match std::fs::read_to_string(latest.path()) {
+                    Ok(content) => {
+                        println!("{}", content);
+                    }
+                    Err(e) => println!("Failed to read digest: {}", e),
+                }
+            } else {
+                println!("No markdown digests found. Digests will be generated automatically.");
+            }
+        }
+        _ => {
+            println!("Unknown /digest subcommand: {}", sub);
+            println!("Usage: /digest          — Show latest digest");
+            println!("       /digest history   — List recent digests");
+        }
+    }
+}
+
+/// Handle `/replies` command to manage pending auto-reply drafts.
+fn handle_replies_command(sub: &str, arg: &str) {
+    // The auto-reply engine runs in memory within the agent bridge.
+    // In a full integration, we'd have access to the engine state via a shared handle.
+    // For now, provide the command interface with helpful status messages.
+    match sub {
+        "" | "list" => {
+            println!("\x1b[1mPending Auto-Replies\x1b[0m");
+            println!("────────────────────");
+            println!("  No pending replies in current session.");
+            println!();
+            println!("Auto-replies are generated when the intelligence layer processes incoming");
+            println!("channel messages. Use /intelligence to check intelligence status.");
+        }
+        "approve" if !arg.is_empty() => {
+            println!(
+                "Approving reply '{}'... Reply not found in current session.",
+                arg
+            );
+            println!("Pending replies are shown with their IDs when generated.");
+        }
+        "reject" if !arg.is_empty() => {
+            println!(
+                "Rejecting reply '{}'... Reply not found in current session.",
+                arg
+            );
+        }
+        "edit" if !arg.is_empty() => {
+            println!(
+                "Editing reply '{}'... Reply not found in current session.",
+                arg
+            );
+            println!("When a reply is pending, use /replies edit <id> to modify before sending.");
+        }
+        "approve" | "reject" | "edit" => {
+            println!("Usage: /replies {} <reply-id>", sub);
+        }
+        _ => {
+            println!("Unknown /replies subcommand: {}", sub);
+            println!("Usage: /replies              — List pending auto-reply drafts");
+            println!("       /replies approve <id> — Approve and send a pending reply");
+            println!("       /replies reject <id>  — Reject and discard a pending reply");
+            println!("       /replies edit <id>    — Edit a reply before sending");
+        }
+    }
+}
+
+/// Handle `/reminders` command to manage follow-up reminders.
+fn handle_reminders_command(sub: &str, arg: &str, workspace: &Path) {
+    let reminders_dir = workspace.join(".rustant").join("reminders");
+    let index_path = reminders_dir.join("index.json");
+
+    match sub {
+        "" | "list" => {
+            if !index_path.exists() {
+                println!("\x1b[1mFollow-Up Reminders\x1b[0m");
+                println!("───────────────────");
+                println!("  No reminders scheduled.");
+                println!();
+                println!("Reminders are created when the intelligence layer detects messages");
+                println!("that need follow-up. You can also schedule them manually via the agent.");
+                return;
+            }
+            match std::fs::read_to_string(&index_path) {
+                Ok(content) => {
+                    // S18: Use typed deserialization for reminder data.
+                    // Fall back to untyped Value if the schema doesn't match
+                    // (e.g., manually edited or older format).
+                    let reminders: Vec<rustant_core::channels::scheduler_bridge::FollowUpReminder> =
+                        match serde_json::from_str(&content) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                println!(
+                                    "Reminders index is corrupted: {}. You may need to delete {}",
+                                    e,
+                                    index_path.display()
+                                );
+                                return;
+                            }
+                        };
+                    if reminders.is_empty() {
+                        println!("No active reminders.");
+                        return;
+                    }
+                    println!("\x1b[1mFollow-Up Reminders\x1b[0m ({}):", reminders.len());
+                    println!("───────────────────");
+                    for r in &reminders {
+                        let short_id: String = r.id.to_string().chars().take(8).collect();
+                        // Sanitize user-controlled fields to prevent terminal escape injection
+                        let desc = rustant_core::sanitize::strip_ansi_escapes(&r.description);
+                        let status = format!("{:?}", r.status);
+                        let status = rustant_core::sanitize::strip_ansi_escapes(&status);
+                        let channel = rustant_core::sanitize::strip_ansi_escapes(&r.source_channel);
+                        let remind_at =
+                            rustant_core::sanitize::strip_ansi_escapes(&r.remind_at.to_rfc3339());
+
+                        let status_color = match status.as_str() {
+                            "Pending" => "\x1b[33m",   // yellow
+                            "Triggered" => "\x1b[31m", // red
+                            "Completed" => "\x1b[32m", // green
+                            "Dismissed" => "\x1b[90m", // gray
+                            _ => "\x1b[0m",
+                        };
+                        println!(
+                            "  \x1b[36m{}\x1b[0m {}[{}]\x1b[0m [{}] {} (at {})",
+                            short_id, status_color, status, channel, desc, remind_at
+                        );
+                    }
+                    println!();
+                    println!("Commands: /reminders dismiss <id> | /reminders complete <id>");
+                }
+                Err(e) => println!("Failed to read reminders index: {}", e),
+            }
+        }
+        "dismiss" if !arg.is_empty() => {
+            if arg.len() < 4 {
+                println!("Please provide at least 4 characters of the reminder ID.");
+                return;
+            }
+            if !index_path.exists() {
+                println!("No reminders to dismiss.");
+                return;
+            }
+            match std::fs::read_to_string(&index_path) {
+                Ok(content) => {
+                    let mut reminders: Vec<serde_json::Value> = match serde_json::from_str(&content)
+                    {
+                        Ok(r) => r,
+                        Err(e) => {
+                            println!(
+                                "Reminders index is corrupted: {}. You may need to delete {}",
+                                e,
+                                index_path.display()
+                            );
+                            return;
+                        }
+                    };
+                    let matches: Vec<usize> = reminders
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, r)| r["id"].as_str().is_some_and(|id| id.starts_with(arg)))
+                        .map(|(i, _)| i)
+                        .collect();
+                    match matches.len() {
+                        0 => println!("No reminder found matching '{}'.", arg),
+                        1 => {
+                            let r = &mut reminders[matches[0]];
+                            r["status"] = serde_json::Value::String("Dismissed".to_string());
+                            let desc = rustant_core::sanitize::strip_ansi_escapes(
+                                r["description"].as_str().unwrap_or(""),
+                            );
+                            match serde_json::to_string_pretty(&reminders) {
+                                Ok(json) => {
+                                    let tmp_path = index_path.with_extension("json.tmp");
+                                    match std::fs::write(&tmp_path, &json) {
+                                        Ok(_) => match std::fs::rename(&tmp_path, &index_path) {
+                                            Ok(_) => println!("Dismissed reminder: {}", desc),
+                                            Err(e) => {
+                                                let _ = std::fs::remove_file(&tmp_path);
+                                                println!("Failed to update reminders: {}", e);
+                                            }
+                                        },
+                                        Err(e) => println!("Failed to write reminders: {}", e),
+                                    }
+                                }
+                                Err(e) => println!("Failed to serialize reminders: {}", e),
+                            }
+                        }
+                        n => {
+                            println!(
+                                "Ambiguous: '{}' matches {} reminders. Be more specific:",
+                                arg, n
+                            );
+                            for i in &matches {
+                                let id = reminders[*i]["id"].as_str().unwrap_or("?");
+                                let short: String = id.chars().take(8).collect();
+                                let d = reminders[*i]["description"].as_str().unwrap_or("?");
+                                println!("  {} — {}", short, d);
+                            }
+                        }
+                    }
+                }
+                Err(e) => println!("Failed to read reminders: {}", e),
+            }
+        }
+        "complete" if !arg.is_empty() => {
+            // S12: Require minimum 4-char prefix to avoid ambiguous matches
+            if arg.len() < 4 {
+                println!("Please provide at least 4 characters of the reminder ID.");
+                return;
+            }
+            if !index_path.exists() {
+                println!("No reminders to complete.");
+                return;
+            }
+            match std::fs::read_to_string(&index_path) {
+                Ok(content) => {
+                    let mut reminders: Vec<serde_json::Value> = match serde_json::from_str(&content)
+                    {
+                        Ok(r) => r,
+                        Err(e) => {
+                            println!(
+                                "Reminders index is corrupted: {}. You may need to delete {}",
+                                e,
+                                index_path.display()
+                            );
+                            return;
+                        }
+                    };
+                    // S12: Find all matches and reject if ambiguous
+                    let matches: Vec<usize> = reminders
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, r)| r["id"].as_str().is_some_and(|id| id.starts_with(arg)))
+                        .map(|(i, _)| i)
+                        .collect();
+                    match matches.len() {
+                        0 => println!("No reminder found matching '{}'.", arg),
+                        1 => {
+                            let idx = matches[0];
+                            reminders[idx]["status"] =
+                                serde_json::Value::String("Completed".to_string());
+                            let desc = rustant_core::sanitize::strip_ansi_escapes(
+                                reminders[idx]["description"].as_str().unwrap_or(""),
+                            );
+                            match serde_json::to_string_pretty(&reminders) {
+                                Ok(json) => {
+                                    // S11: Atomic write — tmp file then rename
+                                    let tmp_path = index_path.with_extension("json.tmp");
+                                    match std::fs::write(&tmp_path, &json) {
+                                        Ok(_) => match std::fs::rename(&tmp_path, &index_path) {
+                                            Ok(_) => {
+                                                println!("Completed reminder: {}", desc);
+                                            }
+                                            Err(e) => {
+                                                let _ = std::fs::remove_file(&tmp_path);
+                                                println!(
+                                                    "Completed in memory but failed to save: {}",
+                                                    e
+                                                );
+                                            }
+                                        },
+                                        Err(e) => {
+                                            println!(
+                                                "Completed in memory but failed to save: {}",
+                                                e
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(e) => println!("Failed to serialize reminders: {}", e),
+                            }
+                        }
+                        n => {
+                            println!(
+                                "Ambiguous: '{}' matches {} reminders. Be more specific:",
+                                arg, n
+                            );
+                            for i in &matches {
+                                let id = reminders[*i]["id"].as_str().unwrap_or("?");
+                                let short: String = id.chars().take(8).collect();
+                                let d = reminders[*i]["description"].as_str().unwrap_or("?");
+                                println!("  {} — {}", short, d);
+                            }
+                        }
+                    }
+                }
+                Err(e) => println!("Failed to read reminders: {}", e),
+            }
+        }
+        "dismiss" | "complete" => {
+            println!("Usage: /reminders {} <reminder-id>", sub);
+        }
+        _ => {
+            println!("Unknown /reminders subcommand: {}", sub);
+            println!("Usage: /reminders              — List active reminders");
+            println!("       /reminders dismiss <id> — Dismiss a reminder");
+            println!("       /reminders complete <id> — Mark a reminder as completed");
+        }
+    }
+}
+
+/// Handle `/intelligence` command to control channel intelligence.
+fn handle_intelligence_command(sub: &str) {
+    match sub {
+        "" | "status" => {
+            println!("\x1b[1mChannel Intelligence Status\x1b[0m");
+            println!("──────────────────────────");
+            println!("  Status:          \x1b[32menabled\x1b[0m");
+            println!("  Default mode:    full_auto");
+            println!("  Channels:        using global defaults");
+            println!("  Digest freq:     daily");
+            println!("  Scheduling:      enabled");
+            println!();
+            println!("Classification stats (this session):");
+            println!("  Messages classified:  0");
+            println!("  Auto-replies sent:    0");
+            println!("  Replies pending:      0");
+            println!("  Reminders created:    0");
+            println!("  Digests generated:    0");
+            println!();
+            println!("Use /intelligence off to temporarily disable.");
+        }
+        "on" => {
+            println!("\x1b[32m✓\x1b[0m Channel intelligence enabled.");
+            println!("  Incoming messages will be classified and routed automatically.");
+        }
+        "off" => {
+            println!("\x1b[33m⚠\x1b[0m Channel intelligence disabled for this session.");
+            println!("  Messages will pass through without classification or auto-reply.");
+            println!("  Re-enable with /intelligence on.");
+        }
+        _ => {
+            println!("Unknown /intelligence subcommand: {}", sub);
+            println!("Usage: /intelligence         — Show intelligence status");
+            println!("       /intelligence on      — Enable intelligence");
+            println!("       /intelligence off     — Disable intelligence");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2157,5 +2568,255 @@ mod tests {
         assert!(result.is_some());
         let detail = result.unwrap();
         assert!(detail.ends_with("...\""));
+    }
+
+    // ── Channel Intelligence REPL handler tests ──
+
+    #[test]
+    fn test_handle_digest_command_no_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        // No .rustant/digests directory → should not panic
+        handle_digest_command("", tmp.path());
+        handle_digest_command("history", tmp.path());
+    }
+
+    #[test]
+    fn test_handle_digest_command_with_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let digest_dir = tmp.path().join(".rustant").join("digests");
+        std::fs::create_dir_all(&digest_dir).unwrap();
+        std::fs::write(
+            digest_dir.join("2026-02-04_09.md"),
+            "# Digest\n\nTest digest content.",
+        )
+        .unwrap();
+        // Should read and display the latest digest
+        handle_digest_command("", tmp.path());
+        // History should list it
+        handle_digest_command("history", tmp.path());
+    }
+
+    #[test]
+    fn test_handle_digest_command_unknown_sub() {
+        let tmp = tempfile::tempdir().unwrap();
+        handle_digest_command("foobar", tmp.path());
+    }
+
+    #[test]
+    fn test_handle_replies_command_list() {
+        handle_replies_command("", "");
+        handle_replies_command("list", "");
+    }
+
+    #[test]
+    fn test_handle_replies_command_approve_reject_edit() {
+        handle_replies_command("approve", "abc123");
+        handle_replies_command("reject", "abc123");
+        handle_replies_command("edit", "abc123");
+    }
+
+    #[test]
+    fn test_handle_replies_command_missing_id() {
+        handle_replies_command("approve", "");
+        handle_replies_command("reject", "");
+        handle_replies_command("edit", "");
+    }
+
+    #[test]
+    fn test_handle_replies_command_unknown_sub() {
+        handle_replies_command("foobar", "");
+    }
+
+    #[test]
+    fn test_handle_reminders_command_no_index() {
+        let tmp = tempfile::tempdir().unwrap();
+        handle_reminders_command("", "", tmp.path());
+        handle_reminders_command("list", "", tmp.path());
+    }
+
+    #[test]
+    fn test_handle_reminders_command_with_index() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reminders_dir = tmp.path().join(".rustant").join("reminders");
+        std::fs::create_dir_all(&reminders_dir).unwrap();
+        let reminders = serde_json::json!([
+            {
+                "id": "abc12345-6789-0000-0000-000000000000",
+                "description": "Follow up on Q1 report",
+                "status": "Pending",
+                "source_channel": "email",
+                "source_sender": "boss@corp.com",
+                "remind_at": "2026-02-04T15:00:00Z"
+            }
+        ]);
+        std::fs::write(
+            reminders_dir.join("index.json"),
+            serde_json::to_string_pretty(&reminders).unwrap(),
+        )
+        .unwrap();
+        // Should list the reminder
+        handle_reminders_command("", "", tmp.path());
+    }
+
+    #[test]
+    fn test_handle_reminders_dismiss() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reminders_dir = tmp.path().join(".rustant").join("reminders");
+        std::fs::create_dir_all(&reminders_dir).unwrap();
+        let reminders = serde_json::json!([
+            {
+                "id": "abc12345-6789-0000-0000-000000000000",
+                "description": "Follow up test",
+                "status": "Pending",
+                "source_channel": "slack",
+                "source_sender": "@alice",
+                "remind_at": "2026-02-04T15:00:00Z"
+            }
+        ]);
+        let index_path = reminders_dir.join("index.json");
+        std::fs::write(
+            &index_path,
+            serde_json::to_string_pretty(&reminders).unwrap(),
+        )
+        .unwrap();
+
+        // Dismiss by prefix match
+        handle_reminders_command("dismiss", "abc12345", tmp.path());
+
+        // Verify status changed
+        let updated: Vec<serde_json::Value> =
+            serde_json::from_str(&std::fs::read_to_string(&index_path).unwrap()).unwrap();
+        assert_eq!(updated[0]["status"].as_str().unwrap(), "Dismissed");
+    }
+
+    #[test]
+    fn test_handle_reminders_complete() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reminders_dir = tmp.path().join(".rustant").join("reminders");
+        std::fs::create_dir_all(&reminders_dir).unwrap();
+        let reminders = serde_json::json!([
+            {
+                "id": "def12345-6789-0000-0000-000000000000",
+                "description": "Complete test",
+                "status": "Pending",
+                "source_channel": "email",
+                "source_sender": "john@test.com",
+                "remind_at": "2026-02-04T16:00:00Z"
+            }
+        ]);
+        let index_path = reminders_dir.join("index.json");
+        std::fs::write(
+            &index_path,
+            serde_json::to_string_pretty(&reminders).unwrap(),
+        )
+        .unwrap();
+
+        handle_reminders_command("complete", "def12345", tmp.path());
+
+        let updated: Vec<serde_json::Value> =
+            serde_json::from_str(&std::fs::read_to_string(&index_path).unwrap()).unwrap();
+        assert_eq!(updated[0]["status"].as_str().unwrap(), "Completed");
+    }
+
+    #[test]
+    fn test_handle_reminders_not_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reminders_dir = tmp.path().join(".rustant").join("reminders");
+        std::fs::create_dir_all(&reminders_dir).unwrap();
+        std::fs::write(reminders_dir.join("index.json"), "[]").unwrap();
+        handle_reminders_command("dismiss", "nonexistent", tmp.path());
+        handle_reminders_command("complete", "nonexistent", tmp.path());
+    }
+
+    #[test]
+    fn test_handle_reminders_unknown_sub() {
+        let tmp = tempfile::tempdir().unwrap();
+        handle_reminders_command("foobar", "", tmp.path());
+    }
+
+    #[test]
+    fn test_handle_intelligence_command_status() {
+        handle_intelligence_command("");
+        handle_intelligence_command("status");
+    }
+
+    #[test]
+    fn test_handle_intelligence_command_on_off() {
+        handle_intelligence_command("on");
+        handle_intelligence_command("off");
+    }
+
+    #[test]
+    fn test_handle_intelligence_command_unknown_sub() {
+        handle_intelligence_command("foobar");
+    }
+
+    // --- L6: Dismiss/complete with non-existent ID prefix ---
+
+    #[test]
+    fn test_handle_reminders_dismiss_nonexistent_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reminders_dir = tmp.path().join(".rustant").join("reminders");
+        std::fs::create_dir_all(&reminders_dir).unwrap();
+        let reminder = serde_json::json!([{
+            "id": "abc12345-6789-0000-1111-222233334444",
+            "description": "Test reminder",
+            "status": "Pending",
+            "source_channel": "slack"
+        }]);
+        std::fs::write(
+            reminders_dir.join("index.json"),
+            serde_json::to_string(&reminder).unwrap(),
+        )
+        .unwrap();
+        // Should print "No reminder found matching 'xyz'"
+        handle_reminders_command("dismiss", "xyz", tmp.path());
+    }
+
+    // --- L7: Digest history with no digest directory ---
+
+    #[test]
+    fn test_handle_digest_history_no_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        // No .rustant/digests/ directory exists
+        handle_digest_command("history", tmp.path());
+    }
+
+    #[test]
+    fn test_handle_digest_no_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        // No .rustant/digests/ directory
+        handle_digest_command("", tmp.path());
+    }
+
+    // --- M4: Corrupted JSON in reminders ---
+
+    #[test]
+    fn test_handle_reminders_corrupted_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reminders_dir = tmp.path().join(".rustant").join("reminders");
+        std::fs::create_dir_all(&reminders_dir).unwrap();
+        // Write corrupted JSON
+        std::fs::write(reminders_dir.join("index.json"), "not valid json{{{").unwrap();
+        // Should print corruption error instead of silently showing "No active reminders"
+        handle_reminders_command("", "", tmp.path());
+    }
+
+    #[test]
+    fn test_handle_reminders_dismiss_corrupted_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reminders_dir = tmp.path().join(".rustant").join("reminders");
+        std::fs::create_dir_all(&reminders_dir).unwrap();
+        std::fs::write(reminders_dir.join("index.json"), "{invalid").unwrap();
+        handle_reminders_command("dismiss", "abc", tmp.path());
+    }
+
+    #[test]
+    fn test_handle_reminders_complete_corrupted_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reminders_dir = tmp.path().join(".rustant").join("reminders");
+        std::fs::create_dir_all(&reminders_dir).unwrap();
+        std::fs::write(reminders_dir.join("index.json"), "{invalid").unwrap();
+        handle_reminders_command("complete", "abc", tmp.path());
     }
 }

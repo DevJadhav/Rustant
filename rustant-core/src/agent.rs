@@ -136,6 +136,27 @@ pub trait AgentCallback: Send + Sync {
     /// Notify about context window health changes (warnings, compression events).
     /// Default is a no-op for backward compatibility.
     async fn on_context_health(&self, _event: &ContextHealthEvent) {}
+
+    /// A channel digest has been generated and is ready for review.
+    /// Called when the digest system completes a summary for the configured period.
+    /// Default is a no-op for backward compatibility.
+    async fn on_channel_digest(&self, _digest: &serde_json::Value) {}
+
+    /// A message on a channel needs immediate user attention (escalation).
+    ///
+    /// Called when the intelligence layer classifies a message at or above the
+    /// escalation threshold. Uses `&str` parameters rather than `ClassifiedMessage`
+    /// to keep the callback trait decoupled from the classification system — callers
+    /// can format the alert data however they choose.
+    ///
+    /// Default is a no-op for backward compatibility.
+    async fn on_channel_alert(&self, _channel: &str, _sender: &str, _summary: &str) {}
+
+    /// A scheduled follow-up reminder has been triggered.
+    /// Called when a cron-scheduled reminder fires for a previously classified
+    /// message that requires follow-up.
+    /// Default is a no-op for backward compatibility.
+    async fn on_reminder(&self, _reminder: &serde_json::Value) {}
 }
 
 /// A tool executor function type. The agent holds tool executors and their definitions.

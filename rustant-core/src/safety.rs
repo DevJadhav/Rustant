@@ -7,7 +7,7 @@
 //! 4. Output validation
 //! 5. Audit logging
 
-use crate::config::{ApprovalMode, SafetyConfig};
+use crate::config::{ApprovalMode, MessagePriority, SafetyConfig};
 use crate::injection::{InjectionDetector, InjectionScanResult, Severity as InjectionSeverity};
 use crate::types::RiskLevel;
 use chrono::{DateTime, Utc};
@@ -43,6 +43,9 @@ pub struct ApprovalContext {
     /// Preview of the changes (diff, command, etc.) for destructive tools.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<String>,
+    /// Full draft text for channel replies (shown on request during approval).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_draft: Option<String>,
 }
 
 impl ApprovalContext {
@@ -88,7 +91,11 @@ impl ApprovalContext {
             }
             ("shell_exec", ActionDetails::ShellCommand { command }) => {
                 let truncated = if command.len() > 200 {
-                    format!("{}...", &command[..200])
+                    let mut end = 200;
+                    while end > 0 && !command.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    format!("{}...", &command[..end])
                 } else {
                     command.clone()
                 };
@@ -99,6 +106,27 @@ impl ApprovalContext {
             }
             ("smart_edit", ActionDetails::FileWrite { path, .. }) => {
                 Some(format!("Will smart-edit {}", path.display()))
+            }
+            (
+                _,
+                ActionDetails::ChannelReply {
+                    channel,
+                    recipient,
+                    preview: reply_preview,
+                    priority,
+                },
+            ) => {
+                let truncated = if reply_preview.chars().count() > 100 {
+                    format!("{}...", reply_preview.chars().take(100).collect::<String>())
+                } else {
+                    reply_preview.clone()
+                };
+                // Store the full draft so approval dialogs can show the complete text
+                self.full_draft = Some(reply_preview.clone());
+                Some(format!(
+                    "[{}] → {} (priority: {:?}): {}",
+                    channel, recipient, priority, truncated
+                ))
             }
             _ => None,
         };
@@ -191,6 +219,17 @@ pub enum ActionDetails {
         provider: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         duration_secs: Option<u64>,
+    },
+    /// An auto-reply or message sent through a channel.
+    ChannelReply {
+        /// The channel through which the reply will be sent.
+        channel: String,
+        /// The recipient (user, thread, or group) the reply targets.
+        recipient: String,
+        /// A short preview of the reply content.
+        preview: String,
+        /// The classified priority of the original message.
+        priority: MessagePriority,
     },
     Other {
         info: String,
@@ -911,8 +950,12 @@ impl SafetyGuardian {
     }
 
     /// Check if a file path is denied.
+    ///
+    /// Normalizes the path before matching to prevent traversal bypasses
+    /// (e.g., `../secrets/key.pem` bypassing `**/secrets/**`).
     fn check_path_denied(&self, path: &Path) -> Option<String> {
-        let path_str = path.to_string_lossy();
+        let resolved = Self::normalize_path(path);
+        let path_str = resolved.to_string_lossy();
         for pattern in &self.config.denied_paths {
             if Self::glob_matches(pattern, &path_str) {
                 return Some(format!(
@@ -922,6 +965,24 @@ impl SafetyGuardian {
             }
         }
         None
+    }
+
+    /// Normalize a path by resolving `.` and `..` segments.
+    ///
+    /// Uses manual component-based normalization to avoid expensive `canonicalize()` syscalls.
+    /// This handles path traversal attacks (`../../secrets`) without filesystem access.
+    fn normalize_path(path: &Path) -> std::path::PathBuf {
+        let mut components = Vec::new();
+        for component in path.components() {
+            match component {
+                std::path::Component::ParentDir => {
+                    components.pop();
+                }
+                std::path::Component::CurDir => {}
+                c => components.push(c),
+            }
+        }
+        components.iter().collect()
     }
 
     /// Check if a command is denied.
@@ -1067,7 +1128,15 @@ impl SafetyGuardian {
     }
 
     /// Add a tool+risk combination to the session-scoped allowlist.
-    /// Future actions with the same tool name and risk level will be auto-approved.
+    ///
+    /// Future actions with the same tool name and risk level will be auto-approved
+    /// for the remainder of this session.
+    ///
+    /// # Session Scope (S20)
+    /// The allowlist is held in memory only and persists for the entire `SafetyGuardian`
+    /// lifetime (i.e., the current session). It is NOT persisted to disk.
+    /// To revoke all entries, call [`clear_session_allowlist()`] or start a new session.
+    /// There is no individual revocation — clearing removes all entries at once.
     pub fn add_session_allowlist(&mut self, tool_name: String, risk_level: RiskLevel) {
         self.session_allowlist.insert((tool_name, risk_level));
     }
@@ -1076,6 +1145,11 @@ impl SafetyGuardian {
     pub fn is_session_allowed(&self, tool_name: &str, risk_level: RiskLevel) -> bool {
         self.session_allowlist
             .contains(&(tool_name.to_string(), risk_level))
+    }
+
+    /// Clear the entire session allowlist, revoking all "approve all similar" grants.
+    pub fn clear_session_allowlist(&mut self) {
+        self.session_allowlist.clear();
     }
 
     /// Get the adaptive trust state (for diagnostics/REPL).
@@ -2130,5 +2204,22 @@ mod tests {
         );
         assert!(ctx.preview.is_some());
         assert!(ctx.preview.unwrap().contains("git commit"));
+    }
+
+    #[test]
+    fn test_approval_context_preview_shell_exec_utf8_truncation() {
+        // Build a command with multi-byte characters that crosses the 200-byte boundary
+        // Each CJK character is 3 bytes in UTF-8, so 70 chars = 210 bytes
+        let command: String = "echo ".to_string() + &"日".repeat(70);
+        assert!(command.len() > 200); // 5 + 210 = 215 bytes
+
+        let ctx = ApprovalContext::new().with_preview_from_tool(
+            "shell_exec",
+            &ActionDetails::ShellCommand { command },
+        );
+        let preview = ctx.preview.unwrap();
+        assert!(preview.contains("$ echo"));
+        assert!(preview.ends_with("..."));
+        // Must not panic — that's the main assertion (reaching this line = success)
     }
 }

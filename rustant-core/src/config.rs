@@ -9,6 +9,7 @@ use figment::{
     Figment,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::channels::discord::DiscordConfig;
@@ -69,6 +70,9 @@ pub struct AgentConfig {
     /// Optional cross-session knowledge distillation configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub knowledge: Option<KnowledgeConfig>,
+    /// Optional channel intelligence configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intelligence: Option<IntelligenceConfig>,
 }
 
 /// Configuration for the workflow engine.
@@ -265,6 +269,256 @@ impl Default for MultiAgentConfig {
             default_resource_limits: crate::multi::ResourceLimits::default(),
             default_workspace_base: None,
         }
+    }
+}
+
+// Channel Intelligence Configuration
+
+/// Auto-reply mode for channel intelligence.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoReplyMode {
+    /// Never auto-reply to channel messages.
+    Disabled,
+    /// Generate draft replies but do not send, store for user review.
+    DraftOnly,
+    /// Auto-reply for routine messages, queue high-priority for approval.
+    AutoWithApproval,
+    /// Send all replies automatically.
+    #[default]
+    FullAuto,
+}
+
+/// Frequency for generating channel digest summaries.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum DigestFrequency {
+    /// No digests generated.
+    #[default]
+    Off,
+    /// Generate digest every hour.
+    Hourly,
+    /// Generate digest once per day.
+    Daily,
+    /// Generate digest once per week.
+    Weekly,
+}
+
+/// Priority level for classifying channel messages.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MessagePriority {
+    /// Low priority, informational, no action needed.
+    Low = 0,
+    /// Normal priority, standard messages.
+    #[default]
+    Normal = 1,
+    /// High priority, needs timely attention.
+    High = 2,
+    /// Urgent, needs immediate attention.
+    Urgent = 3,
+}
+
+/// Per-channel intelligence settings.
+///
+/// These can be overridden per-channel in the `[intelligence.channels.<name>]` section.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelIntelligenceConfig {
+    /// Auto-reply mode for this channel.
+    #[serde(default)]
+    pub auto_reply: AutoReplyMode,
+    /// Digest generation frequency.
+    #[serde(default)]
+    pub digest: DigestFrequency,
+    /// Whether to auto-schedule follow-ups for urgent messages.
+    #[serde(default = "default_true")]
+    pub smart_scheduling: bool,
+    /// Priority threshold for escalation, messages at or above this level get escalated.
+    #[serde(default)]
+    pub escalation_threshold: MessagePriority,
+    /// Default follow-up reminder delay in minutes (default: 60).
+    #[serde(default = "default_followup_minutes")]
+    pub default_followup_minutes: u32,
+}
+
+impl Default for ChannelIntelligenceConfig {
+    fn default() -> Self {
+        Self {
+            auto_reply: AutoReplyMode::default(),
+            digest: DigestFrequency::default(),
+            smart_scheduling: true,
+            escalation_threshold: MessagePriority::High,
+            default_followup_minutes: default_followup_minutes(),
+        }
+    }
+}
+
+/// Top-level channel intelligence configuration.
+///
+/// Controls autonomous message handling across all channels.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IntelligenceConfig {
+    /// Whether channel intelligence is enabled globally.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Default settings for all channels (overridden per-channel).
+    #[serde(default)]
+    pub defaults: ChannelIntelligenceConfig,
+    /// Per-channel overrides keyed by channel name (e.g., "email", "slack").
+    #[serde(default)]
+    pub channels: HashMap<String, ChannelIntelligenceConfig>,
+    /// Quiet hours: suppress auto-actions during these times.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quiet_hours: Option<crate::scheduler::QuietHours>,
+    /// Directory for digest file export (default: ".rustant/digests").
+    #[serde(default = "default_digest_dir")]
+    pub digest_dir: PathBuf,
+    /// Directory for ICS calendar/reminder export (default: ".rustant/reminders").
+    #[serde(default = "default_reminders_dir")]
+    pub reminders_dir: PathBuf,
+    /// Maximum tokens per auto-reply LLM call (cost control).
+    #[serde(default = "default_max_reply_tokens")]
+    pub max_reply_tokens: usize,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_followup_minutes() -> u32 {
+    60
+}
+
+fn default_digest_dir() -> PathBuf {
+    PathBuf::from(".rustant/digests")
+}
+
+fn default_reminders_dir() -> PathBuf {
+    PathBuf::from(".rustant/reminders")
+}
+
+fn default_max_reply_tokens() -> usize {
+    500
+}
+
+impl Default for IntelligenceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            defaults: ChannelIntelligenceConfig::default(),
+            channels: HashMap::new(),
+            quiet_hours: None,
+            digest_dir: default_digest_dir(),
+            reminders_dir: default_reminders_dir(),
+            max_reply_tokens: 500,
+        }
+    }
+}
+
+impl ChannelIntelligenceConfig {
+    /// Validate this channel intelligence config and return any warnings.
+    ///
+    /// Returns an empty Vec if the config is valid. Returns human-readable
+    /// warning messages for problematic values (backward compatible — does not error).
+    pub fn validate(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        // S13: Warn on zero followup minutes (likely a mistake)
+        if self.default_followup_minutes == 0 {
+            warnings.push(
+                "default_followup_minutes is 0 — follow-ups will trigger immediately".to_string(),
+            );
+        }
+
+        // S13: Warn on extremely large followup minutes (> 30 days)
+        if self.default_followup_minutes > 43_200 {
+            warnings.push(format!(
+                "default_followup_minutes is {} (>{} days) — this is unusually large",
+                self.default_followup_minutes,
+                self.default_followup_minutes / 1440
+            ));
+        }
+
+        // S13: Warn on Low escalation threshold (everything escalates)
+        if self.escalation_threshold == MessagePriority::Low {
+            warnings
+                .push("escalation_threshold is Low — all messages will be escalated".to_string());
+        }
+
+        warnings
+    }
+}
+
+impl IntelligenceConfig {
+    /// Get the intelligence config for a specific channel, falling back to defaults.
+    pub fn for_channel(&self, channel_name: &str) -> &ChannelIntelligenceConfig {
+        self.channels.get(channel_name).unwrap_or(&self.defaults)
+    }
+
+    /// Check if the current time is within quiet hours.
+    pub fn is_quiet_hours_now(&self) -> bool {
+        if let Some(ref quiet) = self.quiet_hours {
+            quiet.is_active(&chrono::Utc::now())
+        } else {
+            false
+        }
+    }
+
+    /// Validate the entire intelligence config and return any warnings.
+    ///
+    /// Checks the default config and all per-channel overrides, plus quiet hours format.
+    pub fn validate(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        // Validate defaults
+        for w in self.defaults.validate() {
+            warnings.push(format!("[defaults] {}", w));
+        }
+
+        // Validate per-channel overrides
+        for (name, cfg) in &self.channels {
+            for w in cfg.validate() {
+                warnings.push(format!("[channel:{}] {}", name, w));
+            }
+        }
+
+        // S13: Validate quiet hours time format
+        if let Some(ref quiet) = self.quiet_hours {
+            if !is_valid_time_format(&quiet.start) {
+                warnings.push(format!(
+                    "quiet_hours.start '{}' is not in HH:MM format",
+                    quiet.start
+                ));
+            }
+            if !is_valid_time_format(&quiet.end) {
+                warnings.push(format!(
+                    "quiet_hours.end '{}' is not in HH:MM format",
+                    quiet.end
+                ));
+            }
+        }
+
+        // S13: Warn on zero max_reply_tokens
+        if self.max_reply_tokens == 0 {
+            warnings.push("max_reply_tokens is 0 — auto-replies will be empty".to_string());
+        }
+
+        warnings
+    }
+}
+
+/// Check if a string is a valid HH:MM time format.
+fn is_valid_time_format(s: &str) -> bool {
+    if s.len() != 5 {
+        return false;
+    }
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() != 2 {
+        return false;
+    }
+    match (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+        (Ok(h), Ok(m)) => h < 24 && m < 60,
+        _ => false,
     }
 }
 
@@ -1021,5 +1275,262 @@ max_output_bytes = 1048576
         assert_eq!(config.max_mailbox_size, 1000);
         assert!(config.default_resource_limits.max_memory_mb.is_none());
         assert!(config.default_workspace_base.is_none());
+    }
+
+    #[test]
+    fn test_intelligence_config_defaults() {
+        let config = IntelligenceConfig::default();
+        assert!(config.enabled);
+        assert_eq!(config.defaults.auto_reply, AutoReplyMode::FullAuto);
+        assert_eq!(config.defaults.digest, DigestFrequency::Off);
+        assert!(config.defaults.smart_scheduling);
+        assert_eq!(config.defaults.escalation_threshold, MessagePriority::High);
+        assert!(config.quiet_hours.is_none());
+        assert_eq!(config.max_reply_tokens, 500);
+        assert_eq!(config.digest_dir, PathBuf::from(".rustant/digests"));
+        assert_eq!(config.reminders_dir, PathBuf::from(".rustant/reminders"));
+    }
+
+    #[test]
+    fn test_intelligence_config_for_channel() {
+        let mut config = IntelligenceConfig::default();
+        config.channels.insert(
+            "email".to_string(),
+            ChannelIntelligenceConfig {
+                auto_reply: AutoReplyMode::DraftOnly,
+                digest: DigestFrequency::Daily,
+                smart_scheduling: false,
+                escalation_threshold: MessagePriority::Urgent,
+                default_followup_minutes: 60,
+            },
+        );
+
+        // email channel gets override
+        let email = config.for_channel("email");
+        assert_eq!(email.auto_reply, AutoReplyMode::DraftOnly);
+        assert_eq!(email.digest, DigestFrequency::Daily);
+        assert!(!email.smart_scheduling);
+
+        // slack channel falls back to defaults
+        let slack = config.for_channel("slack");
+        assert_eq!(slack.auto_reply, AutoReplyMode::FullAuto);
+        assert_eq!(slack.digest, DigestFrequency::Off);
+    }
+
+    #[test]
+    fn test_intelligence_config_toml_deserialization() {
+        let toml_str = r#"
+            [llm]
+            provider = "openai"
+            model = "gpt-4o"
+            api_key_env = "OPENAI_API_KEY"
+            max_tokens = 4096
+            temperature = 0.7
+            context_window = 128000
+            input_cost_per_million = 2.5
+            output_cost_per_million = 10.0
+            use_streaming = true
+
+            [safety]
+            approval_mode = "safe"
+            allowed_paths = ["src/**"]
+            denied_paths = []
+            allowed_commands = ["cargo"]
+            ask_commands = []
+            denied_commands = []
+            allowed_hosts = []
+            max_iterations = 25
+
+            [memory]
+            window_size = 12
+            compression_threshold = 0.7
+            enable_persistence = false
+
+            [ui]
+            theme = "dark"
+            vim_mode = false
+            show_cost = true
+            use_tui = false
+
+            [tools]
+            enable_builtins = true
+            default_timeout_secs = 30
+            max_output_bytes = 1048576
+
+            [intelligence]
+            enabled = true
+            max_reply_tokens = 1000
+
+            [intelligence.defaults]
+            auto_reply = "auto_with_approval"
+            digest = "daily"
+            smart_scheduling = true
+            escalation_threshold = "urgent"
+
+            [intelligence.channels.email]
+            auto_reply = "draft_only"
+            digest = "weekly"
+
+            [intelligence.quiet_hours]
+            start = "22:00"
+            end = "07:00"
+        "#;
+
+        let config: AgentConfig = toml::from_str(toml_str).unwrap();
+        let intel = config.intelligence.unwrap();
+        assert!(intel.enabled);
+        assert_eq!(intel.max_reply_tokens, 1000);
+        assert_eq!(intel.defaults.auto_reply, AutoReplyMode::AutoWithApproval);
+        assert_eq!(intel.defaults.digest, DigestFrequency::Daily);
+        assert_eq!(intel.defaults.escalation_threshold, MessagePriority::Urgent);
+
+        let email = intel.for_channel("email");
+        assert_eq!(email.auto_reply, AutoReplyMode::DraftOnly);
+        assert_eq!(email.digest, DigestFrequency::Weekly);
+
+        let quiet = intel.quiet_hours.unwrap();
+        assert_eq!(quiet.start, "22:00");
+        assert_eq!(quiet.end, "07:00");
+    }
+
+    #[test]
+    fn test_auto_reply_mode_serde() {
+        assert_eq!(
+            serde_json::from_str::<AutoReplyMode>("\"full_auto\"").unwrap(),
+            AutoReplyMode::FullAuto
+        );
+        assert_eq!(
+            serde_json::from_str::<AutoReplyMode>("\"disabled\"").unwrap(),
+            AutoReplyMode::Disabled
+        );
+        assert_eq!(
+            serde_json::from_str::<AutoReplyMode>("\"draft_only\"").unwrap(),
+            AutoReplyMode::DraftOnly
+        );
+    }
+
+    #[test]
+    fn test_message_priority_ordering() {
+        assert!(MessagePriority::Low < MessagePriority::Normal);
+        assert!(MessagePriority::Normal < MessagePriority::High);
+        assert!(MessagePriority::High < MessagePriority::Urgent);
+    }
+
+    #[test]
+    fn test_agent_config_with_intelligence_none() {
+        // Verify backward compat: AgentConfig without intelligence field still works
+        let config = AgentConfig::default();
+        assert!(config.intelligence.is_none());
+    }
+
+    // --- S13: Config Validation Tests ---
+
+    #[test]
+    fn test_channel_config_validate_defaults_clean() {
+        let config = ChannelIntelligenceConfig::default();
+        let warnings = config.validate();
+        assert!(
+            warnings.is_empty(),
+            "Default config should have no warnings, got: {:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn test_channel_config_validate_zero_followup() {
+        let config = ChannelIntelligenceConfig {
+            default_followup_minutes: 0,
+            ..Default::default()
+        };
+        let warnings = config.validate();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("immediately"));
+    }
+
+    #[test]
+    fn test_channel_config_validate_huge_followup() {
+        let config = ChannelIntelligenceConfig {
+            default_followup_minutes: u32::MAX,
+            ..Default::default()
+        };
+        let warnings = config.validate();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("unusually large"));
+    }
+
+    #[test]
+    fn test_channel_config_validate_low_escalation() {
+        let config = ChannelIntelligenceConfig {
+            escalation_threshold: MessagePriority::Low,
+            ..Default::default()
+        };
+        let warnings = config.validate();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("all messages will be escalated"));
+    }
+
+    #[test]
+    fn test_intelligence_config_validate_clean() {
+        let config = IntelligenceConfig::default();
+        let warnings = config.validate();
+        assert!(
+            warnings.is_empty(),
+            "Default config should have no warnings, got: {:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn test_intelligence_config_validate_bad_quiet_hours() {
+        let config = IntelligenceConfig {
+            quiet_hours: Some(crate::scheduler::QuietHours {
+                start: "25:00".to_string(),
+                end: "abc".to_string(),
+            }),
+            ..Default::default()
+        };
+        let warnings = config.validate();
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings[0].contains("start"));
+        assert!(warnings[1].contains("end"));
+    }
+
+    #[test]
+    fn test_intelligence_config_validate_zero_reply_tokens() {
+        let config = IntelligenceConfig {
+            max_reply_tokens: 0,
+            ..Default::default()
+        };
+        let warnings = config.validate();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("auto-replies will be empty"));
+    }
+
+    #[test]
+    fn test_intelligence_config_validate_per_channel() {
+        let mut config = IntelligenceConfig::default();
+        config.channels.insert(
+            "email".to_string(),
+            ChannelIntelligenceConfig {
+                escalation_threshold: MessagePriority::Low,
+                default_followup_minutes: 0,
+                ..Default::default()
+            },
+        );
+        let warnings = config.validate();
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings.iter().all(|w| w.starts_with("[channel:email]")));
+    }
+
+    #[test]
+    fn test_is_valid_time_format() {
+        assert!(super::is_valid_time_format("00:00"));
+        assert!(super::is_valid_time_format("23:59"));
+        assert!(super::is_valid_time_format("12:30"));
+        assert!(!super::is_valid_time_format("24:00"));
+        assert!(!super::is_valid_time_format("12:60"));
+        assert!(!super::is_valid_time_format("abc"));
+        assert!(!super::is_valid_time_format("1:30"));
+        assert!(!super::is_valid_time_format(""));
     }
 }

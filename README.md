@@ -136,6 +136,40 @@ Connect Rustant to 13 platforms with a unified interface:
 - **WebChat** — Custom web chat widget
 - **Webhook** — Generic webhook receiver
 
+### Channel Intelligence
+
+Rustant automatically processes incoming messages across all 13 channels with an intelligent classification and response pipeline:
+
+- **Two-Tier Classification** — Fast heuristic pattern matching (<1ms) + LLM-based semantic classification for ambiguous messages, with caching to avoid re-classifying identical messages
+- **Auto-Reply** — Configurable modes: `full_auto` (send all), `auto_with_approval` (queue high-priority for review), `draft_only` (generate but don't send), `disabled`. Safety-gated through SafetyGuardian
+- **Channel Digests** — Periodic summaries (hourly/daily/weekly) with highlights, action items, and markdown export to `.rustant/digests/`
+- **Smart Scheduling** — Automatic follow-up reminders for action-required messages. ICS calendar export to `.rustant/reminders/` for integration with calendar apps
+- **Email Intelligence** — Auto-categorization (NeedsReply, ActionRequired, FYI, Newsletter, Automated), sender profile tracking, background IMAP polling
+- **Per-Channel Config** — Each channel can have different auto-reply modes, digest frequencies, and escalation thresholds
+- **Quiet Hours** — Suppress all auto-actions during configured time windows
+
+```toml
+# .rustant/config.toml
+[intelligence]
+enabled = true
+
+[intelligence.defaults]
+auto_reply = "full_auto"
+digest = "daily"
+smart_scheduling = true
+escalation_threshold = "high"
+
+[intelligence.channels.email]
+auto_reply = "draft_only"
+digest = "daily"
+
+[intelligence.channels.slack]
+auto_reply = "full_auto"
+digest = "hourly"
+```
+
+REPL/TUI commands: `/digest`, `/digest history`, `/replies`, `/replies approve <id>`, `/reminders`, `/reminders dismiss <id>`, `/intelligence`, `/intelligence on/off`.
+
 ### Voice & Audio
 
 - **Speech-to-Text** — OpenAI Whisper (cloud and local models)

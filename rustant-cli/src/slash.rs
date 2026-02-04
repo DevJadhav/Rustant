@@ -403,6 +403,72 @@ impl CommandRegistry {
             tui_only: true,
             detailed_help: None,
         });
+
+        // Channel Intelligence commands
+        self.register(CommandInfo {
+            name: "/digest",
+            aliases: &[],
+            description: "Show or generate channel digest",
+            usage: "/digest [history]",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "Show the latest channel digest or generate one on demand.\n\n\
+                 Usage:\n  /digest          — Show the latest digest\n  \
+                 /digest history   — List past digests\n\n\
+                 Digests summarize channel messages over a configured time period,\n\
+                 highlighting action items and high-priority messages.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/replies",
+            aliases: &[],
+            description: "Manage pending auto-reply drafts",
+            usage: "/replies [approve|reject|edit <id>]",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "View and manage pending auto-reply drafts.\n\n\
+                 Usage:\n  /replies               — List all pending replies\n  \
+                 /replies approve <id>   — Approve and send a reply\n  \
+                 /replies reject <id>    — Reject and discard a reply\n  \
+                 /replies edit <id>      — Edit a reply before sending\n\n\
+                 Auto-replies are gated by the SafetyGuardian approval system.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/reminders",
+            aliases: &[],
+            description: "Manage follow-up reminders",
+            usage: "/reminders [dismiss|complete <id>]",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "View and manage scheduled follow-up reminders.\n\n\
+                 Usage:\n  /reminders               — List active reminders\n  \
+                 /reminders dismiss <id>   — Dismiss a reminder\n  \
+                 /reminders complete <id>  — Mark as completed\n\n\
+                 Reminders are auto-created for messages classified as needing follow-up.\n\
+                 ICS calendar files are exported to .rustant/reminders/.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/intelligence",
+            aliases: &["/intel"],
+            description: "Channel intelligence status and control",
+            usage: "/intelligence [on|off|status]",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "View or control the channel intelligence layer.\n\n\
+                 Usage:\n  /intelligence          — Show intelligence status\n  \
+                 /intelligence off      — Temporarily disable\n  \
+                 /intelligence on       — Re-enable\n  \
+                 /intelligence status   — Detailed stats\n\n\
+                 Shows messages processed, auto-replies sent, digests generated,\n\
+                 reminders scheduled, and per-channel configuration.",
+            ),
+        });
     }
 
     /// Look up a command by name or alias.

@@ -45,6 +45,13 @@ impl ChannelManager {
     /// Register a channel by name.
     pub fn register(&mut self, channel: Box<dyn Channel>) {
         let name = channel.name().to_string();
+        // S17: Warn when overwriting an existing channel registration
+        if self.channels.contains_key(&name) {
+            tracing::warn!(
+                channel = %name,
+                "Overwriting existing channel registration — previous instance will be dropped"
+            );
+        }
         self.channels.insert(name, channel);
     }
 

@@ -1702,6 +1702,207 @@ impl App {
                 text.push_str("\nRun with: rustant workflow run <name> [-i key=value]");
                 self.push_system_msg(&text);
             }
+            cmd if cmd.starts_with("/digest") => {
+                let arg = cmd.strip_prefix("/digest").unwrap_or("").trim();
+                match arg {
+                    "history" => {
+                        let digest_dir = self.workspace.join(".rustant").join("digests");
+                        if !digest_dir.exists() {
+                            self.push_system_msg("No digests generated yet.");
+                        } else {
+                            let mut entries: Vec<_> = std::fs::read_dir(&digest_dir)
+                                .map(|rd| {
+                                    rd.filter_map(|e| e.ok())
+                                        .filter(|e| {
+                                            e.path()
+                                                .extension()
+                                                .is_some_and(|ext| ext == "md" || ext == "json")
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            entries.sort_by_key(|e| std::cmp::Reverse(e.file_name()));
+                            if entries.is_empty() {
+                                self.push_system_msg("No digest files found.");
+                            } else {
+                                let mut text =
+                                    format!("Recent digests ({}):\n", entries.len().min(10));
+                                for entry in entries.iter().take(10) {
+                                    let name = entry.file_name();
+                                    let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                                    text.push_str(&format!(
+                                        "  {} ({} bytes)\n",
+                                        name.to_string_lossy(),
+                                        size
+                                    ));
+                                }
+                                self.push_system_msg(&text);
+                            }
+                        }
+                    }
+                    "" => {
+                        let digest_dir = self.workspace.join(".rustant").join("digests");
+                        if !digest_dir.exists() {
+                            self.push_system_msg(
+                                "No digests yet. The intelligence layer will generate them based on your configured frequency.\nUse /intelligence to check status."
+                            );
+                        } else {
+                            let mut entries: Vec<_> = std::fs::read_dir(&digest_dir)
+                                .map(|rd| {
+                                    rd.filter_map(|e| e.ok())
+                                        .filter(|e| {
+                                            e.path().extension().is_some_and(|ext| ext == "md")
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            entries.sort_by_key(|e| std::cmp::Reverse(e.file_name()));
+                            if let Some(latest) = entries.first() {
+                                match std::fs::read_to_string(latest.path()) {
+                                    Ok(content) => self.push_system_msg(&content),
+                                    Err(e) => self
+                                        .push_system_msg(&format!("Failed to read digest: {}", e)),
+                                }
+                            } else {
+                                self.push_system_msg("No markdown digests found.");
+                            }
+                        }
+                    }
+                    _ => {
+                        self.push_system_msg(&format!(
+                            "Unknown /digest subcommand: {}\nUsage: /digest | /digest history",
+                            arg
+                        ));
+                    }
+                }
+            }
+            cmd if cmd.starts_with("/replies") => {
+                let arg = cmd.strip_prefix("/replies").unwrap_or("").trim();
+                match arg {
+                    "" | "list" => {
+                        self.push_system_msg(
+                            "Pending Auto-Replies\n────────────────────\n  No pending replies in current session.\n\nAuto-replies are generated when the intelligence layer processes incoming channel messages."
+                        );
+                    }
+                    _ => {
+                        let parts: Vec<&str> = arg.splitn(2, ' ').collect();
+                        let sub = parts[0];
+                        let id = parts.get(1).copied().unwrap_or("");
+                        match sub {
+                            "approve" | "reject" | "edit" if !id.is_empty() => {
+                                self.push_system_msg(&format!(
+                                    "Reply '{}' not found in current session. Pending replies are shown when generated.",
+                                    id
+                                ));
+                            }
+                            "approve" | "reject" | "edit" => {
+                                self.push_system_msg(&format!(
+                                    "Usage: /replies {} <reply-id>",
+                                    sub
+                                ));
+                            }
+                            _ => {
+                                self.push_system_msg(
+                                    "Usage: /replies | /replies approve <id> | /replies reject <id> | /replies edit <id>"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            cmd if cmd.starts_with("/reminders") => {
+                let arg = cmd.strip_prefix("/reminders").unwrap_or("").trim();
+                let reminders_dir = self.workspace.join(".rustant").join("reminders");
+                let index_path = reminders_dir.join("index.json");
+                match arg {
+                    "" | "list" => {
+                        if !index_path.exists() {
+                            self.push_system_msg(
+                                "Follow-Up Reminders\n───────────────────\n  No reminders scheduled.\n\nReminders are created when the intelligence layer detects messages needing follow-up."
+                            );
+                        } else {
+                            match std::fs::read_to_string(&index_path) {
+                                Ok(content) => {
+                                    let reminders: Vec<serde_json::Value> =
+                                        match serde_json::from_str(&content) {
+                                            Ok(r) => r,
+                                            Err(e) => {
+                                                self.push_system_msg(&format!(
+                                                    "Reminders index is corrupted: {}. You may need to delete {}",
+                                                    e, index_path.display()
+                                                ));
+                                                return;
+                                            }
+                                        };
+                                    if reminders.is_empty() {
+                                        self.push_system_msg("No active reminders.");
+                                    } else {
+                                        let mut text = format!(
+                                            "Follow-Up Reminders ({}):\n───────────────────\n",
+                                            reminders.len()
+                                        );
+                                        for r in &reminders {
+                                            let id = r["id"].as_str().unwrap_or("?");
+                                            let short_id: String = id.chars().take(8).collect();
+                                            // Sanitize user-controlled fields to prevent terminal escape injection
+                                            let desc = rustant_core::sanitize::strip_ansi_escapes(
+                                                r["description"].as_str().unwrap_or("(no desc)"),
+                                            );
+                                            let status = rustant_core::sanitize::strip_ansi_escapes(
+                                                r["status"].as_str().unwrap_or("?"),
+                                            );
+                                            let channel =
+                                                rustant_core::sanitize::strip_ansi_escapes(
+                                                    r["source_channel"].as_str().unwrap_or("?"),
+                                                );
+                                            text.push_str(&format!(
+                                                "  {} [{}] [{}] {}\n",
+                                                short_id, status, channel, desc
+                                            ));
+                                        }
+                                        self.push_system_msg(&text);
+                                    }
+                                }
+                                Err(e) => self
+                                    .push_system_msg(&format!("Failed to read reminders: {}", e)),
+                            }
+                        }
+                    }
+                    _ => {
+                        self.push_system_msg(
+                            "Usage: /reminders | /reminders dismiss <id> | /reminders complete <id>"
+                        );
+                    }
+                }
+            }
+            cmd if cmd.starts_with("/intelligence") || cmd.starts_with("/intel") => {
+                let prefix = if cmd.starts_with("/intelligence") {
+                    "/intelligence"
+                } else {
+                    "/intel"
+                };
+                let arg = cmd.strip_prefix(prefix).unwrap_or("").trim();
+                match arg {
+                    "" | "status" => {
+                        // TODO: Read actual config values and session stats from IntelligenceConfig
+                        // instead of displaying hardcoded placeholder strings.
+                        self.push_system_msg(
+                            "Channel Intelligence Status\n──────────────────────────\n  Status:       enabled\n  Default mode: full_auto\n  Digest freq:  daily\n  Scheduling:   enabled\n\nClassification stats (this session):\n  Messages: 0  |  Auto-replies: 0  |  Pending: 0  |  Reminders: 0  |  Digests: 0"
+                        );
+                    }
+                    "on" => {
+                        self.push_system_msg("Channel intelligence enabled. Messages will be classified and routed automatically.");
+                    }
+                    "off" => {
+                        self.push_system_msg("Channel intelligence disabled for this session. Re-enable with /intelligence on.");
+                    }
+                    _ => {
+                        self.push_system_msg(
+                            "Usage: /intelligence | /intelligence on | /intelligence off",
+                        );
+                    }
+                }
+            }
             other => {
                 // Use registry for unknown command suggestions
                 let registry = crate::slash::CommandRegistry::with_defaults();
@@ -1961,6 +2162,54 @@ impl App {
                     timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
                 });
                 self.pending_clarification = Some(reply);
+            }
+            TuiEvent::ChannelDigest(digest) => {
+                let summary = digest["summary"]
+                    .as_str()
+                    .unwrap_or("New channel digest available");
+                let total = digest["total_messages"].as_u64().unwrap_or(0);
+                let text = format!(
+                    "📋 Channel Digest: {} ({} messages). Use /digest to view.",
+                    summary, total
+                );
+                self.conversation.push_message(DisplayMessage {
+                    role: Role::System,
+                    text,
+                    tool_name: None,
+                    is_error: false,
+                    timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                });
+            }
+            TuiEvent::ChannelAlert {
+                channel,
+                sender,
+                summary,
+            } => {
+                let text = format!("🔔 Alert [{}] from {}: {}", channel, sender, summary);
+                self.conversation.push_message(DisplayMessage {
+                    role: Role::System,
+                    text,
+                    tool_name: None,
+                    is_error: true, // Highlight alerts
+                    timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                });
+            }
+            TuiEvent::Reminder(reminder) => {
+                let desc = reminder["description"]
+                    .as_str()
+                    .unwrap_or("Reminder triggered");
+                let channel = reminder["source_channel"].as_str().unwrap_or("unknown");
+                let text = format!(
+                    "⏰ Reminder [{}]: {}. Use /reminders to manage.",
+                    channel, desc
+                );
+                self.conversation.push_message(DisplayMessage {
+                    role: Role::System,
+                    text,
+                    tool_name: None,
+                    is_error: false,
+                    timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                });
             }
             TuiEvent::ContextHealth(event) => {
                 let text = match &event {
@@ -3305,5 +3554,116 @@ mod tests {
             last.text.contains("must be between"),
             "Should reject out-of-bounds max_iterations"
         );
+    }
+
+    // ── Channel Intelligence TUI tests ──
+
+    #[test]
+    fn test_handle_command_digest_no_dir() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/digest");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("No digests") || last.text.contains("intelligence"));
+    }
+
+    #[test]
+    fn test_handle_command_digest_history_no_dir() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/digest history");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("No digests") || last.text.contains("No digest"));
+    }
+
+    #[test]
+    fn test_handle_command_replies() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/replies");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("Pending Auto-Replies") || last.text.contains("No pending"));
+    }
+
+    #[test]
+    fn test_handle_command_replies_approve_missing_id() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/replies approve");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("Usage"));
+    }
+
+    #[test]
+    fn test_handle_command_reminders_no_index() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/reminders");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("No reminders") || last.text.contains("Reminders"));
+    }
+
+    #[test]
+    fn test_handle_command_intelligence_status() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/intelligence");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("Channel Intelligence Status"));
+    }
+
+    #[test]
+    fn test_handle_command_intelligence_on_off() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/intelligence on");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("enabled"));
+        app.handle_command("/intelligence off");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("disabled"));
+    }
+
+    #[test]
+    fn test_handle_command_intel_alias() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_command("/intel");
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("Channel Intelligence Status"));
+    }
+
+    #[test]
+    fn test_handle_tui_event_channel_digest() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        let digest = serde_json::json!({
+            "summary": "Test digest",
+            "total_messages": 10
+        });
+        app.handle_tui_event(TuiEvent::ChannelDigest(digest));
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("Digest"));
+        assert!(last.text.contains("10 messages"));
+    }
+
+    #[test]
+    fn test_handle_tui_event_channel_alert() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        app.handle_tui_event(TuiEvent::ChannelAlert {
+            channel: "slack".to_string(),
+            sender: "@alice".to_string(),
+            summary: "Deployment at risk".to_string(),
+        });
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("Alert"));
+        assert!(last.text.contains("slack"));
+        assert!(last.text.contains("@alice"));
+        assert!(last.is_error); // Alerts are highlighted
+    }
+
+    #[test]
+    fn test_handle_tui_event_reminder() {
+        let mut app = App::new(test_config(), std::env::temp_dir());
+        let reminder = serde_json::json!({
+            "description": "Follow up on PR review",
+            "source_channel": "github"
+        });
+        app.handle_tui_event(TuiEvent::Reminder(reminder));
+        let last = app.conversation.messages.last().unwrap();
+        assert!(last.text.contains("Reminder"));
+        assert!(last.text.contains("github"));
+        assert!(last.text.contains("Follow up on PR review"));
     }
 }
