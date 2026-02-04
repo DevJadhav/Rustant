@@ -25,6 +25,14 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+/// Truncate a string to at most `max_chars` characters, respecting UTF-8 boundaries.
+fn truncate_str(s: &str, max_chars: usize) -> &str {
+    match s.char_indices().nth(max_chars) {
+        Some((idx, _)) => &s[..idx],
+        None => s,
+    }
+}
+
 /// Messages sent to the agent loop via the handle.
 pub enum AgentMessage {
     ProcessTask {
@@ -236,6 +244,7 @@ impl Agent {
         self.state.task_id = Some(task_id);
         self.memory.start_new_task(task);
         self.budget.reset_task();
+        self.tool_token_usage.clear();
 
         // Run knowledge distillation from long-term memory and inject into brain
         self.knowledge.distill(&self.memory.long_term);
@@ -487,20 +496,46 @@ impl Agent {
                                 self.callback.on_decision_explanation(&explanation).await;
 
                                 let result = self.execute_tool(id, name, arguments).await;
-                                match result {
+                                let result_tokens = match &result {
                                     Ok(output) => {
                                         let msg = Message::tool_result(id, &output.content, false);
+                                        let tokens = output.content.len() / 4;
                                         self.memory.add_message(msg);
+
+                                        // Record fact for cross-session learning (same as single ToolCall path)
+                                        if output.content.len() > 10 && output.content.len() < 5000
+                                        {
+                                            let summary = if output.content.chars().count() > 200 {
+                                                format!("{}...", truncate_str(&output.content, 200))
+                                            } else {
+                                                output.content.clone()
+                                            };
+                                            self.memory.long_term.add_fact(
+                                                crate::memory::Fact::new(
+                                                    format!("Tool '{}' result: {}", name, summary),
+                                                    format!("tool:{}", name),
+                                                )
+                                                .with_tags(vec![
+                                                    "tool_result".to_string(),
+                                                    name.to_string(),
+                                                ]),
+                                            );
+                                        }
+
+                                        tokens
                                     }
                                     Err(e) => {
-                                        let msg = Message::tool_result(
-                                            id,
-                                            format!("Tool error: {}", e),
-                                            true,
-                                        );
+                                        let error_msg = format!("Tool error: {}", e);
+                                        let tokens = error_msg.len() / 4;
+                                        let msg = Message::tool_result(id, &error_msg, true);
                                         self.memory.add_message(msg);
+                                        tokens
                                     }
-                                }
+                                };
+
+                                // Track per-tool token usage (same as single ToolCall path)
+                                *self.tool_token_usage.entry(name.to_string()).or_insert(0) +=
+                                    result_tokens;
                             }
                             _ => {}
                         }
@@ -509,7 +544,55 @@ impl Agent {
                     if !has_tool_call {
                         break; // Only text, we're done
                     }
-                    // If there were tool calls, continue the loop
+
+                    // Check context compression after multipart tool calls
+                    if self.memory.short_term.needs_compression() {
+                        debug!("Triggering LLM-based context compression (multipart)");
+                        let msgs_to_summarize: Vec<Message> = self
+                            .memory
+                            .short_term
+                            .messages_to_summarize()
+                            .into_iter()
+                            .cloned()
+                            .collect();
+                        let msgs_count = msgs_to_summarize.len();
+                        let pinned_count = self.memory.short_term.pinned_count();
+
+                        let (summary_text, was_llm) = match self
+                            .summarizer
+                            .summarize(&msgs_to_summarize)
+                            .await
+                        {
+                            Ok(result) => {
+                                info!(
+                                    messages_summarized = result.messages_summarized,
+                                    tokens_saved = result.tokens_saved,
+                                    "Context compression via LLM summarization (multipart)"
+                                );
+                                (result.text, true)
+                            }
+                            Err(e) => {
+                                warn!(error = %e, "LLM summarization failed, falling back to truncation");
+                                let text = crate::summarizer::smart_fallback_summary(
+                                    &msgs_to_summarize,
+                                    500,
+                                );
+                                (text, false)
+                            }
+                        };
+
+                        self.memory.short_term.compress(summary_text);
+
+                        self.callback
+                            .on_context_health(&ContextHealthEvent::Compressed {
+                                messages_compressed: msgs_count,
+                                was_llm_summarized: was_llm,
+                                pinned_preserved: pinned_count,
+                            })
+                            .await;
+                    }
+
+                    // Continue loop — agent needs to observe and think again
                 }
                 Content::ToolResult { .. } => {
                     // Shouldn't happen from LLM directly, but handle gracefully
@@ -796,8 +879,8 @@ impl Agent {
                 // Only record non-trivial (>10 chars) and non-huge (<5000 chars) outputs
                 // to avoid noise and memory bloat.
                 if output.content.len() > 10 && output.content.len() < 5000 {
-                    let summary = if output.content.len() > 200 {
-                        format!("{}...", &output.content[..200])
+                    let summary = if output.content.chars().count() > 200 {
+                        format!("{}...", truncate_str(&output.content, 200))
                     } else {
                         output.content.clone()
                     };
@@ -952,7 +1035,7 @@ impl Agent {
                     .get("message")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                let truncated = &msg[..msg.len().min(80)];
+                let truncated = truncate_str(msg, 80);
                 ActionDetails::GitOperation {
                     operation: format!("commit: {}", truncated),
                 }

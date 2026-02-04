@@ -396,6 +396,10 @@ impl UserGuidance for RustantError {
             RustantError::Browser(e) => e.next_steps(),
             RustantError::Scheduler(e) => e.next_steps(),
             RustantError::Voice(e) => e.next_steps(),
+            RustantError::Memory(e) => e.next_steps(),
+            RustantError::Config(e) => e.next_steps(),
+            RustantError::Safety(e) => e.next_steps(),
+            RustantError::Channel(e) => e.next_steps(),
             _ => vec![],
         }
     }
@@ -1005,5 +1009,64 @@ mod tests {
         // Verify workflow errors dispatch through RustantError
         let err = RustantError::Workflow(WorkflowError::NotFound { name: "w".into() });
         assert!(err.suggestion().is_some());
+    }
+
+    #[test]
+    fn test_memory_error_guidance() {
+        let err = MemoryError::CompressionFailed {
+            message: "out of memory".into(),
+        };
+        assert!(err.suggestion().is_some());
+
+        let err = MemoryError::CapacityExceeded;
+        assert!(err.suggestion().is_some());
+    }
+
+    #[test]
+    fn test_config_error_guidance() {
+        let err = ConfigError::MissingField {
+            field: "api_key".into(),
+        };
+        assert!(err.suggestion().is_some());
+
+        let err = ConfigError::EnvVarMissing {
+            var: "OPENAI_API_KEY".into(),
+        };
+        assert!(err.suggestion().is_some());
+    }
+
+    #[test]
+    fn test_safety_error_guidance() {
+        let err = SafetyError::PathDenied {
+            path: "/etc/passwd".into(),
+        };
+        assert!(err.suggestion().is_some());
+
+        let err = SafetyError::ApprovalRejected;
+        assert!(err.suggestion().is_some());
+    }
+
+    #[test]
+    fn test_next_steps_delegation_memory_config_safety_channel() {
+        // These error types should delegate next_steps through RustantError
+        let err = RustantError::Memory(MemoryError::CompressionFailed {
+            message: "test".into(),
+        });
+        // Should not panic; returns vec (may be empty but delegation works)
+        let _ = err.next_steps();
+
+        let err = RustantError::Config(ConfigError::MissingField {
+            field: "test".into(),
+        });
+        let _ = err.next_steps();
+
+        let err = RustantError::Safety(SafetyError::ApprovalRejected);
+        let _ = err.next_steps();
+
+        let err = RustantError::Channel(ChannelError::ConnectionFailed {
+            name: "test".into(),
+            message: "fail".into(),
+        });
+        let _ = err.next_steps();
     }
 }

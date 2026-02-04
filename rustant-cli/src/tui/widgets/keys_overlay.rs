@@ -19,6 +19,9 @@ pub struct KeysOverlay {
     pub scroll_offset: u16,
 }
 
+/// Maximum scroll offset for the overlay content (~35 lines minus typical visible area).
+const MAX_SCROLL: u16 = 25;
+
 impl KeysOverlay {
     pub fn new() -> Self {
         Self::default()
@@ -40,7 +43,9 @@ impl KeysOverlay {
     }
 
     pub fn scroll_down(&mut self) {
-        self.scroll_offset = self.scroll_offset.saturating_add(1);
+        if self.scroll_offset < MAX_SCROLL {
+            self.scroll_offset = self.scroll_offset.saturating_add(1);
+        }
     }
 }
 
@@ -236,5 +241,28 @@ mod tests {
         terminal
             .draw(|frame| render_keys_overlay(frame, frame.area(), &overlay, &theme))
             .unwrap();
+    }
+
+    #[test]
+    fn test_scroll_down_capped_at_max() {
+        let mut overlay = KeysOverlay::new();
+        for _ in 0..100 {
+            overlay.scroll_down();
+        }
+        assert_eq!(overlay.scroll_offset, MAX_SCROLL);
+    }
+
+    #[test]
+    fn test_scroll_up_after_max() {
+        let mut overlay = KeysOverlay::new();
+        // Scroll to max
+        for _ in 0..100 {
+            overlay.scroll_down();
+        }
+        assert_eq!(overlay.scroll_offset, MAX_SCROLL);
+
+        // Scroll back up one
+        overlay.scroll_up();
+        assert_eq!(overlay.scroll_offset, MAX_SCROLL - 1);
     }
 }

@@ -424,7 +424,7 @@ impl SessionManager {
         match entry {
             Some(e) => {
                 let tag_str = tag.to_string();
-                if !e.tags.contains(&tag_str) {
+                if !e.tags.iter().any(|t| t.eq_ignore_ascii_case(&tag_str)) {
                     e.tags.push(tag_str);
                 }
                 self.index.save(&self.sessions_dir)
@@ -805,5 +805,77 @@ mod tests {
 
         let results = mgr.filter_by_tag("nonexistent");
         assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_tag_session_case_insensitive_dedup() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut mgr = create_test_manager(dir.path());
+
+        let entry = mgr.start_session(Some("test-tag-dedup"));
+        mgr.tag_session("test-tag-dedup", "bugfix").unwrap();
+        mgr.tag_session("test-tag-dedup", "BugFix").unwrap();
+        mgr.tag_session("test-tag-dedup", "BUGFIX").unwrap();
+
+        // Reload and verify only one tag was added
+        let index = SessionIndex::load(dir.path()).unwrap();
+        let saved = index.find_by_id(entry.id).unwrap();
+        assert_eq!(saved.tags.len(), 1);
+        assert_eq!(saved.tags[0], "bugfix");
+    }
+
+    #[test]
+    fn test_search_special_characters_no_panic() {
+        let mut index = SessionIndex::default();
+        let make_entry = |name: &str, goal: Option<&str>| SessionEntry {
+            id: Uuid::new_v4(),
+            name: name.to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            last_goal: goal.map(|g| g.to_string()),
+            summary: None,
+            message_count: 1,
+            total_tokens: 100,
+            completed: false,
+            file_name: format!("{}.json", name),
+            tags: vec![],
+            project_type: None,
+        };
+        index.entries.push(make_entry("session-1", Some("fix bug")));
+
+        let mgr = SessionManager::from_index(index);
+
+        // Special regex-like characters should not panic
+        let _ = mgr.search(".*+?()[]{}|\\^$");
+        let _ = mgr.search("🦀 Rust emoji");
+        let _ = mgr.search("日本語テスト");
+        let _ = mgr.search("café résumé");
+    }
+
+    #[test]
+    fn test_filter_by_tag_case_insensitive() {
+        let mut index = SessionIndex::default();
+        let make_entry = |name: &str, tags: Vec<&str>| SessionEntry {
+            id: Uuid::new_v4(),
+            name: name.to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            last_goal: None,
+            summary: None,
+            message_count: 1,
+            total_tokens: 100,
+            completed: false,
+            file_name: format!("{}.json", name),
+            tags: tags.into_iter().map(|s| s.to_string()).collect(),
+            project_type: None,
+        };
+        index.entries.push(make_entry("s1", vec!["BugFix"]));
+        index.entries.push(make_entry("s2", vec!["bugfix"]));
+
+        let mgr = SessionManager::from_index(index);
+
+        // Case-insensitive filtering should find both
+        let results = mgr.filter_by_tag("BUGFIX");
+        assert_eq!(results.len(), 2);
     }
 }

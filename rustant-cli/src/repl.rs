@@ -10,6 +10,14 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// Truncate a string to at most `max_chars` characters, respecting UTF-8 boundaries.
+fn truncate_str(s: &str, max_chars: usize) -> &str {
+    match s.char_indices().nth(max_chars) {
+        Some((idx, _)) => &s[..idx],
+        None => s,
+    }
+}
+
 /// Extract a human-readable detail string from tool arguments.
 ///
 /// Maps tool names to their primary argument for display during execution:
@@ -23,23 +31,23 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
         "shell_exec" => args.get("command").and_then(|v| v.as_str()).map(|s| {
-            if s.len() > 60 {
-                format!("{}...", &s[..60])
+            if s.chars().count() > 60 {
+                format!("{}...", truncate_str(s, 60))
             } else {
                 s.to_string()
             }
         }),
         "git_status" | "git_diff" => Some("workspace".to_string()),
         "git_commit" => args.get("message").and_then(|v| v.as_str()).map(|s| {
-            if s.len() > 50 {
-                format!("\"{}...\"", &s[..50])
+            if s.chars().count() > 50 {
+                format!("\"{}...\"", truncate_str(s, 50))
             } else {
                 format!("\"{}\"", s)
             }
         }),
         "web_search" => args.get("query").and_then(|v| v.as_str()).map(|s| {
-            if s.len() > 50 {
-                format!("\"{}...\"", &s[..50])
+            if s.chars().count() > 50 {
+                format!("\"{}...\"", truncate_str(s, 50))
             } else {
                 format!("\"{}\"", s)
             }
@@ -53,8 +61,8 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
         "codebase_search" => args.get("query").and_then(|v| v.as_str()).map(|s| {
-            if s.len() > 50 {
-                format!("\"{}...\"", &s[..50])
+            if s.chars().count() > 50 {
+                format!("\"{}...\"", truncate_str(s, 50))
             } else {
                 format!("\"{}\"", s)
             }
@@ -132,8 +140,8 @@ impl AgentCallback for CliCallback {
     }
 
     async fn on_tool_result(&self, tool_name: &str, output: &ToolOutput, duration_ms: u64) {
-        let preview = if output.content.len() > 200 {
-            format!("{}...", &output.content[..200])
+        let preview = if output.content.chars().count() > 200 {
+            format!("{}...", truncate_str(&output.content, 200))
         } else {
             output.content.clone()
         };
@@ -1162,8 +1170,8 @@ fn handle_pin_command(arg: &str, agent: &mut Agent) {
                     if let Some(msg) = msgs.get(i) {
                         let preview = match &msg.content {
                             rustant_core::types::Content::Text { text } => {
-                                if text.len() > 60 {
-                                    format!("{}...", &text[..60])
+                                if text.chars().count() > 60 {
+                                    format!("{}...", truncate_str(text, 60))
                                 } else {
                                     text.clone()
                                 }
@@ -1416,8 +1424,8 @@ fn handle_sessions_command(sub: &str, arg: &str, workspace: &Path) {
 fn print_session_entry(entry: &rustant_core::session_manager::SessionEntry) {
     let status = if entry.completed { "done" } else { "..." };
     let goal = entry.last_goal.as_deref().unwrap_or("(no goal)");
-    let goal_display = if goal.len() > 50 {
-        format!("{}...", &goal[..50])
+    let goal_display = if goal.chars().count() > 50 {
+        format!("{}...", truncate_str(goal, 50))
     } else {
         goal.to_string()
     };
@@ -2092,5 +2100,62 @@ mod tests {
             extract_tool_detail("codebase_search", &args),
             Some("\"error handling\"".to_string())
         );
+    }
+
+    #[test]
+    fn test_truncate_str_ascii() {
+        assert_eq!(truncate_str("hello world", 5), "hello");
+        assert_eq!(truncate_str("hello", 10), "hello");
+        assert_eq!(truncate_str("", 5), "");
+    }
+
+    #[test]
+    fn test_truncate_str_utf8_multibyte() {
+        // CJK characters (3 bytes each)
+        let cjk = "日本語テストの文字列です";
+        let truncated = truncate_str(cjk, 3);
+        assert_eq!(truncated, "日本語");
+
+        // Emoji (4 bytes each)
+        let emoji = "🦀🦀🦀🦀🦀";
+        let truncated = truncate_str(emoji, 2);
+        assert_eq!(truncated, "🦀🦀");
+
+        // Mixed ASCII and multi-byte
+        let mixed = "hello日本語world";
+        let truncated = truncate_str(mixed, 8);
+        assert_eq!(truncated, "hello日本語");
+    }
+
+    #[test]
+    fn test_extract_tool_detail_utf8_shell_exec() {
+        // Shell command with CJK chars exceeding truncation limit
+        let long_cjk = "日".repeat(70);
+        let args = serde_json::json!({"command": long_cjk});
+        let result = extract_tool_detail("shell_exec", &args);
+        assert!(result.is_some());
+        let detail = result.unwrap();
+        assert!(detail.ends_with("..."));
+    }
+
+    #[test]
+    fn test_extract_tool_detail_utf8_git_commit() {
+        // Git commit message with emoji exceeding truncation limit
+        let long_emoji = "🦀".repeat(60);
+        let args = serde_json::json!({"message": long_emoji});
+        let result = extract_tool_detail("git_commit", &args);
+        assert!(result.is_some());
+        let detail = result.unwrap();
+        assert!(detail.ends_with("...\""));
+    }
+
+    #[test]
+    fn test_extract_tool_detail_utf8_web_search() {
+        let long_kanji = "漢".repeat(60);
+        let args = serde_json::json!({"query": long_kanji});
+        let result = extract_tool_detail("web_search", &args);
+        assert!(result.is_some());
+        let detail = result.unwrap();
+        assert!(detail.ends_with("...\""));
     }
 }

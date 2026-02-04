@@ -197,6 +197,9 @@ impl ShortTermMemory {
 
     /// Unpin a message by its position in the current message list.
     pub fn unpin(&mut self, position: usize) -> bool {
+        if position >= self.messages.len() {
+            return false;
+        }
         let abs_idx = self.compressed_offset + position;
         self.pinned.remove(&abs_idx)
     }
@@ -1943,5 +1946,42 @@ mod tests {
         let store =
             KnowledgeStore::load(std::path::Path::new("/nonexistent/knowledge.json")).unwrap();
         assert!(store.rules.is_empty());
+    }
+
+    #[test]
+    fn test_unpin_out_of_bounds_returns_false() {
+        let mut stm = ShortTermMemory::new(100);
+        stm.add(Message::user("hello"));
+        stm.add(Message::assistant("hi"));
+        stm.add(Message::user("world"));
+
+        // Pin a valid message
+        assert!(stm.pin(1));
+        assert!(stm.is_pinned(1));
+
+        // Unpin out-of-bounds should return false
+        assert!(!stm.unpin(999));
+        assert!(!stm.unpin(3));
+
+        // Original pin should still be intact
+        assert!(stm.is_pinned(1));
+    }
+
+    #[test]
+    fn test_unpin_at_exact_boundary() {
+        let mut stm = ShortTermMemory::new(100);
+        stm.add(Message::user("msg0"));
+        stm.add(Message::user("msg1"));
+
+        // Unpin at exactly len (2) should fail
+        assert!(!stm.unpin(2));
+
+        // Unpin at len-1 (1) should succeed even if not pinned (returns false from remove)
+        assert!(!stm.unpin(1)); // not pinned, so remove returns false
+
+        // Pin and then unpin at boundary
+        assert!(stm.pin(1));
+        assert!(stm.unpin(1));
+        assert!(!stm.is_pinned(1));
     }
 }
