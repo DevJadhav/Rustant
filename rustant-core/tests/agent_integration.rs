@@ -16,7 +16,9 @@ use std::sync::Arc;
 /// Helper to create a test agent with recording callback.
 fn create_agent(provider: Arc<MockLlmProvider>) -> (Agent, Arc<RecordingCallback>) {
     let callback = Arc::new(RecordingCallback::new());
-    let config = AgentConfig::default();
+    let mut config = AgentConfig::default();
+    // Use non-streaming for deterministic test behavior
+    config.llm.use_streaming = false;
     let agent = Agent::new(provider, config, callback.clone());
     (agent, callback)
 }
@@ -197,15 +199,15 @@ async fn test_context_compression_during_task() {
     let provider = Arc::new(MockLlmProvider::new());
 
     // Create enough tool call iterations to trigger compression.
-    // Default window_size is 12, compression at 2x = 24 messages.
+    // Default window_size is 20, compression at 2x = 40 messages.
     // Each iteration adds ~2 messages (assistant tool_call + tool_result).
-    // After 12 tool iterations: 1 (user) + 24 (12*2) = 25 >= 24, triggers compression.
+    // After 20 tool iterations: 1 (user) + 40 (20*2) = 41 >= 40, triggers compression.
     // The LLM-based ContextSummarizer consumes one provider response when
-    // compression triggers, so we insert a text response at position 12.
+    // compression triggers, so we insert a text response at position 20.
     //
-    // Queue order: 12 tool calls, 1 summarizer text, 2 tool calls, 1 final text
-    // = 16 total responses, 15 agent iterations (14 tool + 1 text).
-    for _ in 0..12 {
+    // Queue order: 20 tool calls, 1 summarizer text, 2 tool calls, 1 final text
+    // = 24 total responses, 23 agent iterations (22 tool + 1 text).
+    for _ in 0..20 {
         provider.queue_response(MockLlmProvider::tool_call_response(
             "echo",
             serde_json::json!({"text": "iteration"}),
@@ -229,12 +231,12 @@ async fn test_context_compression_during_task() {
     register_echo_tool(&mut agent);
 
     let result = agent
-        .process_task("Run echo 14 times then finish")
+        .process_task("Run echo 22 times then finish")
         .await
         .unwrap();
 
     assert!(result.success);
-    assert_eq!(result.iterations, 15);
+    assert_eq!(result.iterations, 23);
 }
 
 #[tokio::test]
@@ -287,8 +289,8 @@ async fn test_agent_with_streaming_config() {
 async fn test_max_iterations_in_integration() {
     let provider = Arc::new(MockLlmProvider::new());
 
-    // Queue more tool calls than max_iterations allows
-    for _ in 0..30 {
+    // Queue more tool calls than max_iterations allows (default is 50)
+    for _ in 0..55 {
         provider.queue_response(MockLlmProvider::tool_call_response(
             "echo",
             serde_json::json!({"text": "loop"}),
@@ -302,7 +304,7 @@ async fn test_max_iterations_in_integration() {
     assert!(result.is_err());
     match result.unwrap_err() {
         RustantError::Agent(AgentError::MaxIterationsReached { max }) => {
-            assert_eq!(max, 25); // default config
+            assert_eq!(max, 50); // default config
         }
         e => panic!("Expected MaxIterationsReached, got: {:?}", e),
     }

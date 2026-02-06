@@ -875,6 +875,89 @@ fn create_tool_executor(name: &str, workspace: &Path) -> Option<rustant_core::ag
                 })
             }))
         }
+        "web_search" => {
+            let tool = Arc::new(rustant_tools::web::WebSearchTool::new());
+            Some(Box::new(move |args| {
+                let t = tool.clone();
+                Box::pin(async move {
+                    use rustant_tools::registry::Tool;
+                    t.execute(args).await
+                })
+            }))
+        }
+        "web_fetch" => {
+            let tool = Arc::new(rustant_tools::web::WebFetchTool::new());
+            Some(Box::new(move |args| {
+                let t = tool.clone();
+                Box::pin(async move {
+                    use rustant_tools::registry::Tool;
+                    t.execute(args).await
+                })
+            }))
+        }
+        "document_read" => {
+            let tool = Arc::new(rustant_tools::web::DocumentReadTool::new(ws));
+            Some(Box::new(move |args| {
+                let t = tool.clone();
+                Box::pin(async move {
+                    use rustant_tools::registry::Tool;
+                    t.execute(args).await
+                })
+            }))
+        }
+        "smart_edit" => {
+            let tool = Arc::new(rustant_tools::smart_edit::SmartEditTool::new(ws));
+            Some(Box::new(move |args| {
+                let t = tool.clone();
+                Box::pin(async move {
+                    use rustant_tools::registry::Tool;
+                    t.execute(args).await
+                })
+            }))
+        }
+        "codebase_search" => {
+            let tool = Arc::new(rustant_tools::codebase_search::CodebaseSearchTool::new(ws));
+            Some(Box::new(move |args| {
+                let t = tool.clone();
+                Box::pin(async move {
+                    use rustant_tools::registry::Tool;
+                    t.execute(args).await
+                })
+            }))
+        }
+        #[cfg(target_os = "macos")]
+        "imessage_contacts" => {
+            let tool = Arc::new(rustant_tools::imessage::IMessageContactsTool);
+            Some(Box::new(move |args| {
+                let t = tool.clone();
+                Box::pin(async move {
+                    use rustant_tools::registry::Tool;
+                    t.execute(args).await
+                })
+            }))
+        }
+        #[cfg(target_os = "macos")]
+        "imessage_send" => {
+            let tool = Arc::new(rustant_tools::imessage::IMessageSendTool);
+            Some(Box::new(move |args| {
+                let t = tool.clone();
+                Box::pin(async move {
+                    use rustant_tools::registry::Tool;
+                    t.execute(args).await
+                })
+            }))
+        }
+        #[cfg(target_os = "macos")]
+        "imessage_read" => {
+            let tool = Arc::new(rustant_tools::imessage::IMessageReadTool);
+            Some(Box::new(move |args| {
+                let t = tool.clone();
+                Box::pin(async move {
+                    use rustant_tools::registry::Tool;
+                    t.execute(args).await
+                })
+            }))
+        }
         _ => None,
     }
 }
@@ -883,9 +966,14 @@ fn create_tool_executor(name: &str, workspace: &Path) -> Option<rustant_core::ag
 fn tool_risk_level(name: &str) -> RiskLevel {
     match name {
         "file_read" | "file_list" | "file_search" | "git_status" | "git_diff" | "echo"
-        | "datetime" | "calculator" => RiskLevel::ReadOnly,
-        "file_write" | "file_patch" | "git_commit" => RiskLevel::Write,
+        | "datetime" | "calculator" | "web_search" | "web_fetch" | "document_read"
+        | "codebase_search" => RiskLevel::ReadOnly,
+        "file_write" | "file_patch" | "git_commit" | "smart_edit" => RiskLevel::Write,
         "shell_exec" => RiskLevel::Execute,
+        #[cfg(target_os = "macos")]
+        "imessage_contacts" | "imessage_read" => RiskLevel::ReadOnly,
+        #[cfg(target_os = "macos")]
+        "imessage_send" => RiskLevel::Write,
         _ => RiskLevel::Execute,
     }
 }

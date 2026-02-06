@@ -455,6 +455,7 @@ async fn test_gmail_imap_xoauth2_real_connection() {
         smtp_port: 587,
         username: email.clone(),
         password: token,
+        password_env: None,
         from_address: email,
         allowed_senders: vec![],
         auth_method: EmailAuthMethod::XOAuth2,

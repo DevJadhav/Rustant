@@ -655,21 +655,41 @@ impl Agent {
             model: None,
         };
 
-        // Run the streaming completion
-        self.brain
-            .provider()
-            .complete_streaming(request, tx)
-            .await?;
+        // Run the streaming completion in a background task so the producer
+        // (complete_streaming) and consumer (rx.recv loop) run concurrently.
+        // Without this, awaiting complete_streaming drops the tx sender before
+        // the consumer reads any events, resulting in empty text.
+        let provider = self.brain.provider_arc();
+        let producer = tokio::spawn(async move { provider.complete_streaming(request, tx).await });
 
-        // Consume events from the channel
+        // Consume events from the channel concurrently with the producer
         let mut text_parts = String::new();
         let mut usage = TokenUsage::default();
+        // Track streaming tool calls: id -> (name, accumulated_arguments)
+        let mut tool_calls: std::collections::HashMap<String, (String, String)> =
+            std::collections::HashMap::new();
+        let mut tool_call_order: Vec<String> = Vec::new(); // preserve order
 
         while let Some(event) = rx.recv().await {
             match event {
                 StreamEvent::Token(token) => {
                     self.callback.on_token(&token).await;
                     text_parts.push_str(&token);
+                }
+                StreamEvent::ToolCallStart { id, name } => {
+                    tool_call_order.push(id.clone());
+                    tool_calls.insert(id, (name, String::new()));
+                }
+                StreamEvent::ToolCallDelta {
+                    id,
+                    arguments_delta,
+                } => {
+                    if let Some((_, ref mut args)) = tool_calls.get_mut(&id) {
+                        args.push_str(&arguments_delta);
+                    }
+                }
+                StreamEvent::ToolCallEnd { id: _ } => {
+                    // Tool call complete — arguments are now fully accumulated
                 }
                 StreamEvent::Done { usage: u } => {
                     usage = u;
@@ -678,19 +698,52 @@ impl Agent {
                 StreamEvent::Error(e) => {
                     return Err(LlmError::Streaming { message: e });
                 }
-                _ => {}
             }
         }
+
+        // Wait for the producer to finish and propagate errors
+        producer.await.map_err(|e| LlmError::Streaming {
+            message: format!("Streaming task panicked: {}", e),
+        })??;
 
         // Track usage in brain
         self.brain.track_usage(&usage);
 
-        let message = Message::new(Role::Assistant, Content::text(text_parts));
+        // Build the response content based on what was streamed
+        let content = if !tool_call_order.is_empty() {
+            // Use the first tool call (single tool call is most common)
+            let first_id = &tool_call_order[0];
+            if let Some((name, args_str)) = tool_calls.get(first_id) {
+                let arguments: serde_json::Value =
+                    serde_json::from_str(args_str).unwrap_or(serde_json::json!({}));
+                if text_parts.is_empty() {
+                    Content::tool_call(first_id, name, arguments)
+                } else {
+                    Content::MultiPart {
+                        parts: vec![
+                            Content::text(&text_parts),
+                            Content::tool_call(first_id, name, arguments),
+                        ],
+                    }
+                }
+            } else {
+                Content::text(text_parts)
+            }
+        } else {
+            Content::text(text_parts)
+        };
+        let finish_reason = if tool_call_order.is_empty() {
+            "stop"
+        } else {
+            "tool_calls"
+        };
+
+        let message = Message::new(Role::Assistant, content);
         Ok(CompletionResponse {
             message,
             usage,
             model: self.brain.model_name().to_string(),
-            finish_reason: Some("stop".to_string()),
+            finish_reason: Some(finish_reason.to_string()),
         })
     }
 
@@ -1054,6 +1107,86 @@ impl Agent {
                     operation: format!("commit: {}", truncated),
                 }
             }
+            // macOS native tools
+            "macos_calendar" | "macos_reminders" | "macos_notes" => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("list");
+                let title = arguments
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                ActionDetails::Other {
+                    info: format!("{} {} {}", tool_name, action, title)
+                        .trim()
+                        .to_string(),
+                }
+            }
+            "macos_app_control" => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("list_running");
+                let app = arguments
+                    .get("app_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                ActionDetails::ShellCommand {
+                    command: format!("{} {}", action, app).trim().to_string(),
+                }
+            }
+            "macos_clipboard" => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("read");
+                ActionDetails::Other {
+                    info: format!("clipboard {}", action),
+                }
+            }
+            "macos_screenshot" => {
+                let path = arguments
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("screenshot.png");
+                ActionDetails::FileWrite {
+                    path: path.into(),
+                    size_bytes: 0,
+                }
+            }
+            "macos_finder" => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("reveal");
+                let path = arguments
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(".");
+                if action == "trash" {
+                    ActionDetails::FileDelete { path: path.into() }
+                } else {
+                    ActionDetails::Other {
+                        info: format!("Finder: {} {}", action, path),
+                    }
+                }
+            }
+            "macos_notification" | "macos_system_info" | "macos_spotlight" => {
+                ActionDetails::Other {
+                    info: arguments
+                        .as_object()
+                        .map(|o| {
+                            o.iter()
+                                .map(|(k, v)| {
+                                    format!("{}={}", k, v.as_str().unwrap_or(&v.to_string()))
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .unwrap_or_default(),
+                }
+            }
             _ => ActionDetails::Other {
                 info: arguments.to_string(),
             },
@@ -1339,7 +1472,9 @@ mod tests {
 
     fn create_test_agent(provider: Arc<MockLlmProvider>) -> (Agent, Arc<RecordingCallback>) {
         let callback = Arc::new(RecordingCallback::new());
-        let config = AgentConfig::default();
+        let mut config = AgentConfig::default();
+        // Use non-streaming for deterministic test behavior
+        config.llm.use_streaming = false;
         let agent = Agent::new(provider, config, callback.clone());
         (agent, callback)
     }
@@ -1447,8 +1582,8 @@ mod tests {
     #[tokio::test]
     async fn test_agent_max_iterations() {
         let provider = Arc::new(MockLlmProvider::new());
-        // Queue many tool calls to exhaust iterations
-        for _ in 0..30 {
+        // Queue many tool calls to exhaust iterations (more than max_iterations default of 50)
+        for _ in 0..55 {
             provider.queue_response(MockLlmProvider::tool_call_response(
                 "echo",
                 serde_json::json!({"text": "loop"}),
@@ -1470,7 +1605,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             RustantError::Agent(AgentError::MaxIterationsReached { max }) => {
-                assert_eq!(max, 25);
+                assert_eq!(max, 50);
             }
             e => panic!("Expected MaxIterationsReached, got: {:?}", e),
         }
@@ -1654,7 +1789,8 @@ mod tests {
         provider.queue_response(MockLlmProvider::text_response("OK, I'll skip that."));
 
         let callback = Arc::new(RecordingCallback::new());
-        let config = AgentConfig::default();
+        let mut config = AgentConfig::default();
+        config.llm.use_streaming = false;
         let mut agent = Agent::new(provider, config, callback.clone());
         agent.register_tool(RegisteredTool {
             definition: ToolDefinition {
@@ -1986,6 +2122,7 @@ mod tests {
 
         let callback = Arc::new(SelectiveDenyCallback::new(vec!["file_write".to_string()]));
         let mut config = AgentConfig::default();
+        config.llm.use_streaming = false;
         // Use Paranoid mode so ALL actions require approval
         config.safety.approval_mode = crate::config::ApprovalMode::Paranoid;
 

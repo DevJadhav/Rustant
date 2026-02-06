@@ -1,0 +1,61 @@
+# Rustant Daily macOS Assistant — Ollama (Local) Config Template
+# Copy to .rustant/config.toml and adjust as needed
+#
+# Prerequisites:
+#   brew install ollama
+#   ollama pull qwen2.5:14b    # Recommended: best tool calling balance
+#   ollama serve                # Start the server
+#
+# Model Recommendations (by capability):
+#   qwen2.5:14b  — 9GB, 16GB RAM — Best balance of speed + tool calling
+#   qwen2.5:32b  — 20GB, 32GB RAM — Best reasoning + tool calling
+#   llama3.1:8b  — 4.7GB, 8GB RAM — Fastest, simple daily tasks
+#   llama3.1:70b — 40GB, 64GB RAM — Best open-source reasoning
+#   mistral-nemo:12b — 7GB, 16GB RAM — Good multilingual
+#   deepseek-coder-v2:16b — 9GB, 16GB RAM — Code-focused tasks
+
+[llm]
+provider = "openai"
+model = "qwen2.5:14b"
+api_key_env = "OLLAMA_API_KEY"
+base_url = "http://localhost:11434/v1"
+max_tokens = 4096
+temperature = 0.7
+context_window = 32768
+input_cost_per_million = 0.0
+output_cost_per_million = 0.0
+use_streaming = true
+
+[safety]
+approval_mode = "safe"
+allowed_paths = ["src/**", "tests/**", "docs/**", "~/**"]
+denied_paths = [".env*", "**/*.key", "**/secrets/**", "**/*.pem",
+    "**/credentials*", ".ssh/**", ".aws/**"]
+allowed_commands = ["cargo", "git", "npm", "pnpm", "yarn", "python -m pytest",
+    "open", "osascript", "mdfind", "screencapture", "pbcopy", "pbpaste",
+    "pmset", "sw_vers", "brew"]
+ask_commands = ["rm", "mv", "cp", "chmod"]
+denied_commands = ["sudo", "curl | sh", "wget | bash"]
+allowed_hosts = []
+max_iterations = 50
+
+[safety.injection_detection]
+enabled = true
+threshold = 0.5
+scan_tool_outputs = true
+
+[memory]
+window_size = 20
+compression_threshold = 0.7
+enable_persistence = true
+
+[ui]
+theme = "dark"
+vim_mode = false
+show_cost = true
+use_tui = false
+
+[tools]
+enable_builtins = true
+default_timeout_secs = 60
+max_output_bytes = 2097152

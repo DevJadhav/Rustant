@@ -27,6 +27,7 @@ struct ModelMeta {
 /// Look up known model metadata. Returns None for unknown models.
 fn known_model_meta(model: &str) -> Option<ModelMeta> {
     match model {
+        // OpenAI models
         "gpt-4o" | "gpt-4o-2024-11-20" | "gpt-4o-2024-08-06" => Some(ModelMeta {
             context_window: 128_000,
             input_cost_per_million: 2.50,
@@ -51,6 +52,45 @@ fn known_model_meta(model: &str) -> Option<ModelMeta> {
             output_cost_per_million: 1.50,
             supports_tools: true,
         }),
+        // Ollama / local models (zero cost)
+        "qwen2.5:14b" | "qwen2.5:32b" | "qwen2.5:7b" | "qwen2.5:72b" => Some(ModelMeta {
+            context_window: 32_768,
+            input_cost_per_million: 0.0,
+            output_cost_per_million: 0.0,
+            supports_tools: true,
+        }),
+        "llama3.1:8b" | "llama3.1:70b" | "llama3.1:405b" | "llama3.2:3b" | "llama3.2:1b" => {
+            Some(ModelMeta {
+                context_window: 128_000,
+                input_cost_per_million: 0.0,
+                output_cost_per_million: 0.0,
+                supports_tools: true,
+            })
+        }
+        "mistral-nemo:12b" | "mistral:7b" | "mixtral:8x7b" => Some(ModelMeta {
+            context_window: 128_000,
+            input_cost_per_million: 0.0,
+            output_cost_per_million: 0.0,
+            supports_tools: true,
+        }),
+        "deepseek-coder-v2:16b" | "deepseek-coder:6.7b" | "deepseek-coder:33b" => Some(ModelMeta {
+            context_window: 128_000,
+            input_cost_per_million: 0.0,
+            output_cost_per_million: 0.0,
+            supports_tools: true,
+        }),
+        "phi-3:14b" | "phi-3:3.8b" => Some(ModelMeta {
+            context_window: 128_000,
+            input_cost_per_million: 0.0,
+            output_cost_per_million: 0.0,
+            supports_tools: true,
+        }),
+        "codellama:70b" | "codellama:34b" | "codellama:13b" | "codellama:7b" => Some(ModelMeta {
+            context_window: 16_384,
+            input_cost_per_million: 0.0,
+            output_cost_per_million: 0.0,
+            supports_tools: false,
+        }),
         _ => None,
     }
 }
@@ -73,12 +113,28 @@ impl OpenAiCompatibleProvider {
     ///
     /// Reads the API key from the environment variable specified in `config.api_key_env`.
     pub fn new(config: &LlmConfig) -> Result<Self, LlmError> {
-        let api_key = std::env::var(&config.api_key_env).map_err(|_| LlmError::AuthFailed {
-            provider: format!(
-                "OpenAI-compatible: env var '{}' not set",
-                config.api_key_env
-            ),
-        })?;
+        let is_local = config
+            .base_url
+            .as_ref()
+            .map(|u| u.contains("localhost") || u.contains("127.0.0.1"))
+            .unwrap_or(false);
+
+        let api_key = match std::env::var(&config.api_key_env) {
+            Ok(key) => key,
+            Err(_) if is_local => {
+                // Local providers (Ollama, vLLM, LM Studio) don't require an API key
+                debug!("No API key set for local provider; using dummy bearer token");
+                "ollama".to_string()
+            }
+            Err(_) => {
+                return Err(LlmError::AuthFailed {
+                    provider: format!(
+                        "OpenAI-compatible: env var '{}' not set",
+                        config.api_key_env
+                    ),
+                });
+            }
+        };
         Self::new_with_key(config, api_key)
     }
 
@@ -847,5 +903,79 @@ mod tests {
         let provider = OpenAiCompatibleProvider::new(&config).unwrap();
         assert_eq!(provider.base_url, "http://localhost:11434/v1");
         std::env::remove_var("RUSTANT_TEST_OPENAI_KEY");
+    }
+
+    #[test]
+    fn test_ollama_provider_no_api_key_required() {
+        // Ollama on localhost should not require an API key env var
+        std::env::remove_var("RUSTANT_TEST_OLLAMA_KEY_NONEXISTENT");
+        let mut config = test_config();
+        config.api_key_env = "RUSTANT_TEST_OLLAMA_KEY_NONEXISTENT".to_string();
+        config.base_url = Some("http://localhost:11434/v1".to_string());
+        config.model = "qwen2.5:14b".to_string();
+        let result = OpenAiCompatibleProvider::new(&config);
+        assert!(
+            result.is_ok(),
+            "Ollama localhost should not require API key"
+        );
+        let provider = result.unwrap();
+        assert_eq!(provider.model_name(), "qwen2.5:14b");
+    }
+
+    #[test]
+    fn test_ollama_127_0_0_1_no_api_key_required() {
+        std::env::remove_var("RUSTANT_TEST_OLLAMA_KEY_NONEXISTENT2");
+        let mut config = test_config();
+        config.api_key_env = "RUSTANT_TEST_OLLAMA_KEY_NONEXISTENT2".to_string();
+        config.base_url = Some("http://127.0.0.1:11434/v1".to_string());
+        config.model = "llama3.1:8b".to_string();
+        let result = OpenAiCompatibleProvider::new(&config);
+        assert!(result.is_ok(), "127.0.0.1 should not require API key");
+    }
+
+    #[test]
+    fn test_remote_provider_still_requires_api_key() {
+        std::env::remove_var("RUSTANT_TEST_REMOTE_KEY_NONEXISTENT");
+        let mut config = test_config();
+        config.api_key_env = "RUSTANT_TEST_REMOTE_KEY_NONEXISTENT".to_string();
+        config.base_url = None; // defaults to api.openai.com
+        let result = OpenAiCompatibleProvider::new(&config);
+        assert!(result.is_err(), "Remote provider must require API key");
+    }
+
+    #[test]
+    fn test_known_model_meta_ollama_models() {
+        let meta = known_model_meta("qwen2.5:14b").expect("qwen2.5:14b should be known");
+        assert_eq!(meta.input_cost_per_million, 0.0);
+        assert_eq!(meta.output_cost_per_million, 0.0);
+        assert!(meta.supports_tools);
+        assert_eq!(meta.context_window, 32_768);
+
+        let meta = known_model_meta("llama3.1:8b").expect("llama3.1:8b should be known");
+        assert_eq!(meta.input_cost_per_million, 0.0);
+        assert!(meta.supports_tools);
+
+        let meta = known_model_meta("qwen2.5:32b").expect("qwen2.5:32b should be known");
+        assert_eq!(meta.context_window, 32_768);
+
+        let meta = known_model_meta("mistral-nemo:12b").expect("mistral-nemo:12b should be known");
+        assert!(meta.supports_tools);
+
+        let meta = known_model_meta("deepseek-coder-v2:16b")
+            .expect("deepseek-coder-v2:16b should be known");
+        assert_eq!(meta.input_cost_per_million, 0.0);
+    }
+
+    #[test]
+    fn test_ollama_model_zero_cost() {
+        std::env::remove_var("RUSTANT_TEST_OLLAMA_COST_KEY");
+        let mut config = test_config();
+        config.api_key_env = "RUSTANT_TEST_OLLAMA_COST_KEY".to_string();
+        config.base_url = Some("http://localhost:11434/v1".to_string());
+        config.model = "qwen2.5:14b".to_string();
+        let provider = OpenAiCompatibleProvider::new(&config).unwrap();
+        let (input_cost, output_cost) = provider.cost_per_token();
+        assert_eq!(input_cost, 0.0);
+        assert_eq!(output_cost, 0.0);
     }
 }

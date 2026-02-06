@@ -11,6 +11,8 @@ pub mod file;
 pub mod git;
 pub mod imessage;
 pub mod lsp;
+#[cfg(target_os = "macos")]
+pub mod macos;
 pub mod registry;
 pub mod sandbox;
 pub mod shell;
@@ -72,6 +74,21 @@ pub fn register_builtin_tools_with_progress(
         tools.push(Arc::new(imessage::IMessageReadTool));
     }
 
+    // macOS native tools — Calendar, Reminders, Notes, App Control, etc.
+    #[cfg(target_os = "macos")]
+    {
+        tools.push(Arc::new(macos::MacosCalendarTool));
+        tools.push(Arc::new(macos::MacosRemindersTool));
+        tools.push(Arc::new(macos::MacosNotesTool));
+        tools.push(Arc::new(macos::MacosAppControlTool));
+        tools.push(Arc::new(macos::MacosNotificationTool));
+        tools.push(Arc::new(macos::MacosClipboardTool));
+        tools.push(Arc::new(macos::MacosScreenshotTool));
+        tools.push(Arc::new(macos::MacosSystemInfoTool));
+        tools.push(Arc::new(macos::MacosSpotlightTool));
+        tools.push(Arc::new(macos::MacosFinderTool));
+    }
+
     for tool in tools {
         if let Err(e) = registry.register(tool) {
             tracing::warn!("Failed to register tool: {}", e);
@@ -106,9 +123,9 @@ mod tests {
         let mut registry = ToolRegistry::new();
         register_builtin_tools(&mut registry, dir.path().to_path_buf());
 
-        // 17 base tools (12 original + 3 web + 1 smart_edit + 1 codebase_search) + 3 iMessage on macOS
+        // 17 base + 3 iMessage + 10 macOS native = 30 on macOS
         #[cfg(target_os = "macos")]
-        assert_eq!(registry.len(), 20);
+        assert_eq!(registry.len(), 30);
         #[cfg(not(target_os = "macos"))]
         assert_eq!(registry.len(), 17);
 
@@ -133,6 +150,21 @@ mod tests {
             assert!(names.contains(&"imessage_contacts".to_string()));
             assert!(names.contains(&"imessage_send".to_string()));
             assert!(names.contains(&"imessage_read".to_string()));
+        }
+
+        // macOS native tools
+        #[cfg(target_os = "macos")]
+        {
+            assert!(names.contains(&"macos_calendar".to_string()));
+            assert!(names.contains(&"macos_reminders".to_string()));
+            assert!(names.contains(&"macos_notes".to_string()));
+            assert!(names.contains(&"macos_app_control".to_string()));
+            assert!(names.contains(&"macos_notification".to_string()));
+            assert!(names.contains(&"macos_clipboard".to_string()));
+            assert!(names.contains(&"macos_screenshot".to_string()));
+            assert!(names.contains(&"macos_system_info".to_string()));
+            assert!(names.contains(&"macos_spotlight".to_string()));
+            assert!(names.contains(&"macos_finder".to_string()));
         }
     }
 

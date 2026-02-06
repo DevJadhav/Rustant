@@ -309,9 +309,9 @@ mod tests {
 
         let result = handler.handle_tools_list().unwrap();
         let tools = result["tools"].as_array().unwrap();
-        // 12 base + 3 web + 1 smart_edit + 1 codebase_search + 3 iMessage on macOS
+        // 12 base + 3 web + 1 smart_edit + 1 codebase_search + 3 iMessage + 10 macOS on macOS
         #[cfg(target_os = "macos")]
-        assert_eq!(tools.len(), 20);
+        assert_eq!(tools.len(), 30);
         #[cfg(not(target_os = "macos"))]
         assert_eq!(tools.len(), 17);
 

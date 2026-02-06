@@ -45,14 +45,8 @@ impl ChromiumCdpClient {
         );
 
         // Use a unique temporary user-data-dir to allow parallel instances
-        let user_data_dir = std::env::temp_dir().join(format!(
-            "rustant-chrome-{}",
-            std::process::id() as u64 * 1000
-                + std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .subsec_nanos() as u64
-        ));
+        let user_data_dir =
+            std::env::temp_dir().join(format!("rustant-chrome-{}", uuid::Uuid::new_v4()));
         builder = builder.user_data_dir(user_data_dir);
 
         // Common stability args

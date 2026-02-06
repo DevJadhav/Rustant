@@ -616,7 +616,7 @@ impl Default for LlmConfig {
             context_window: 128_000,
             input_cost_per_million: 2.50,
             output_cost_per_million: 10.00,
-            use_streaming: false,
+            use_streaming: true,
             fallback_providers: Vec::new(),
             credential_store_key: None,
             auth_method: String::new(),
@@ -769,6 +769,16 @@ impl Default for SafetyConfig {
                 "pnpm".to_string(),
                 "yarn".to_string(),
                 "python -m pytest".to_string(),
+                // macOS daily assistant commands
+                "open".to_string(),
+                "osascript".to_string(),
+                "mdfind".to_string(),
+                "screencapture".to_string(),
+                "pbcopy".to_string(),
+                "pbpaste".to_string(),
+                "pmset".to_string(),
+                "sw_vers".to_string(),
+                "brew".to_string(),
             ],
             ask_commands: vec![
                 "rm".to_string(),
@@ -786,7 +796,7 @@ impl Default for SafetyConfig {
                 "crates.io".to_string(),
                 "registry.npmjs.org".to_string(),
             ],
-            max_iterations: 25,
+            max_iterations: 50,
             injection_detection: InjectionDetectionConfig::default(),
             adaptive_trust: None,
         }
@@ -809,10 +819,10 @@ pub struct MemoryConfig {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
-            window_size: 12,
+            window_size: 20,
             compression_threshold: 0.7,
             persist_path: None,
-            enable_persistence: false,
+            enable_persistence: true,
         }
     }
 }
@@ -856,7 +866,7 @@ impl Default for ToolsConfig {
     fn default() -> Self {
         Self {
             enable_builtins: true,
-            default_timeout_secs: 30,
+            default_timeout_secs: 60,
             max_output_bytes: 1_048_576, // 1MB
         }
     }
@@ -1030,7 +1040,7 @@ mod tests {
         assert_eq!(config.llm.provider, "openai");
         assert_eq!(config.llm.model, "gpt-4o");
         assert_eq!(config.safety.approval_mode, ApprovalMode::Safe);
-        assert_eq!(config.memory.window_size, 12);
+        assert_eq!(config.memory.window_size, 20);
         assert!(!config.ui.vim_mode);
         assert!(config.tools.enable_builtins);
     }
@@ -1060,7 +1070,7 @@ mod tests {
     fn test_load_config_defaults() {
         let config = load_config(None, None).unwrap();
         assert_eq!(config.llm.provider, "openai");
-        assert_eq!(config.safety.max_iterations, 25);
+        assert_eq!(config.safety.max_iterations, 50);
     }
 
     #[test]
@@ -1192,9 +1202,9 @@ max_output_bytes = 1048576
     #[test]
     fn test_memory_config_defaults() {
         let config = MemoryConfig::default();
-        assert_eq!(config.window_size, 12);
+        assert_eq!(config.window_size, 20);
         assert!((config.compression_threshold - 0.7).abs() < f32::EPSILON);
-        assert!(!config.enable_persistence);
+        assert!(config.enable_persistence);
     }
 
     #[test]

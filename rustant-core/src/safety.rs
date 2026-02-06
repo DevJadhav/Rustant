@@ -1563,7 +1563,7 @@ mod tests {
     #[test]
     fn test_max_iterations() {
         let guardian = default_guardian();
-        assert_eq!(guardian.max_iterations(), 25);
+        assert_eq!(guardian.max_iterations(), 50);
     }
 
     #[test]

@@ -313,6 +313,11 @@ impl Brain {
         &*self.provider
     }
 
+    /// Get a cloneable Arc handle to the underlying LLM provider.
+    pub fn provider_arc(&self) -> Arc<dyn LlmProvider> {
+        Arc::clone(&self.provider)
+    }
+
     /// Track usage and cost from an external completion (e.g., streaming).
     pub fn track_usage(&mut self, usage: &TokenUsage) {
         self.total_usage.accumulate(usage);

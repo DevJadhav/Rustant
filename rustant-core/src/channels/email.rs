@@ -37,12 +37,30 @@ pub struct EmailConfig {
     /// Email address (used as the IMAP/SMTP username).
     pub username: String,
     /// Password or OAuth access token (when `auth_method` is `XOAuth2`).
+    /// Prefer `password_env` to avoid storing secrets in config files.
+    #[serde(default)]
     pub password: String,
+    /// Environment variable name containing the password or OAuth token.
+    /// When set, this takes precedence over the `password` field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password_env: Option<String>,
     pub from_address: String,
     pub allowed_senders: Vec<String>,
     /// Authentication method for IMAP/SMTP connections.
     #[serde(default)]
     pub auth_method: EmailAuthMethod,
+}
+
+impl EmailConfig {
+    /// Resolve the effective password, preferring the environment variable.
+    pub fn resolve_password(&self) -> String {
+        if let Some(ref env_var) = self.password_env {
+            if let Ok(val) = std::env::var(env_var) {
+                return val;
+            }
+        }
+        self.password.clone()
+    }
 }
 
 /// Trait for SMTP sending.
@@ -110,7 +128,7 @@ impl Channel for EmailChannel {
             }));
         }
         // Both Password and XOAuth2 require a non-empty password/token
-        if self.config.password.is_empty() {
+        if self.config.resolve_password().is_empty() {
             return Err(RustantError::Channel(ChannelError::AuthFailed {
                 name: self.name.clone(),
             }));
@@ -475,11 +493,12 @@ impl ImapReader for RealImap {
 
 /// Create an Email channel with real SMTP and IMAP clients.
 pub fn create_email_channel(config: EmailConfig) -> EmailChannel {
+    let resolved_password = config.resolve_password();
     let smtp = RealSmtp::new(
         config.smtp_host.clone(),
         config.smtp_port,
         config.username.clone(),
-        config.password.clone(),
+        resolved_password.clone(),
         config.from_address.clone(),
         config.auth_method.clone(),
     );
@@ -487,7 +506,7 @@ pub fn create_email_channel(config: EmailConfig) -> EmailChannel {
         config.imap_host.clone(),
         config.imap_port,
         config.username.clone(),
-        config.password.clone(),
+        resolved_password,
         config.auth_method.clone(),
     );
     EmailChannel::new(config, Box::new(smtp), Box::new(imap))

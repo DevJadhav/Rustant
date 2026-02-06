@@ -1,0 +1,58 @@
+# Rustant Daily macOS Assistant — Cloud Config Template
+# Copy to .rustant/config.toml and adjust as needed
+#
+# Recommended cloud provider: Anthropic Claude Opus 4.6
+# Alternative: OpenAI GPT-4o (shown below)
+
+[llm]
+provider = "openai"
+model = "gpt-4o"
+api_key_env = "OPENAI_API_KEY"
+max_tokens = 4096
+temperature = 0.7
+context_window = 128000
+input_cost_per_million = 2.5
+output_cost_per_million = 10.0
+use_streaming = true
+
+# For Anthropic Claude Opus 4.6 (best reasoning + tool calling):
+# provider = "anthropic"
+# model = "claude-opus-4-6"
+# api_key_env = "ANTHROPIC_API_KEY"
+# context_window = 200000
+# input_cost_per_million = 15.0
+# output_cost_per_million = 75.0
+
+[safety]
+approval_mode = "safe"
+allowed_paths = ["src/**", "tests/**", "docs/**", "~/**"]
+denied_paths = [".env*", "**/*.key", "**/secrets/**", "**/*.pem",
+    "**/credentials*", ".ssh/**", ".aws/**"]
+allowed_commands = ["cargo", "git", "npm", "pnpm", "yarn", "python -m pytest",
+    "open", "osascript", "mdfind", "screencapture", "pbcopy", "pbpaste",
+    "pmset", "sw_vers", "brew"]
+ask_commands = ["rm", "mv", "cp", "chmod"]
+denied_commands = ["sudo", "curl | sh", "wget | bash"]
+allowed_hosts = []
+max_iterations = 50
+
+[safety.injection_detection]
+enabled = true
+threshold = 0.5
+scan_tool_outputs = true
+
+[memory]
+window_size = 20
+compression_threshold = 0.7
+enable_persistence = true
+
+[ui]
+theme = "dark"
+vim_mode = false
+show_cost = true
+use_tui = false
+
+[tools]
+enable_builtins = true
+default_timeout_secs = 60
+max_output_bytes = 2097152
