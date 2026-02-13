@@ -2,9 +2,12 @@
 
 use proptest::prelude::*;
 
+use rustant_core::credentials::CredentialStore;
+use rustant_core::credentials::InMemoryCredentialStore;
 use rustant_core::injection::InjectionDetector;
 use rustant_core::memory::{Fact, LongTermMemory, ShortTermMemory};
 use rustant_core::merkle::MerkleChain;
+use rustant_core::scheduler::{CronJob, CronJobConfig, CronScheduler};
 use rustant_core::skills::parse_skill_md;
 use rustant_core::updater::is_newer_version;
 use rustant_core::Message;
@@ -193,5 +196,149 @@ proptest! {
         let skill = result.unwrap();
         prop_assert_eq!(skill.name, name);
         prop_assert_eq!(skill.version, version);
+    }
+}
+
+// --- Cron scheduler properties ---
+
+proptest! {
+    #[test]
+    fn cron_job_next_run_is_always_in_future(
+        second in 0u32..60,
+        minute in 0u32..60,
+        hour in 0u32..24,
+    ) {
+        // Build a valid 7-field cron expression: sec min hour day month weekday year
+        let expr = format!("{} {} {} * * * *", second, minute, hour);
+        let config = CronJobConfig::new("prop-test", &expr, "test task");
+        if let Ok(job) = CronJob::new(config) {
+            if let Some(next_run) = job.next_run {
+                // next_run should always be >= now
+                let now = chrono::Utc::now();
+                prop_assert!(
+                    next_run >= now - chrono::Duration::seconds(2),
+                    "next_run ({:?}) should be in the future (now: {:?})",
+                    next_run,
+                    now
+                );
+            }
+        }
+        // If parsing fails, that's fine — not all combinations are valid
+    }
+
+    #[test]
+    fn cron_scheduler_add_remove_is_idempotent(
+        job_count in 1usize..20,
+    ) {
+        let mut scheduler = CronScheduler::new();
+        let mut names = Vec::new();
+
+        // Add N jobs
+        for i in 0..job_count {
+            let name = format!("job_{}", i);
+            let config = CronJobConfig::new(&name, "0 0 9 * * * *", format!("task {}", i));
+            scheduler.add_job(config).unwrap();
+            names.push(name);
+        }
+        prop_assert_eq!(scheduler.len(), job_count);
+
+        // Remove all jobs
+        for name in &names {
+            scheduler.remove_job(name).unwrap();
+        }
+        prop_assert!(scheduler.is_empty());
+    }
+
+    #[test]
+    fn cron_scheduler_serialization_roundtrip(
+        job_count in 1usize..10,
+    ) {
+        let mut scheduler = CronScheduler::new();
+        for i in 0..job_count {
+            let config = CronJobConfig::new(
+                format!("job_{}", i),
+                "0 0 9 * * * *",
+                format!("task {}", i),
+            );
+            scheduler.add_job(config).unwrap();
+        }
+
+        // Serialize and deserialize
+        let json = scheduler.to_json().unwrap();
+        let restored = CronScheduler::from_json(&json).unwrap();
+        prop_assert_eq!(restored.len(), scheduler.len());
+    }
+}
+
+// --- Short-term memory pinning properties ---
+
+proptest! {
+    #[test]
+    fn pinned_messages_always_in_output(
+        total_msgs in 5usize..50,
+        pin_idx in 0usize..5,
+    ) {
+        let pin_idx = pin_idx.min(total_msgs - 1);
+        let mut stm = ShortTermMemory::new(10); // Window of 10
+
+        for i in 0..total_msgs {
+            stm.add(Message::user(format!("message_{}", i)));
+        }
+
+        // Pin a message
+        stm.pin(pin_idx);
+
+        // Get all messages for the context window
+        let output = stm.to_messages();
+
+        // The pinned message text should appear in the output
+        let pin_text = format!("message_{}", pin_idx);
+        let found = output.iter().any(|m| {
+            if let Some(text) = m.content.as_text() {
+                text.contains(&pin_text)
+            } else {
+                false
+            }
+        });
+        prop_assert!(
+            found,
+            "Pinned message '{}' should appear in to_messages() output",
+            pin_text
+        );
+    }
+}
+
+// --- Credential store properties ---
+
+proptest! {
+    #[test]
+    fn credential_store_roundtrip(
+        provider in "[a-z]{3,20}",
+        key in "[a-zA-Z0-9!@#$%^&*()]{5,50}",
+    ) {
+        let store = InMemoryCredentialStore::new();
+        store.store_key(&provider, &key).unwrap();
+        let retrieved = store.get_key(&provider).unwrap();
+        prop_assert_eq!(retrieved, key);
+    }
+
+    #[test]
+    fn credential_store_has_key_after_store(
+        provider in "[a-z]{3,20}",
+    ) {
+        let store = InMemoryCredentialStore::new();
+        prop_assert!(!store.has_key(&provider));
+        store.store_key(&provider, "test-key").unwrap();
+        prop_assert!(store.has_key(&provider));
+    }
+
+    #[test]
+    fn credential_store_delete_removes_key(
+        provider in "[a-z]{3,20}",
+    ) {
+        let store = InMemoryCredentialStore::new();
+        store.store_key(&provider, "test-key").unwrap();
+        store.delete_key(&provider).unwrap();
+        prop_assert!(!store.has_key(&provider));
     }
 }

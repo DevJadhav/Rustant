@@ -10,6 +10,7 @@ pub mod input_area;
 pub mod keys_overlay;
 pub mod markdown;
 pub mod progress_bar;
+pub mod replay_panel;
 pub mod sidebar;
 pub mod status_bar;
 pub mod task_board;

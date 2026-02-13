@@ -427,4 +427,80 @@ mod tests {
             "a very long comman.."
         );
     }
+
+    #[test]
+    fn test_shell_exec_schema() {
+        let tool = ShellExecTool::new(PathBuf::from("/tmp"));
+        let schema = tool.parameters_schema();
+        assert!(schema["properties"]["command"].is_object());
+        assert!(schema["properties"]["working_dir"].is_object());
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.contains(&serde_json::json!("command")));
+        assert!(!required.contains(&serde_json::json!("working_dir")));
+    }
+
+    #[tokio::test]
+    async fn test_shell_exec_empty_command() {
+        let dir = setup_workspace();
+        let tool = ShellExecTool::new(dir.path().to_path_buf());
+
+        // Empty string is still a valid command arg (sh -c "" exits 0)
+        let result = tool
+            .execute(serde_json::json!({"command": ""}))
+            .await
+            .unwrap();
+        assert!(result.content.contains("Exit code: 0"));
+    }
+
+    #[tokio::test]
+    async fn test_shell_exec_multiline_output() {
+        let dir = setup_workspace();
+        let tool = ShellExecTool::new(dir.path().to_path_buf());
+
+        let result = tool
+            .execute(serde_json::json!({"command": "echo line1; echo line2; echo line3"}))
+            .await
+            .unwrap();
+
+        assert!(result.content.contains("line1"));
+        assert!(result.content.contains("line2"));
+        assert!(result.content.contains("line3"));
+    }
+
+    #[tokio::test]
+    async fn test_shell_exec_special_chars() {
+        let dir = setup_workspace();
+        let tool = ShellExecTool::new(dir.path().to_path_buf());
+
+        let result = tool
+            .execute(serde_json::json!({"command": "echo 'hello world' \"with quotes\""}))
+            .await
+            .unwrap();
+
+        assert!(result.content.contains("hello world"));
+        assert!(result.content.contains("with quotes"));
+    }
+
+    #[tokio::test]
+    async fn test_shell_exec_reads_workspace_file() {
+        let dir = setup_workspace();
+        let tool = ShellExecTool::new(dir.path().to_path_buf());
+
+        let result = tool
+            .execute(serde_json::json!({"command": "cat test.txt"}))
+            .await
+            .unwrap();
+
+        assert!(result.content.contains("hello world"));
+    }
+
+    #[test]
+    fn test_truncate_cmd_exact_length() {
+        assert_eq!(truncate_cmd("12345", 5), "12345");
+    }
+
+    #[test]
+    fn test_truncate_cmd_empty() {
+        assert_eq!(truncate_cmd("", 10), "");
+    }
 }

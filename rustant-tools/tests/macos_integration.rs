@@ -168,4 +168,80 @@ mod macos_integration {
         let result = tool.execute(json!({"action": "list", "limit": 5})).await;
         assert!(result.is_ok(), "Notes list should succeed");
     }
+
+    // ── New screen automation tool integration tests ──
+
+    #[tokio::test]
+    #[ignore = "Requires Accessibility permissions"]
+    async fn test_gui_scripting_list_elements() {
+        use rustant_tools::gui_scripting::MacosGuiScriptingTool;
+        let tool = MacosGuiScriptingTool;
+        let result = tool
+            .execute(json!({"action": "list_elements", "app_name": "Finder", "max_depth": 2}))
+            .await;
+        assert!(result.is_ok(), "list_elements on Finder should succeed");
+        let text = result.unwrap().content;
+        assert!(
+            text.contains("AX") || text.contains("Finder"),
+            "Should contain accessibility roles, got: {}",
+            &text[..text.len().min(200)]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires Accessibility permissions"]
+    async fn test_accessibility_get_frontmost() {
+        use rustant_tools::accessibility::MacosAccessibilityTool;
+        let tool = MacosAccessibilityTool;
+        let result = tool.execute(json!({"action": "get_frontmost_app"})).await;
+        assert!(result.is_ok(), "get_frontmost_app should succeed");
+        let text = result.unwrap().content;
+        assert!(
+            text.contains("App:"),
+            "Should contain 'App:' label, got: {}",
+            text
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires Contacts.app access"]
+    async fn test_contacts_list_groups() {
+        use rustant_tools::contacts::MacosContactsTool;
+        let tool = MacosContactsTool;
+        let result = tool.execute(json!({"action": "list_groups"})).await;
+        assert!(result.is_ok(), "list_groups should succeed");
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires Safari to be installed"]
+    async fn test_safari_list_tabs() {
+        use rustant_tools::safari::MacosSafariTool;
+        let tool = MacosSafariTool;
+        let result = tool.execute(json!({"action": "list_tabs"})).await;
+        assert!(result.is_ok(), "list_tabs should succeed");
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires Python3 + PyObjC Vision framework"]
+    async fn test_screen_analyze_ocr() {
+        use rustant_tools::screen_analyze::MacosScreenAnalyzeTool;
+        let tool = MacosScreenAnalyzeTool;
+        let result = tool.execute(json!({"action": "ocr"})).await;
+        // OCR may fail if PyObjC is not installed, but should not panic
+        match result {
+            Ok(output) => {
+                assert!(!output.content.is_empty(), "OCR output should not be empty");
+            }
+            Err(e) => {
+                let err_str = format!("{:?}", e);
+                assert!(
+                    err_str.contains("Python")
+                        || err_str.contains("pyobjc")
+                        || err_str.contains("Shortcut"),
+                    "Should fail with Python/PyObjC/Shortcut error, got: {}",
+                    err_str
+                );
+            }
+        }
+    }
 }

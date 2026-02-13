@@ -562,6 +562,10 @@ impl FileSearchTool {
     }
 }
 
+/// Maximum file write size (10 MB). Rejects writes exceeding this limit
+/// to prevent the LLM from generating arbitrarily large files.
+const MAX_WRITE_BYTES: usize = 10 * 1024 * 1024;
+
 /// Write contents to a file (create or overwrite).
 pub struct FileWriteTool {
     workspace: PathBuf,
@@ -613,6 +617,19 @@ impl Tool for FileWriteTool {
                 name: "file_write".into(),
                 reason: "'content' parameter is required".into(),
             })?;
+
+        // Reject writes exceeding the safety limit.
+        if content.len() > MAX_WRITE_BYTES {
+            return Err(ToolError::InvalidArguments {
+                name: "file_write".into(),
+                reason: format!(
+                    "Content size ({} bytes) exceeds maximum allowed ({} bytes / {} MB)",
+                    content.len(),
+                    MAX_WRITE_BYTES,
+                    MAX_WRITE_BYTES / (1024 * 1024)
+                ),
+            });
+        }
 
         // Validate the path stays inside the workspace
         let _ = validate_workspace_path(&self.workspace, path_str, "file_write")?;
@@ -1235,6 +1252,45 @@ mod tests {
             ToolError::PermissionDenied { name, .. } => assert_eq!(name, "file_write"),
             e => panic!("Expected PermissionDenied, got: {:?}", e),
         }
+    }
+
+    #[tokio::test]
+    async fn test_file_write_rejects_oversized_content() {
+        let dir = setup_workspace();
+        let tool = FileWriteTool::new(dir.path().to_path_buf());
+
+        // Create content just over the limit
+        let oversized = "x".repeat(MAX_WRITE_BYTES + 1);
+        let result = tool
+            .execute(serde_json::json!({
+                "path": "big.txt",
+                "content": oversized
+            }))
+            .await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ToolError::InvalidArguments { name, reason } => {
+                assert_eq!(name, "file_write");
+                assert!(reason.contains("exceeds maximum"));
+            }
+            e => panic!("Expected InvalidArguments, got: {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_file_write_accepts_content_at_limit() {
+        let dir = setup_workspace();
+        let tool = FileWriteTool::new(dir.path().to_path_buf());
+
+        // Content exactly at the limit should be accepted
+        let at_limit = "x".repeat(MAX_WRITE_BYTES);
+        let result = tool
+            .execute(serde_json::json!({
+                "path": "exact.txt",
+                "content": at_limit
+            }))
+            .await;
+        assert!(result.is_ok());
     }
 
     #[tokio::test]

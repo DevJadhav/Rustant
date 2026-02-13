@@ -22,6 +22,13 @@ pub fn list_builtin_names() -> Vec<&'static str> {
         "pr_review",
         "dependency_audit",
         "changelog",
+        // macOS daily assistant workflows
+        "meeting_recorder",
+        "daily_briefing_full",
+        "end_of_day_summary",
+        // macOS screen automation workflows
+        "app_automation",
+        "email_triage",
     ]
 }
 
@@ -40,6 +47,11 @@ pub fn get_builtin(name: &str) -> Option<WorkflowDefinition> {
         "pr_review" => PR_REVIEW_WORKFLOW,
         "dependency_audit" => DEPENDENCY_AUDIT_WORKFLOW,
         "changelog" => CHANGELOG_WORKFLOW,
+        "meeting_recorder" => MEETING_RECORDER_WORKFLOW,
+        "daily_briefing_full" => DAILY_BRIEFING_FULL_WORKFLOW,
+        "end_of_day_summary" => END_OF_DAY_SUMMARY_WORKFLOW,
+        "app_automation" => APP_AUTOMATION_WORKFLOW,
+        "email_triage" => EMAIL_TRIAGE_WORKFLOW,
         _ => return None,
     };
     parse_workflow(yaml).ok()
@@ -502,6 +514,195 @@ outputs:
     value: "{{ steps.generate_changelog.output }}"
 "#;
 
+const MEETING_RECORDER_WORKFLOW: &str = r#"
+name: meeting_recorder
+description: Record, transcribe, and summarize a meeting to Notes.app
+version: "1.0"
+author: rustant
+inputs:
+  - name: title
+    type: string
+    optional: true
+    default: "Untitled Meeting"
+    description: Meeting title for the Notes.app entry
+steps:
+  - id: detect
+    tool: macos_meeting_recorder
+    params:
+      action: "detect_meeting"
+  - id: record
+    tool: macos_meeting_recorder
+    params:
+      action: "record"
+      title: "{{ inputs.title }}"
+    gate:
+      type: approval_required
+    gate_message: "Start recording meeting audio from microphone?"
+  - id: notify_recording
+    tool: macos_notification
+    params:
+      message: "Meeting recording started. Use 'stop' when finished."
+      title: "Rustant Meeting Recorder"
+  - id: stop
+    tool: macos_meeting_recorder
+    params:
+      action: "stop"
+    gate:
+      type: approval_required
+    gate_message: "Stop recording and begin transcription?"
+  - id: transcribe
+    tool: macos_meeting_recorder
+    params:
+      action: "transcribe"
+      audio_path: "{{ steps.stop.output }}"
+  - id: save_to_notes
+    tool: macos_meeting_recorder
+    params:
+      action: "summarize_to_notes"
+      title: "{{ inputs.title }}"
+      transcript: "{{ steps.transcribe.output }}"
+outputs:
+  - name: transcript
+    value: "{{ steps.transcribe.output }}"
+"#;
+
+const DAILY_BRIEFING_FULL_WORKFLOW: &str = r#"
+name: daily_briefing_full
+description: Complete daily briefing with calendar, reminders, weather, and Notes.app output
+version: "1.0"
+author: rustant
+inputs:
+  - name: location
+    type: string
+    optional: true
+    default: ""
+    description: Location for weather forecast (auto-detect if empty)
+steps:
+  - id: briefing
+    tool: macos_daily_briefing
+    params:
+      action: "morning"
+      include_weather: true
+      location: "{{ inputs.location }}"
+  - id: notify
+    tool: macos_notification
+    params:
+      message: "Your morning briefing is ready in Notes.app"
+      title: "Rustant Daily Briefing"
+outputs:
+  - name: briefing
+    value: "{{ steps.briefing.output }}"
+"#;
+
+const END_OF_DAY_SUMMARY_WORKFLOW: &str = r#"
+name: end_of_day_summary
+description: End-of-day review with completed tasks, tomorrow preview, and Notes.app output
+version: "1.0"
+author: rustant
+steps:
+  - id: evening_summary
+    tool: macos_daily_briefing
+    params:
+      action: "evening"
+  - id: tomorrow_preview
+    tool: macos_calendar
+    params:
+      action: "list"
+      days_ahead: 1
+  - id: notify
+    tool: macos_notification
+    params:
+      message: "End-of-day summary saved to Notes.app"
+      title: "Rustant EOD Summary"
+outputs:
+  - name: summary
+    value: "{{ steps.evening_summary.output }}"
+"#;
+
+const APP_AUTOMATION_WORKFLOW: &str = r#"
+name: app_automation
+description: Open a macOS app, inspect its UI via accessibility, and perform GUI actions
+version: "1.0"
+author: rustant
+inputs:
+  - name: app_name
+    type: string
+    description: Name of the macOS application to automate
+  - name: task
+    type: string
+    description: Description of the task to perform in the app
+steps:
+  - id: open_app
+    tool: macos_app_control
+    params:
+      action: "open"
+      app_name: "{{ inputs.app_name }}"
+  - id: inspect_ui
+    tool: macos_accessibility
+    params:
+      action: "get_tree"
+      app_name: "{{ inputs.app_name }}"
+      max_depth: 3
+  - id: perform_action
+    tool: macos_gui_scripting
+    params:
+      action: "click_element"
+      app_name: "{{ inputs.app_name }}"
+      element_description: "{{ inputs.task }}"
+    gate:
+      type: approval_required
+      message: "Perform GUI action in {{ inputs.app_name }}?"
+  - id: verify
+    tool: macos_accessibility
+    params:
+      action: "get_tree"
+      app_name: "{{ inputs.app_name }}"
+      max_depth: 2
+outputs:
+  - name: result
+    value: "{{ steps.verify.output }}"
+"#;
+
+const EMAIL_TRIAGE_WORKFLOW: &str = r#"
+name: email_triage
+description: Read unread emails, classify by priority, and draft replies for important ones
+version: "1.0"
+author: rustant
+inputs:
+  - name: max_emails
+    type: number
+    optional: true
+    default: 10
+    description: Maximum number of unread emails to process
+steps:
+  - id: fetch_unread
+    tool: macos_mail
+    params:
+      action: "unread"
+  - id: classify
+    tool: echo
+    params:
+      text: "Classifying emails by priority and type"
+  - id: draft_replies
+    tool: echo
+    params:
+      text: "Drafting replies for high-priority emails"
+  - id: send_replies
+    tool: echo
+    params:
+      text: "Ready to send drafted replies"
+    gate:
+      type: approval_required
+      message: "Send the drafted email replies?"
+  - id: summary
+    tool: echo
+    params:
+      text: "Email triage complete. Unread emails classified and replies drafted."
+outputs:
+  - name: triage_report
+    value: "{{ steps.summary.output }}"
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -547,7 +748,7 @@ mod tests {
     #[test]
     fn test_list_builtin_names() {
         let names = list_builtin_names();
-        assert_eq!(names.len(), 12);
+        assert_eq!(names.len(), 17);
         assert!(names.contains(&"code_review"));
         assert!(names.contains(&"refactor"));
         assert!(names.contains(&"test_generation"));
@@ -561,6 +762,13 @@ mod tests {
         assert!(names.contains(&"pr_review"));
         assert!(names.contains(&"dependency_audit"));
         assert!(names.contains(&"changelog"));
+        // macOS daily assistant workflows
+        assert!(names.contains(&"meeting_recorder"));
+        assert!(names.contains(&"daily_briefing_full"));
+        assert!(names.contains(&"end_of_day_summary"));
+        // macOS screen automation workflows
+        assert!(names.contains(&"app_automation"));
+        assert!(names.contains(&"email_triage"));
     }
 
     #[test]
@@ -592,5 +800,44 @@ mod tests {
         assert_eq!(wf.name, "changelog");
         assert!(!wf.steps.is_empty());
         assert!(wf.inputs.iter().any(|i| i.name == "since"));
+    }
+
+    #[test]
+    fn test_builtin_meeting_recorder_parses() {
+        let wf = parse_workflow(MEETING_RECORDER_WORKFLOW).unwrap();
+        assert_eq!(wf.name, "meeting_recorder");
+        assert!(!wf.steps.is_empty());
+        assert!(wf.inputs.iter().any(|i| i.name == "title"));
+    }
+
+    #[test]
+    fn test_builtin_daily_briefing_full_parses() {
+        let wf = parse_workflow(DAILY_BRIEFING_FULL_WORKFLOW).unwrap();
+        assert_eq!(wf.name, "daily_briefing_full");
+        assert!(!wf.steps.is_empty());
+        assert!(wf.inputs.iter().any(|i| i.name == "location"));
+    }
+
+    #[test]
+    fn test_builtin_end_of_day_summary_parses() {
+        let wf = parse_workflow(END_OF_DAY_SUMMARY_WORKFLOW).unwrap();
+        assert_eq!(wf.name, "end_of_day_summary");
+        assert!(!wf.steps.is_empty());
+    }
+
+    #[test]
+    fn test_builtin_app_automation_parses() {
+        let wf = parse_workflow(APP_AUTOMATION_WORKFLOW).unwrap();
+        assert_eq!(wf.name, "app_automation");
+        assert!(!wf.steps.is_empty());
+        assert!(wf.inputs.iter().any(|i| i.name == "app_name"));
+        assert!(wf.inputs.iter().any(|i| i.name == "task"));
+    }
+
+    #[test]
+    fn test_builtin_email_triage_parses() {
+        let wf = parse_workflow(EMAIL_TRIAGE_WORKFLOW).unwrap();
+        assert_eq!(wf.name, "email_triage");
+        assert!(!wf.steps.is_empty());
     }
 }

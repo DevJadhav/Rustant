@@ -73,6 +73,45 @@ pub struct AgentConfig {
     /// Optional channel intelligence configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intelligence: Option<IntelligenceConfig>,
+    /// Optional meeting recording and transcription configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meeting: Option<MeetingConfig>,
+}
+
+/// Meeting recording and transcription configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeetingConfig {
+    /// Whether meeting features are enabled.
+    pub enabled: bool,
+    /// Default Notes.app folder for meeting transcripts.
+    pub notes_folder: String,
+    /// Audio recording format (wav).
+    pub audio_format: String,
+    /// Audio sample rate in Hz.
+    pub sample_rate: u32,
+    /// Maximum recording duration in minutes.
+    pub max_duration_mins: u64,
+    /// Whether to auto-detect virtual audio devices (BlackHole, Loopback).
+    pub auto_detect_virtual_audio: bool,
+    /// Whether to auto-transcribe when recording stops.
+    pub auto_transcribe: bool,
+    /// Whether to auto-summarize after transcription.
+    pub auto_summarize: bool,
+}
+
+impl Default for MeetingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            notes_folder: "Meeting Transcripts".to_string(),
+            audio_format: "wav".to_string(),
+            sample_rate: 16000,
+            max_duration_mins: 180,
+            auto_detect_virtual_audio: true,
+            auto_transcribe: true,
+            auto_summarize: true,
+        }
+    }
 }
 
 /// Configuration for the workflow engine.
@@ -109,6 +148,13 @@ impl Default for WorkflowConfig {
 pub struct BrowserConfig {
     /// Whether browser automation is enabled.
     pub enabled: bool,
+    /// How to connect to Chrome: auto (try connect, then launch), connect, or launch.
+    pub connection_mode: BrowserConnectionMode,
+    /// Remote debugging port for connecting to or launching Chrome.
+    pub debug_port: u16,
+    /// WebSocket URL for direct connection (overrides port-based discovery).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ws_url: Option<String>,
     /// Path to the Chrome/Chromium binary.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chrome_path: Option<String>,
@@ -126,16 +172,46 @@ pub struct BrowserConfig {
     /// These domains are always blocked.
     #[serde(default)]
     pub blocked_domains: Vec<String>,
-    /// Whether to use an isolated browser profile.
+    /// Whether to use an isolated browser profile (temp dir per session).
     pub isolate_profile: bool,
+    /// Persistent user data directory. When set, browser state (cookies, history)
+    /// persists across sessions. Ignored when `isolate_profile` is true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_data_dir: Option<PathBuf>,
     /// Maximum number of open pages/tabs.
     pub max_pages: usize,
+}
+
+/// How to connect to Chrome for browser automation.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BrowserConnectionMode {
+    /// Try connecting to an existing Chrome instance first, then launch a new one.
+    #[default]
+    Auto,
+    /// Only connect to an existing Chrome instance (fail if none found).
+    Connect,
+    /// Always launch a new Chrome instance (previous behavior).
+    Launch,
+}
+
+impl std::fmt::Display for BrowserConnectionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BrowserConnectionMode::Auto => write!(f, "auto"),
+            BrowserConnectionMode::Connect => write!(f, "connect"),
+            BrowserConnectionMode::Launch => write!(f, "launch"),
+        }
+    }
 }
 
 impl Default for BrowserConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            connection_mode: BrowserConnectionMode::default(),
+            debug_port: 9222,
+            ws_url: None,
             chrome_path: None,
             headless: true,
             default_viewport_width: 1280,
@@ -144,6 +220,7 @@ impl Default for BrowserConfig {
             allowed_domains: Vec::new(),
             blocked_domains: Vec::new(),
             isolate_profile: true,
+            user_data_dir: None,
             max_pages: 5,
         }
     }
@@ -588,6 +665,11 @@ pub struct LlmConfig {
     /// store instead of a traditional API key.
     #[serde(default)]
     pub auth_method: String,
+    /// Optional direct API key value.
+    /// If the value starts with "keychain:", the remainder is used as a keyring
+    /// service name and the actual key is resolved at startup via `resolve_credentials()`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
 }
 
 /// Configuration for a fallback LLM provider.
@@ -620,6 +702,7 @@ impl Default for LlmConfig {
             fallback_providers: Vec::new(),
             credential_store_key: None,
             auth_method: String::new(),
+            api_key: None,
         }
     }
 }
@@ -697,6 +780,9 @@ pub struct SafetyConfig {
     /// Optional adaptive trust configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adaptive_trust: Option<AdaptiveTrustConfig>,
+    /// Maximum tool calls per minute (0 = unlimited).
+    #[serde(default)]
+    pub max_tool_calls_per_minute: usize,
 }
 
 /// Configuration for the prompt injection detection system.
@@ -799,6 +885,7 @@ impl Default for SafetyConfig {
             max_iterations: 50,
             injection_detection: InjectionDetectionConfig::default(),
             adaptive_trust: None,
+            max_tool_calls_per_minute: 0,
         }
     }
 }
@@ -959,7 +1046,29 @@ pub fn load_config(
         figment = figment.merge(Serialized::defaults(overrides));
     }
 
-    figment.extract().map_err(Box::new)
+    let mut config: AgentConfig = figment.extract().map_err(Box::new)?;
+    resolve_credentials(&mut config);
+    Ok(config)
+}
+
+/// Resolve credential references in config.
+/// If api_key starts with "keychain:", load from system keyring.
+pub fn resolve_credentials(config: &mut AgentConfig) {
+    let key_value = config.llm.api_key.clone();
+    if let Some(key) = key_value {
+        if let Some(service) = key.strip_prefix("keychain:") {
+            let store = crate::credentials::KeyringCredentialStore::new();
+            match crate::credentials::CredentialStore::get_key(&store, service) {
+                Ok(resolved_key) => {
+                    config.llm.api_key = Some(resolved_key);
+                    tracing::info!("Resolved API key from keyring service: {}", service);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to resolve keyring credential '{}': {}", service, e);
+                }
+            }
+        }
+    }
 }
 
 /// Check whether any Rustant configuration file exists (user-level or workspace-level).
@@ -1033,6 +1142,10 @@ pub fn update_channel_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// Shared mutex for tests that read/write RUSTANT_* env vars to avoid races.
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_default_config() {
@@ -1086,6 +1199,10 @@ mod tests {
 
     #[test]
     fn test_load_config_from_workspace() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        // Clear any stray env var from parallel tests
+        unsafe { std::env::remove_var("RUSTANT_SAFETY__APPROVAL_MODE") };
+
         let dir = tempfile::tempdir().unwrap();
         let rustant_dir = dir.path().join(".rustant");
         std::fs::create_dir_all(&rustant_dir).unwrap();
@@ -1135,6 +1252,53 @@ max_output_bytes = 1048576
         assert_eq!(config.llm.model, "gpt-4o-mini");
         assert_eq!(config.safety.max_iterations, 100);
         assert_eq!(config.safety.approval_mode, ApprovalMode::Cautious);
+    }
+
+    /// Test that RUSTANT_SAFETY__APPROVAL_MODE env var overrides both defaults and
+    /// workspace config. Combined into one test to avoid race conditions between
+    /// `set_var`/`remove_var` calls across parallel test threads.
+    #[test]
+    fn test_env_var_override_approval_mode() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+
+        // Part 1: env var overrides default (no workspace config)
+        unsafe { std::env::set_var("RUSTANT_SAFETY__APPROVAL_MODE", "yolo") };
+        let config = load_config(None, None).unwrap();
+        assert_eq!(
+            config.safety.approval_mode,
+            ApprovalMode::Yolo,
+            "RUSTANT_SAFETY__APPROVAL_MODE=yolo should override default 'safe'"
+        );
+
+        // Part 2: env var overrides workspace config file
+        let dir = tempfile::tempdir().unwrap();
+        let rustant_dir = dir.path().join(".rustant");
+        std::fs::create_dir_all(&rustant_dir).unwrap();
+        std::fs::write(
+            rustant_dir.join("config.toml"),
+            r#"
+[safety]
+approval_mode = "safe"
+max_iterations = 50
+allowed_paths = ["src/**"]
+denied_paths = []
+allowed_commands = ["cargo"]
+ask_commands = []
+denied_commands = []
+allowed_hosts = []
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(Some(dir.path()), None).unwrap();
+        assert_eq!(
+            config.safety.approval_mode,
+            ApprovalMode::Yolo,
+            "Env var RUSTANT_SAFETY__APPROVAL_MODE=yolo should override workspace config 'safe'"
+        );
+
+        // Cleanup
+        unsafe { std::env::remove_var("RUSTANT_SAFETY__APPROVAL_MODE") };
     }
 
     #[test]

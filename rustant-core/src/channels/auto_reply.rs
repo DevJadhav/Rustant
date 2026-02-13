@@ -171,6 +171,9 @@ pub struct AutoReplyEngine {
     reply_timestamps: std::collections::VecDeque<DateTime<Utc>>,
     /// Maximum replies per hour per channel (rate limit).
     max_replies_per_hour: usize,
+    /// Maximum character length for draft reply content. Replies exceeding
+    /// this limit are truncated with a "..." suffix.
+    max_reply_length: usize,
 }
 
 impl AutoReplyEngine {
@@ -182,6 +185,7 @@ impl AutoReplyEngine {
             pending_replies: Vec::new(),
             reply_timestamps: std::collections::VecDeque::new(),
             max_replies_per_hour: max_replies.max(10),
+            max_reply_length: 500,
         }
     }
 
@@ -192,6 +196,19 @@ impl AutoReplyEngine {
             self.reply_timestamps.pop_front();
         }
         self.reply_timestamps.len() >= self.max_replies_per_hour
+    }
+
+    /// Truncate draft reply content to `max_reply_length` characters.
+    ///
+    /// If the content exceeds the limit, it is truncated at a character
+    /// boundary and a "..." suffix is appended.
+    fn truncate_draft(&self, draft: &str) -> String {
+        if draft.chars().count() > self.max_reply_length {
+            let truncated: String = draft.chars().take(self.max_reply_length).collect();
+            format!("{}...", truncated)
+        } else {
+            draft.to_string()
+        }
     }
 
     /// Process a classified message and determine the reply action.
@@ -212,12 +229,15 @@ impl AutoReplyEngine {
 
         match &classified.suggested_action {
             SuggestedAction::AutoReply => {
-                let reply = self.create_reply(classified, channel_name, &channel_config.auto_reply);
+                let mut reply =
+                    self.create_reply(classified, channel_name, &channel_config.auto_reply);
+                reply.draft_response = self.truncate_draft(&reply.draft_response);
                 Some(reply)
             }
             SuggestedAction::DraftReply => {
                 let mut reply =
                     self.create_reply(classified, channel_name, &AutoReplyMode::DraftOnly);
+                reply.draft_response = self.truncate_draft(&reply.draft_response);
                 reply.status = ReplyStatus::PendingApproval;
                 Some(reply)
             }
@@ -284,8 +304,10 @@ impl AutoReplyEngine {
         }
     }
 
-    /// Add a reply to the pending queue.
-    pub fn enqueue(&mut self, reply: PendingReply) {
+    /// Add a reply to the pending queue. The draft response is truncated
+    /// to `max_reply_length` if it exceeds the limit.
+    pub fn enqueue(&mut self, mut reply: PendingReply) {
+        reply.draft_response = self.truncate_draft(&reply.draft_response);
         self.pending_replies.push(reply);
     }
 

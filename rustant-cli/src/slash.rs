@@ -469,6 +469,80 @@ impl CommandRegistry {
                  reminders scheduled, and per-channel configuration.",
             ),
         });
+
+        // macOS daily assistant commands
+        self.register(CommandInfo {
+            name: "/meeting",
+            aliases: &["/meet"],
+            description: "Meeting recording and transcription",
+            usage: "/meeting [detect|record|stop|status]",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "Record, transcribe, and summarize meetings.\n\n\
+                 Usage:\n  /meeting detect  — Check for active meeting apps\n  \
+                 /meeting record  — Start recording microphone audio\n  \
+                 /meeting stop    — Stop recording\n  \
+                 /meeting status  — Show recording status\n\n\
+                 After recording, use the macos_meeting_recorder tool to transcribe\n\
+                 and save summaries to Notes.app in the 'Meeting Transcripts' folder.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/briefing",
+            aliases: &["/brief"],
+            description: "Generate daily briefing (calendar, reminders, weather)",
+            usage: "/briefing [morning|evening]",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "Generate a daily briefing combining calendar, reminders, and weather.\n\n\
+                 Usage:\n  /briefing          — Morning briefing (default)\n  \
+                 /briefing morning  — Today's schedule, reminders, weather\n  \
+                 /briefing evening  — End-of-day summary with tomorrow preview\n\n\
+                 Briefings are saved to Notes.app in the 'Daily Briefings' folder.",
+            ),
+        });
+
+        // ── Transparency ──
+        self.register(CommandInfo {
+            name: "/why",
+            aliases: &[],
+            description: "Show why the agent made recent decisions",
+            usage: "/why [index]",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "Show the reasoning behind recent agent decisions.\n\n\
+                 Usage:\n  /why         -- Show most recent decision\n  \
+                 /why 0       -- Show first recorded decision\n  \
+                 /why N       -- Show decision at index N\n\n\
+                 Each explanation includes: decision type, confidence score,\n\
+                 reasoning chain, alternatives considered, and influence factors.",
+            ),
+        });
+
+        // ── Scheduler ──
+        self.register(CommandInfo {
+            name: "/schedule",
+            aliases: &["/sched", "/cron"],
+            description: "Manage scheduled tasks and cron jobs",
+            usage: "/schedule [list|add|remove|enable|disable]",
+            category: CommandCategory::System,
+            tui_only: false,
+            detailed_help: Some(
+                "Manage background scheduled tasks (cron jobs).\n\n\
+                 Usage:\n  /schedule list              — List all scheduled jobs\n  \
+                 /schedule add <name> <cron> <task>  — Add a new scheduled job\n  \
+                 /schedule remove <name>     — Remove a scheduled job\n  \
+                 /schedule enable <name>     — Enable a disabled job\n  \
+                 /schedule disable <name>    — Disable a job\n\n\
+                 Example cron expressions:\n  0 0 8 * * MON-FRI *  — 8 AM weekdays\n  \
+                 0 0 17 * * * *           — 5 PM daily\n  \
+                 0 30 9 * * SAT *         — 9:30 AM Saturdays\n\n\
+                 Configure in .rustant/config.toml under [scheduler].",
+            ),
+        });
     }
 
     /// Look up a command by name or alias.
@@ -664,10 +738,10 @@ mod tests {
     #[test]
     fn test_register_defaults_populates() {
         let registry = CommandRegistry::with_defaults();
-        // We have 31 commands registered (24 core + 7 TUI-only)
+        // We have 32 commands registered (25 core + 7 TUI-only)
         assert!(
-            registry.len() >= 31,
-            "Expected at least 31 commands, got {}",
+            registry.len() >= 32,
+            "Expected at least 32 commands, got {}",
             registry.len()
         );
     }

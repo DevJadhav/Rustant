@@ -286,6 +286,9 @@ pub enum BrowserError {
     #[error("Page limit exceeded: maximum {max} pages")]
     PageLimitExceeded { max: usize },
 
+    #[error("Tab not found: {tab_id}")]
+    TabNotFound { tab_id: String },
+
     #[error("Browser not connected")]
     NotConnected,
 }

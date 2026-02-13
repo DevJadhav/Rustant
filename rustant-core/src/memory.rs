@@ -290,11 +290,29 @@ impl Fact {
 }
 
 /// Long-term memory persisted across sessions.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LongTermMemory {
     pub facts: Vec<Fact>,
     pub preferences: HashMap<String, String>,
     pub corrections: Vec<Correction>,
+    /// Maximum number of facts to retain. When exceeded, the oldest fact is evicted.
+    #[serde(default = "LongTermMemory::default_max_facts")]
+    pub max_facts: usize,
+    /// Maximum number of corrections to retain. When exceeded, the oldest correction is evicted.
+    #[serde(default = "LongTermMemory::default_max_corrections")]
+    pub max_corrections: usize,
+}
+
+impl Default for LongTermMemory {
+    fn default() -> Self {
+        Self {
+            facts: Vec::new(),
+            preferences: HashMap::new(),
+            corrections: Vec::new(),
+            max_facts: Self::default_max_facts(),
+            max_corrections: Self::default_max_corrections(),
+        }
+    }
 }
 
 /// A correction recorded from user feedback.
@@ -312,7 +330,18 @@ impl LongTermMemory {
         Self::default()
     }
 
+    fn default_max_facts() -> usize {
+        10_000
+    }
+
+    fn default_max_corrections() -> usize {
+        1_000
+    }
+
     pub fn add_fact(&mut self, fact: Fact) {
+        if self.facts.len() >= self.max_facts {
+            self.facts.remove(0);
+        }
         self.facts.push(fact);
     }
 
@@ -325,6 +354,9 @@ impl LongTermMemory {
     }
 
     pub fn add_correction(&mut self, original: String, corrected: String, context: String) {
+        if self.corrections.len() >= self.max_corrections {
+            self.corrections.remove(0);
+        }
         self.corrections.push(Correction {
             id: Uuid::new_v4(),
             original,

@@ -157,15 +157,111 @@ impl HeartbeatManager {
     }
 
     /// Check if a condition is met.
-    /// Currently supports "file_changed:<path>" format.
+    /// Supported conditions:
+    /// - `file_changed:<path>` — true if path exists
+    /// - `battery_low` — true if battery < 20% (macOS)
+    /// - `disk_low` — true if disk < 10% free
+    /// - `idle:<seconds>` — true if user idle > N seconds (macOS)
     pub fn check_condition(condition: &str) -> bool {
         if let Some(path) = condition.strip_prefix("file_changed:") {
-            // Simple check: file exists (in real use, would track modification times)
             std::path::Path::new(path).exists()
+        } else if condition == "battery_low" {
+            Self::check_battery_low()
+        } else if condition == "disk_low" {
+            Self::check_disk_low()
+        } else if let Some(secs_str) = condition.strip_prefix("idle:") {
+            if let Ok(threshold) = secs_str.parse::<u64>() {
+                Self::check_idle(threshold)
+            } else {
+                true // Invalid threshold, default to true
+            }
         } else {
             // Unknown condition format — default to true
             true
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn check_battery_low() -> bool {
+        match std::process::Command::new("pmset")
+            .args(["-g", "batt"])
+            .output()
+        {
+            Ok(output) => {
+                let text = String::from_utf8_lossy(&output.stdout);
+                // Look for pattern like "42%;" or "42%"
+                for word in text.split_whitespace() {
+                    if let Some(pct_str) = word.strip_suffix("%;") {
+                        if let Ok(pct) = pct_str.parse::<u32>() {
+                            return pct < 20;
+                        }
+                    }
+                    if let Some(pct_str) = word.strip_suffix('%') {
+                        if let Ok(pct) = pct_str.parse::<u32>() {
+                            return pct < 20;
+                        }
+                    }
+                }
+                false // Couldn't parse, assume not low
+            }
+            Err(_) => false,
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn check_battery_low() -> bool {
+        false // Not implemented on non-macOS
+    }
+
+    fn check_disk_low() -> bool {
+        match std::process::Command::new("df").args(["-P", "/"]).output() {
+            Ok(output) => {
+                let text = String::from_utf8_lossy(&output.stdout);
+                // Parse "df -P /" output: last column of second line is "Use%"
+                if let Some(line) = text.lines().nth(1) {
+                    let fields: Vec<&str> = line.split_whitespace().collect();
+                    // capacity/use% is typically at index 4 (e.g. "85%")
+                    if let Some(pct_str) = fields.get(4).and_then(|s| s.strip_suffix('%')) {
+                        if let Ok(pct) = pct_str.parse::<u32>() {
+                            return pct >= 90; // 90% used = <10% free
+                        }
+                    }
+                }
+                false
+            }
+            Err(_) => false,
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn check_idle(threshold_secs: u64) -> bool {
+        match std::process::Command::new("ioreg")
+            .args(["-c", "IOHIDSystem"])
+            .output()
+        {
+            Ok(output) => {
+                let text = String::from_utf8_lossy(&output.stdout);
+                for line in text.lines() {
+                    if line.contains("HIDIdleTime") {
+                        // Extract the number (idle time in nanoseconds)
+                        if let Some(num_str) = line.split('=').nth(1) {
+                            let num_str = num_str.trim();
+                            if let Ok(ns) = num_str.parse::<u64>() {
+                                let idle_secs = ns / 1_000_000_000;
+                                return idle_secs > threshold_secs;
+                            }
+                        }
+                    }
+                }
+                false
+            }
+            Err(_) => false,
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn check_idle(_threshold_secs: u64) -> bool {
+        false // Not implemented on non-macOS
     }
 }
 
@@ -296,5 +392,35 @@ mod tests {
         // 10:00 should NOT be in quiet hours
         let daytime = Utc.with_ymd_and_hms(2025, 1, 15, 10, 0, 0).unwrap();
         assert!(!quiet.is_active(&daytime));
+    }
+
+    #[test]
+    fn test_heartbeat_condition_battery_low() {
+        // battery_low should not panic
+        let _ = HeartbeatManager::check_condition("battery_low");
+    }
+
+    #[test]
+    fn test_heartbeat_condition_disk_low() {
+        // disk_low should not panic and return a bool
+        let _ = HeartbeatManager::check_condition("disk_low");
+    }
+
+    #[test]
+    fn test_heartbeat_condition_idle() {
+        // idle:N should not panic
+        let _ = HeartbeatManager::check_condition("idle:300");
+    }
+
+    #[test]
+    fn test_heartbeat_condition_idle_invalid() {
+        // Invalid idle threshold defaults to true
+        assert!(HeartbeatManager::check_condition("idle:notanumber"));
+    }
+
+    #[test]
+    fn test_heartbeat_condition_unknown() {
+        // Unknown conditions default to true
+        assert!(HeartbeatManager::check_condition("some_unknown_condition"));
     }
 }

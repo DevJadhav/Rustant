@@ -181,15 +181,21 @@ impl HttpTransport {
 #[async_trait]
 impl Transport for HttpTransport {
     async fn read_message(&mut self) -> Result<Option<String>, McpError> {
-        todo!("HTTP transport")
+        Err(McpError::TransportError {
+            message: "HTTP transport is not yet implemented".into(),
+        })
     }
 
     async fn write_message(&mut self, _message: &str) -> Result<(), McpError> {
-        todo!("HTTP transport")
+        Err(McpError::TransportError {
+            message: "HTTP transport is not yet implemented".into(),
+        })
     }
 
     async fn close(&mut self) -> Result<(), McpError> {
-        todo!("HTTP transport")
+        Err(McpError::TransportError {
+            message: "HTTP transport is not yet implemented".into(),
+        })
     }
 }
 
@@ -277,5 +283,24 @@ mod tests {
         // Verify the raw receiver got the message.
         let received = rx.recv().await.unwrap();
         assert_eq!(received, msg);
+    }
+
+    #[tokio::test]
+    async fn test_http_transport_returns_error_not_panic() {
+        let mut transport = HttpTransport::new(8080);
+
+        // All methods should return errors, NOT panic with todo!()
+        let read_result = transport.read_message().await;
+        assert!(read_result.is_err());
+        assert!(read_result
+            .unwrap_err()
+            .to_string()
+            .contains("not yet implemented"));
+
+        let write_result = transport.write_message("test").await;
+        assert!(write_result.is_err());
+
+        let close_result = transport.close().await;
+        assert!(close_result.is_err());
     }
 }

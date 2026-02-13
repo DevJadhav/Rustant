@@ -496,4 +496,65 @@ mod tests {
             _ => panic!("Expected InvalidArguments error"),
         }
     }
+
+    // --- Security tests ---
+
+    #[test]
+    fn test_imessage_send_tool_timeout() {
+        let tool = IMessageSendTool;
+        assert_eq!(tool.timeout(), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn test_imessage_contacts_tool_timeout() {
+        let tool = IMessageContactsTool;
+        assert_eq!(tool.timeout(), Duration::from_secs(15));
+    }
+
+    #[test]
+    fn test_imessage_read_tool_timeout() {
+        let tool = IMessageReadTool;
+        assert_eq!(tool.timeout(), Duration::from_secs(15));
+    }
+
+    #[test]
+    fn test_imessage_send_schema_required_fields() {
+        let tool = IMessageSendTool;
+        let schema = tool.parameters_schema();
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.contains(&json!("recipient")));
+        assert!(required.contains(&json!("message")));
+        assert_eq!(required.len(), 2);
+    }
+
+    #[test]
+    fn test_imessage_contacts_schema_required_fields() {
+        let tool = IMessageContactsTool;
+        let schema = tool.parameters_schema();
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.contains(&json!("query")));
+        assert_eq!(required.len(), 1);
+    }
+
+    #[test]
+    fn test_imessage_read_no_required_fields() {
+        let tool = IMessageReadTool;
+        let schema = tool.parameters_schema();
+        // read tool has no required fields (minutes and limit are optional with defaults)
+        assert!(schema.get("required").is_none());
+    }
+
+    #[tokio::test]
+    async fn test_imessage_send_both_params_missing() {
+        let tool = IMessageSendTool;
+        let result = tool.execute(json!({})).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_imessage_contacts_null_query() {
+        let tool = IMessageContactsTool;
+        let result = tool.execute(json!({"query": null})).await;
+        assert!(result.is_err());
+    }
 }

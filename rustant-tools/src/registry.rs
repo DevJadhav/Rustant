@@ -37,6 +37,7 @@ pub trait Tool: Send + Sync {
 }
 
 /// The tool registry holds all registered tools and handles execution.
+#[derive(Clone)]
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn Tool>>,
 }

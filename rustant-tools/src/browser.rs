@@ -586,7 +586,12 @@ impl Tool for BrowserSnapshotTool {
                 .get_aria_tree()
                 .await
                 .map_err(|e| browser_err("browser_snapshot", e))?,
-            SnapshotMode::Screenshot => unreachable!(),
+            SnapshotMode::Screenshot => {
+                return Err(ToolError::ExecutionFailed {
+                    name: "browser_snapshot".into(),
+                    message: "Screenshot mode is handled separately by the screenshot tool".into(),
+                });
+            }
         };
         let masked = BrowserSecurityGuard::mask_credentials(&content);
         Ok(ToolOutput::text(masked))
@@ -938,10 +943,193 @@ impl Tool for BrowserCloseTool {
 }
 
 // ============================================================================
+// 21. browser_new_tab
+// ============================================================================
+pub struct BrowserNewTabTool {
+    ctx: BrowserToolContext,
+}
+impl BrowserNewTabTool {
+    pub fn new(ctx: BrowserToolContext) -> Self {
+        Self { ctx }
+    }
+}
+#[async_trait]
+impl Tool for BrowserNewTabTool {
+    fn name(&self) -> &str {
+        "browser_new_tab"
+    }
+    fn description(&self) -> &str {
+        "Open a new browser tab and navigate to a URL. Returns the tab ID."
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "url": { "type": "string", "description": "URL to open in the new tab (default: about:blank)" }
+            }
+        })
+    }
+    async fn execute(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError> {
+        let url = args["url"].as_str().unwrap_or("about:blank");
+        if url != "about:blank" {
+            self.ctx
+                .security
+                .check_url(url)
+                .map_err(|e| browser_err("browser_new_tab", e))?;
+        }
+        let tab_id = self
+            .ctx
+            .client
+            .new_tab(url)
+            .await
+            .map_err(|e| browser_err("browser_new_tab", e))?;
+        Ok(ToolOutput::text(format!(
+            "Opened new tab (id: {}) at {}",
+            tab_id, url
+        )))
+    }
+    fn risk_level(&self) -> RiskLevel {
+        RiskLevel::Write
+    }
+}
+
+// ============================================================================
+// 22. browser_list_tabs
+// ============================================================================
+pub struct BrowserListTabsTool {
+    ctx: BrowserToolContext,
+}
+impl BrowserListTabsTool {
+    pub fn new(ctx: BrowserToolContext) -> Self {
+        Self { ctx }
+    }
+}
+#[async_trait]
+impl Tool for BrowserListTabsTool {
+    fn name(&self) -> &str {
+        "browser_list_tabs"
+    }
+    fn description(&self) -> &str {
+        "List all open browser tabs with their IDs, URLs, titles, and which is active."
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object", "properties": {}})
+    }
+    async fn execute(&self, _args: serde_json::Value) -> Result<ToolOutput, ToolError> {
+        let tabs = self
+            .ctx
+            .client
+            .list_tabs()
+            .await
+            .map_err(|e| browser_err("browser_list_tabs", e))?;
+        let mut output = format!("{} tab(s) open:\n", tabs.len());
+        for tab in &tabs {
+            let marker = if tab.active { " [ACTIVE]" } else { "" };
+            output.push_str(&format!(
+                "  - {} | {} | {}{}\n",
+                tab.id, tab.url, tab.title, marker
+            ));
+        }
+        Ok(ToolOutput::text(output))
+    }
+    fn risk_level(&self) -> RiskLevel {
+        RiskLevel::ReadOnly
+    }
+}
+
+// ============================================================================
+// 23. browser_switch_tab
+// ============================================================================
+pub struct BrowserSwitchTabTool {
+    ctx: BrowserToolContext,
+}
+impl BrowserSwitchTabTool {
+    pub fn new(ctx: BrowserToolContext) -> Self {
+        Self { ctx }
+    }
+}
+#[async_trait]
+impl Tool for BrowserSwitchTabTool {
+    fn name(&self) -> &str {
+        "browser_switch_tab"
+    }
+    fn description(&self) -> &str {
+        "Switch the active browser tab by tab ID. Use browser_list_tabs to see available IDs."
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "tab_id": { "type": "string", "description": "ID of the tab to switch to" }
+            },
+            "required": ["tab_id"]
+        })
+    }
+    async fn execute(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError> {
+        let tab_id = args["tab_id"]
+            .as_str()
+            .ok_or_else(|| missing_arg("browser_switch_tab", "tab_id"))?;
+        self.ctx
+            .client
+            .switch_tab(tab_id)
+            .await
+            .map_err(|e| browser_err("browser_switch_tab", e))?;
+        Ok(ToolOutput::text(format!("Switched to tab {}", tab_id)))
+    }
+    fn risk_level(&self) -> RiskLevel {
+        RiskLevel::ReadOnly
+    }
+}
+
+// ============================================================================
+// 24. browser_close_tab
+// ============================================================================
+pub struct BrowserCloseTabTool {
+    ctx: BrowserToolContext,
+}
+impl BrowserCloseTabTool {
+    pub fn new(ctx: BrowserToolContext) -> Self {
+        Self { ctx }
+    }
+}
+#[async_trait]
+impl Tool for BrowserCloseTabTool {
+    fn name(&self) -> &str {
+        "browser_close_tab"
+    }
+    fn description(&self) -> &str {
+        "Close a specific browser tab by its ID."
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "tab_id": { "type": "string", "description": "ID of the tab to close" }
+            },
+            "required": ["tab_id"]
+        })
+    }
+    async fn execute(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError> {
+        let tab_id = args["tab_id"]
+            .as_str()
+            .ok_or_else(|| missing_arg("browser_close_tab", "tab_id"))?;
+        self.ctx
+            .client
+            .close_tab(tab_id)
+            .await
+            .map_err(|e| browser_err("browser_close_tab", e))?;
+        Ok(ToolOutput::text(format!("Closed tab {}", tab_id)))
+    }
+    fn risk_level(&self) -> RiskLevel {
+        RiskLevel::Write
+    }
+}
+
+// ============================================================================
 // Registration helper
 // ============================================================================
 
-/// Create all 20 browser tools for registration.
+/// Create all 24 browser tools for registration.
 pub fn create_browser_tools(ctx: BrowserToolContext) -> Vec<Arc<dyn Tool>> {
     vec![
         Arc::new(BrowserNavigateTool::new(ctx.clone())),
@@ -963,7 +1151,12 @@ pub fn create_browser_tools(ctx: BrowserToolContext) -> Vec<Arc<dyn Tool>> {
         Arc::new(BrowserWaitTool::new(ctx.clone())),
         Arc::new(BrowserFileUploadTool::new(ctx.clone())),
         Arc::new(BrowserDownloadTool::new(ctx.clone())),
-        Arc::new(BrowserCloseTool::new(ctx)),
+        Arc::new(BrowserCloseTool::new(ctx.clone())),
+        // Tab management tools
+        Arc::new(BrowserNewTabTool::new(ctx.clone())),
+        Arc::new(BrowserListTabsTool::new(ctx.clone())),
+        Arc::new(BrowserSwitchTabTool::new(ctx.clone())),
+        Arc::new(BrowserCloseTabTool::new(ctx)),
     ]
 }
 
@@ -1162,12 +1355,12 @@ mod tests {
         let (ctx, _client) = make_ctx();
         let mut registry = ToolRegistry::new();
         register_browser_tools(&mut registry, ctx);
-        assert_eq!(registry.len(), 20);
+        assert_eq!(registry.len(), 24);
 
         // Verify no duplicate names
         let names = registry.list_names();
         let unique: std::collections::HashSet<_> = names.iter().collect();
-        assert_eq!(unique.len(), 20);
+        assert_eq!(unique.len(), 24);
     }
 
     #[tokio::test]
@@ -1195,6 +1388,11 @@ mod tests {
         // Network tools
         assert_eq!(risk_map["browser_file_upload"], RiskLevel::Network);
         assert_eq!(risk_map["browser_download"], RiskLevel::Network);
+        // Tab management tools
+        assert_eq!(risk_map["browser_new_tab"], RiskLevel::Write);
+        assert_eq!(risk_map["browser_list_tabs"], RiskLevel::ReadOnly);
+        assert_eq!(risk_map["browser_switch_tab"], RiskLevel::ReadOnly);
+        assert_eq!(risk_map["browser_close_tab"], RiskLevel::Write);
     }
 
     #[tokio::test]

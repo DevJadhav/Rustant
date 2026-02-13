@@ -19,7 +19,7 @@ description = "A high-performance, privacy-first autonomous personal agent built
 
 [workspace.dependencies]
 # Core runtime & async
-tokio = { version = "1.47", features = ["rt-multi-thread", "sync", "time", "macros", "net", "fs", "io-util", "io-std", "process"] }
+tokio = { version = "1.47", features = ["rt-multi-thread", "sync", "time", "macros", "net", "fs", "io-util", "io-std", "process", "signal"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 tokio-stream = "0.1"
 futures = "0.3"
@@ -144,6 +144,21 @@ criterion = { version = "0.5", features = ["html_reports"] }
 
 # Property testing
 proptest = "1.5"
+
+# Encryption (session at rest)
+aes-gcm = "0.10"
+
+# Archive / compression
+zip = "2.1"
+
+# Template engine
+handlebars = "6.2"
+
+# PDF generation
+genpdf = "0.2"
+
+# Timezone support
+chrono-tz = "0.10"
 
 # Internal crates
 rustant-core = { path = "rustant-core" }

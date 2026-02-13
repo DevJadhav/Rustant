@@ -186,6 +186,39 @@ impl JobManager {
         self.jobs.is_empty()
     }
 
+    /// Serialize the job manager state to JSON.
+    pub fn to_json(&self) -> Result<String, SchedulerError> {
+        let jobs: Vec<&BackgroundJob> = self.jobs.values().collect();
+        let state = serde_json::json!({
+            "max_jobs": self.max_jobs,
+            "jobs": jobs,
+        });
+        serde_json::to_string_pretty(&state).map_err(|e| SchedulerError::PersistenceError {
+            message: e.to_string(),
+        })
+    }
+
+    /// Deserialize the job manager from JSON.
+    pub fn from_json(json: &str) -> Result<Self, SchedulerError> {
+        let value: serde_json::Value =
+            serde_json::from_str(json).map_err(|e| SchedulerError::PersistenceError {
+                message: e.to_string(),
+            })?;
+        let max_jobs = value.get("max_jobs").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+        let jobs_arr: Vec<BackgroundJob> = value
+            .get("jobs")
+            .map(|v| serde_json::from_value(v.clone()).unwrap_or_default())
+            .unwrap_or_default();
+        let mut jobs_map = HashMap::new();
+        for job in jobs_arr {
+            jobs_map.insert(job.id, job);
+        }
+        Ok(Self {
+            jobs: jobs_map,
+            max_jobs,
+        })
+    }
+
     /// Clean up finished jobs.
     pub fn cleanup_finished(&mut self) {
         self.jobs.retain(|_, j| !j.is_finished());

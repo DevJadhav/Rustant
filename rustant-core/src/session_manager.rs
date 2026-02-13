@@ -120,6 +120,8 @@ pub struct SessionManager {
     index: SessionIndex,
     /// ID of the currently active session (if any).
     active_session_id: Option<Uuid>,
+    /// Optional encryptor for session data at rest.
+    encryptor: Option<crate::encryption::SessionEncryptor>,
 }
 
 impl SessionManager {
@@ -131,6 +133,7 @@ impl SessionManager {
             sessions_dir,
             index,
             active_session_id: None,
+            encryptor: None,
         })
     }
 
@@ -141,7 +144,14 @@ impl SessionManager {
             sessions_dir,
             index,
             active_session_id: None,
+            encryptor: None,
         })
+    }
+
+    /// Enable encryption for session data using the provided encryptor.
+    pub fn with_encryption(mut self, encryptor: crate::encryption::SessionEncryptor) -> Self {
+        self.encryptor = Some(encryptor);
+        self
     }
 
     /// Start a new session with an optional name.
@@ -206,6 +216,29 @@ impl SessionManager {
         let session_path = self.sessions_dir.join(&entry.file_name);
         memory.save_session(&session_path)?;
 
+        // Encrypt session file if encryption is enabled
+        if let Some(ref encryptor) = self.encryptor {
+            let plaintext =
+                std::fs::read(&session_path).map_err(|e| MemoryError::PersistenceError {
+                    message: format!("Failed to read session for encryption: {}", e),
+                })?;
+            let encrypted =
+                encryptor
+                    .encrypt(&plaintext)
+                    .map_err(|e| MemoryError::PersistenceError {
+                        message: format!("Failed to encrypt session: {}", e),
+                    })?;
+            let tmp_path = session_path.with_extension("json.enc.tmp");
+            std::fs::write(&tmp_path, &encrypted).map_err(|e| MemoryError::PersistenceError {
+                message: format!("Failed to write encrypted session: {}", e),
+            })?;
+            std::fs::rename(&tmp_path, &session_path).map_err(|e| {
+                MemoryError::PersistenceError {
+                    message: format!("Failed to finalize encrypted session: {}", e),
+                }
+            })?;
+        }
+
         // Save updated index
         self.index.save(&self.sessions_dir)
     }
@@ -242,7 +275,30 @@ impl SessionManager {
         };
 
         let session_path = self.sessions_dir.join(&entry.file_name);
-        let memory = MemorySystem::load_session(&session_path)?;
+
+        // Decrypt session file if encryption is enabled
+        let memory = if let Some(ref encryptor) = self.encryptor {
+            let encrypted =
+                std::fs::read(&session_path).map_err(|e| MemoryError::SessionLoadFailed {
+                    message: format!("Failed to read encrypted session: {}", e),
+                })?;
+            let plaintext =
+                encryptor
+                    .decrypt(&encrypted)
+                    .map_err(|e| MemoryError::SessionLoadFailed {
+                        message: format!("Failed to decrypt session: {}", e),
+                    })?;
+            // Write decrypted data to a temp file for loading
+            let tmp_path = session_path.with_extension("json.dec.tmp");
+            std::fs::write(&tmp_path, &plaintext).map_err(|e| MemoryError::SessionLoadFailed {
+                message: format!("Failed to write decrypted session: {}", e),
+            })?;
+            let result = MemorySystem::load_session(&tmp_path);
+            let _ = std::fs::remove_file(&tmp_path); // Clean up temp file
+            result?
+        } else {
+            MemorySystem::load_session(&session_path)?
+        };
 
         // Build continuation prompt
         let mut continuation =
@@ -372,7 +428,18 @@ impl SessionManager {
             sessions_dir: PathBuf::from("/tmp/rustant-test-sessions"),
             index,
             active_session_id: None,
+            encryptor: None,
         }
+    }
+
+    /// Find incomplete sessions (not completed, with at least one message).
+    /// Useful for crash recovery — shows sessions that were interrupted.
+    pub fn find_incomplete_sessions(&self) -> Vec<&SessionEntry> {
+        self.index
+            .entries
+            .iter()
+            .filter(|e| !e.completed && e.message_count > 0)
+            .collect()
     }
 
     /// Search sessions by matching query against name, goal, summary, and tags.
@@ -877,5 +944,127 @@ mod tests {
         // Case-insensitive filtering should find both
         let results = mgr.filter_by_tag("BUGFIX");
         assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_encrypted_session_save_load_roundtrip() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let sessions_dir = dir.path().to_path_buf();
+
+        let key = [42u8; 32];
+        let encryptor = crate::encryption::SessionEncryptor::from_key(&key);
+
+        let mut mgr = SessionManager::with_dir(sessions_dir.clone())
+            .unwrap()
+            .with_encryption(encryptor);
+        let _entry = mgr.start_session(Some("encrypted-test"));
+
+        let mut memory = MemorySystem::new(20);
+        memory.short_term.add(Message::user("hello encrypted"));
+        memory.short_term.add(Message::assistant("hi back"));
+
+        mgr.save_checkpoint(&memory, 100).unwrap();
+
+        // Verify the saved file is NOT valid JSON (it's encrypted binary data)
+        let entry = mgr.index().entries.last().unwrap();
+        let file_path = sessions_dir.join(&entry.file_name);
+        let raw_bytes = std::fs::read(&file_path).unwrap();
+        assert!(
+            serde_json::from_slice::<serde_json::Value>(&raw_bytes).is_err(),
+            "Encrypted file should not be valid JSON"
+        );
+
+        // Resume should decrypt and load correctly
+        let (loaded_memory, continuation) = mgr.resume_session("encrypted-test").unwrap();
+        assert_eq!(loaded_memory.short_term.len(), 2);
+        assert!(continuation.contains("resuming"));
+    }
+
+    #[test]
+    fn test_encrypted_session_wrong_key_fails() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let sessions_dir = dir.path().to_path_buf();
+
+        let key1 = [42u8; 32];
+        let encryptor1 = crate::encryption::SessionEncryptor::from_key(&key1);
+
+        let mut mgr = SessionManager::with_dir(sessions_dir.clone())
+            .unwrap()
+            .with_encryption(encryptor1);
+        let _entry = mgr.start_session(Some("wrongkey-test"));
+
+        let mut memory = MemorySystem::new(20);
+        memory.short_term.add(Message::user("secret data"));
+        mgr.save_checkpoint(&memory, 50).unwrap();
+
+        // Create a new manager with a different key
+        let key2 = [99u8; 32];
+        let encryptor2 = crate::encryption::SessionEncryptor::from_key(&key2);
+        let mut mgr2 = SessionManager::with_dir(sessions_dir)
+            .unwrap()
+            .with_encryption(encryptor2);
+
+        // Resume should fail because the key is wrong
+        let result = mgr2.resume_session("wrongkey-test");
+        assert!(result.is_err(), "Decryption with wrong key should fail");
+    }
+
+    #[test]
+    fn test_find_incomplete_sessions() {
+        let mut index = SessionIndex::default();
+        let now = Utc::now();
+
+        // Incomplete session with messages
+        index.entries.push(SessionEntry {
+            id: Uuid::new_v4(),
+            name: "interrupted".to_string(),
+            created_at: now,
+            updated_at: now,
+            last_goal: Some("fix bug".to_string()),
+            summary: None,
+            message_count: 5,
+            total_tokens: 100,
+            completed: false,
+            file_name: "a.json".to_string(),
+            tags: vec![],
+            project_type: None,
+        });
+
+        // Completed session
+        index.entries.push(SessionEntry {
+            id: Uuid::new_v4(),
+            name: "done".to_string(),
+            created_at: now,
+            updated_at: now,
+            last_goal: None,
+            summary: Some("all done".to_string()),
+            message_count: 10,
+            total_tokens: 200,
+            completed: true,
+            file_name: "b.json".to_string(),
+            tags: vec![],
+            project_type: None,
+        });
+
+        // Empty session (no messages) — should NOT be included
+        index.entries.push(SessionEntry {
+            id: Uuid::new_v4(),
+            name: "empty".to_string(),
+            created_at: now,
+            updated_at: now,
+            last_goal: None,
+            summary: None,
+            message_count: 0,
+            total_tokens: 0,
+            completed: false,
+            file_name: "c.json".to_string(),
+            tags: vec![],
+            project_type: None,
+        });
+
+        let mgr = SessionManager::from_index(index);
+        let incomplete = mgr.find_incomplete_sessions();
+        assert_eq!(incomplete.len(), 1);
+        assert_eq!(incomplete[0].name, "interrupted");
     }
 }

@@ -26,6 +26,11 @@ wasmi = { workspace = true }
 reqwest = { workspace = true }
 urlencoding = { workspace = true }
 similar = { workspace = true }
+sha2 = { workspace = true }
+zip = { workspace = true }
+handlebars = { workspace = true }
+genpdf = { workspace = true }
+chrono-tz = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

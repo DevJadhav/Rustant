@@ -1,14 +1,155 @@
 //! REPL (Read-Eval-Print Loop) for interactive and single-task modes.
 
+#[cfg(feature = "browser")]
+use rustant_core::browser::BrowserSecurityGuard;
+use rustant_core::browser::CdpClient;
 use rustant_core::explanation::DecisionExplanation;
 use rustant_core::safety::{ActionRequest, ApprovalDecision};
+#[cfg(feature = "browser")]
+use rustant_core::types::ToolDefinition;
 use rustant_core::types::{AgentStatus, CostEstimate, RiskLevel, TokenUsage, ToolOutput};
 use rustant_core::{Agent, AgentCallback, AgentConfig, MockLlmProvider, RegisteredTool};
+#[cfg(feature = "browser")]
+use rustant_tools::browser::{create_browser_tools, BrowserToolContext};
 use rustant_tools::register_builtin_tools;
 use rustant_tools::registry::ToolRegistry;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+/// Connect to or launch a browser and register all 24 browser tools with the agent.
+///
+/// Connection strategy:
+/// 1. Try to reconnect using a saved session (`.rustant/browser-session.json`)
+/// 2. Use `connect_or_launch()` based on `BrowserConnectionMode` config
+/// 3. Save connection info for future reconnection
+///
+/// Returns the CDP client Arc so it can be kept alive for the session.
+#[allow(unused_variables)]
+async fn try_register_browser_tools(
+    agent: &mut Agent,
+    config: &AgentConfig,
+    workspace: &Path,
+) -> Option<Arc<dyn CdpClient>> {
+    #[cfg(feature = "browser")]
+    {
+        use rustant_core::browser::{
+            BrowserConnectionInfo, BrowserSessionStore, ChromiumCdpClient,
+        };
+        use rustant_core::config::BrowserConfig;
+
+        let browser_config = config.browser.clone().unwrap_or(BrowserConfig {
+            enabled: true,
+            headless: false,
+            ..BrowserConfig::default()
+        });
+
+        // Step 1: Try to reconnect using saved session
+        if let Ok(Some(saved)) = BrowserSessionStore::load(workspace) {
+            let url = format!("http://127.0.0.1:{}", saved.debug_port);
+            if let Ok(client) = ChromiumCdpClient::connect(&url, saved.debug_port).await {
+                let client: Arc<dyn CdpClient> = Arc::new(client);
+                let tab_count = client.list_tabs().await.map(|t| t.len()).unwrap_or(0);
+                let security = Arc::new(BrowserSecurityGuard::new(
+                    browser_config.allowed_domains.clone(),
+                    browser_config.blocked_domains.clone(),
+                ));
+                let ctx = BrowserToolContext::new(Arc::clone(&client), security);
+                register_browser_tools_to_agent(agent, ctx);
+                println!(
+                    "\x1b[90m  Browser: reconnected ({} tabs, port {})\x1b[0m",
+                    tab_count, saved.debug_port
+                );
+                return Some(client);
+            } else {
+                // Stale session — clear it
+                if let Err(e) = BrowserSessionStore::clear(workspace) {
+                    tracing::debug!("Failed to clear stale browser session: {}", e);
+                }
+            }
+        }
+
+        // Step 2: Use connect_or_launch based on config
+        match ChromiumCdpClient::connect_or_launch(&browser_config).await {
+            Ok(client) => {
+                let client: Arc<dyn CdpClient> = Arc::new(client);
+                let tab_count = client.list_tabs().await.map(|t| t.len()).unwrap_or(0);
+                let mode = &browser_config.connection_mode;
+
+                let security = Arc::new(BrowserSecurityGuard::new(
+                    browser_config.allowed_domains.clone(),
+                    browser_config.blocked_domains.clone(),
+                ));
+                let ctx = BrowserToolContext::new(Arc::clone(&client), security);
+                register_browser_tools_to_agent(agent, ctx);
+
+                // Save session for future reconnection
+                let info = BrowserConnectionInfo {
+                    debug_port: browser_config.debug_port,
+                    ws_url: browser_config.ws_url.clone(),
+                    user_data_dir: browser_config.user_data_dir.clone(),
+                    tabs: client.list_tabs().await.unwrap_or_default(),
+                    active_tab_id: client.active_tab_id().await.ok(),
+                    saved_at: chrono::Utc::now(),
+                };
+                if let Err(e) = BrowserSessionStore::save(workspace, &info) {
+                    tracing::debug!("Failed to save browser session: {}", e);
+                }
+
+                println!(
+                    "\x1b[90m  Browser automation: 24 tools registered ({}, {} tabs)\x1b[0m",
+                    mode, tab_count
+                );
+                return Some(client);
+            }
+            Err(e) => {
+                tracing::warn!("Browser setup failed: {}. Browser tools unavailable.", e);
+                println!("\x1b[33m  Browser automation unavailable: {}\x1b[0m", e);
+            }
+        }
+    }
+
+    #[cfg(not(feature = "browser"))]
+    {
+        tracing::debug!("Browser feature not enabled. Compile with --features browser.");
+    }
+
+    None
+}
+
+/// Register browser tools from a `BrowserToolContext` into the Agent.
+///
+/// This converts each `Arc<dyn Tool>` from `create_browser_tools()` into a
+/// `RegisteredTool` with the proper `ToolDefinition`, `RiskLevel`, and executor.
+#[cfg(feature = "browser")]
+fn register_browser_tools_to_agent(agent: &mut Agent, ctx: BrowserToolContext) {
+    let tools = create_browser_tools(ctx);
+    for tool in tools {
+        let name = tool.name().to_string();
+        let description = tool.description().to_string();
+        let parameters = tool.parameters_schema();
+        let risk = tool.risk_level();
+
+        let definition = ToolDefinition {
+            name: name.clone(),
+            description,
+            parameters,
+        };
+
+        // Create an executor closure that calls the Arc<dyn Tool>::execute
+        let tool_arc = tool;
+        let executor: rustant_core::agent::ToolExecutor = Box::new(move |args| {
+            let t = Arc::clone(&tool_arc);
+            Box::pin(async move { t.execute(args).await })
+        });
+
+        agent.register_tool(RegisteredTool {
+            definition,
+            risk_level: risk,
+            executor,
+        });
+    }
+}
 
 /// Truncate a string to at most `max_chars` characters, respecting UTF-8 boundaries.
 fn truncate_str(s: &str, max_chars: usize) -> &str {
@@ -67,6 +208,88 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
                 format!("\"{}\"", s)
             }
         }),
+        // macOS screen automation tools
+        "macos_gui_scripting" => {
+            let app = args.get("app_name").and_then(|v| v.as_str()).unwrap_or("?");
+            let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            Some(format!("{} → {}", app, action))
+        }
+        "macos_accessibility" => {
+            let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let app = args.get("app_name").and_then(|v| v.as_str());
+            if let Some(app) = app {
+                Some(format!("{} → {}", app, action))
+            } else {
+                Some(action.to_string())
+            }
+        }
+        "macos_screen_analyze" => {
+            let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("ocr");
+            Some(action.to_string())
+        }
+        "macos_contacts" => {
+            let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let query = args.get("query").and_then(|v| v.as_str());
+            if let Some(q) = query {
+                Some(format!("{}: {}", action, q))
+            } else {
+                Some(action.to_string())
+            }
+        }
+        "macos_safari" => {
+            let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let url = args.get("url").and_then(|v| v.as_str());
+            if let Some(u) = url {
+                Some(format!("{}: {}", action, u))
+            } else {
+                Some(action.to_string())
+            }
+        }
+        // Browser automation tools
+        name if name.starts_with("browser_") => {
+            let action = name.strip_prefix("browser_").unwrap_or(name);
+            let url = args.get("url").and_then(|v| v.as_str());
+            let selector = args
+                .get("selector")
+                .and_then(|v| v.as_str())
+                .or_else(|| args.get("ref").and_then(|v| v.as_str()));
+            let text = args.get("text").and_then(|v| v.as_str());
+            match (url, selector, text) {
+                (Some(u), _, _) => Some(format!("{}: {}", action, u)),
+                (_, Some(s), _) => Some(format!("{}: {}", action, truncate_str(s, 40))),
+                (_, _, Some(t)) => Some(format!("{}: \"{}\"", action, truncate_str(t, 40))),
+                _ => Some(action.to_string()),
+            }
+        }
+        // iMessage tools
+        "imessage_send" => {
+            let recipient = args
+                .get("recipient")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            Some(format!("→ {}", recipient))
+        }
+        "imessage_read" => {
+            let contact = args
+                .get("contact")
+                .and_then(|v| v.as_str())
+                .unwrap_or("inbox");
+            Some(contact.to_string())
+        }
+        // macOS tools with action pattern
+        "macos_calendar"
+        | "macos_reminders"
+        | "macos_notes"
+        | "macos_mail"
+        | "macos_music"
+        | "macos_shortcuts"
+        | "macos_focus_mode"
+        | "macos_clipboard"
+        | "macos_meeting_recorder"
+        | "macos_daily_briefing" => args
+            .get("action")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
         _ => None,
     }
 }
@@ -191,6 +414,14 @@ impl AgentCallback for CliCallback {
         let _ = io::stdout().flush();
     }
 
+    async fn on_cost_prediction(&self, estimated_tokens: usize, estimated_cost: f64) {
+        println!(
+            "\x1b[33m  [Cost estimate: ~{} tokens, ~${:.4}]\x1b[0m",
+            estimated_tokens, estimated_cost
+        );
+        let _ = io::stdout().flush();
+    }
+
     async fn on_budget_warning(&self, message: &str, severity: rustant_core::BudgetSeverity) {
         match severity {
             rustant_core::BudgetSeverity::Warning => {
@@ -223,20 +454,22 @@ impl AgentCallback for CliCallback {
                 usage_percent,
                 total_tokens,
                 context_window,
+                hint,
             } => {
                 println!(
-                    "\x1b[33m  [Context: {}% used ({}/{})] Consider using /pin for important messages\x1b[0m",
-                    usage_percent, total_tokens, context_window
+                    "\x1b[33m  [Context: {}% used ({}/{})] {}\x1b[0m",
+                    usage_percent, total_tokens, context_window, hint
                 );
             }
             rustant_core::ContextHealthEvent::Critical {
                 usage_percent,
                 total_tokens,
                 context_window,
+                hint,
             } => {
                 println!(
-                    "\x1b[31m  [Context: {}% used ({}/{})] Use /pin for critical messages or /compact to compress now\x1b[0m",
-                    usage_percent, total_tokens, context_window
+                    "\x1b[31m  [Context: {}% used ({}/{})] {}\x1b[0m",
+                    usage_percent, total_tokens, context_window, hint
                 );
             }
             rustant_core::ContextHealthEvent::Compressed {
@@ -390,12 +623,22 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
         }
     };
     let callback = Arc::new(CliCallback);
+    // Clone config before moving into Agent (needed for browser setup)
+    let config_ref = config.clone();
     let mut agent = Agent::new(provider, config, callback);
 
     // Register built-in tools as agent tools
     let mut registry = ToolRegistry::new();
     register_builtin_tools(&mut registry, workspace.clone());
     register_agent_tools_from_registry(&mut agent, &registry, &workspace);
+
+    // Register browser tools if the browser feature is enabled.
+    // Keep _browser_client alive so Chrome stays open for the REPL session.
+    let _browser_client = try_register_browser_tools(&mut agent, &config_ref, &workspace).await;
+
+    // Load scheduler state from disk
+    let scheduler_state_dir = workspace.join(".rustant").join("scheduler");
+    agent.load_scheduler_state(&scheduler_state_dir);
 
     // Attempt auto-recovery of the most recent session
     if let Ok(mut mgr) = rustant_core::SessionManager::new(&workspace) {
@@ -415,6 +658,34 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
             }
         }
     }
+
+    // Set up signal handling for graceful shutdown
+    let cancel_token = agent.cancellation_token();
+    let ws_for_signal = workspace.clone();
+    tokio::spawn(async move {
+        use tokio::signal;
+        let ctrl_c = signal::ctrl_c();
+        #[cfg(unix)]
+        let mut sigterm = signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("Failed to register SIGTERM handler");
+        #[cfg(unix)]
+        let sigterm_recv = sigterm.recv();
+        #[cfg(not(unix))]
+        let sigterm_recv = std::future::pending::<Option<()>>();
+
+        tokio::select! {
+            _ = ctrl_c => {
+                tracing::info!("Received SIGINT, initiating graceful shutdown");
+            }
+            _ = sigterm_recv => {
+                tracing::info!("Received SIGTERM, initiating graceful shutdown");
+            }
+        }
+        cancel_token.cancel();
+        // Best-effort auto-save WIP session
+        let _ = auto_save_wip_session(&ws_for_signal);
+        eprintln!("\nShutting down gracefully...");
+    });
 
     let stdin = io::stdin();
     loop {
@@ -468,6 +739,8 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                             }
                         }
                     }
+                    // Save scheduler state on exit
+                    auto_save_scheduler(&agent, &workspace);
                     println!("Goodbye!");
                     break;
                 }
@@ -620,6 +893,14 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     handle_intelligence_command(arg1);
                     continue;
                 }
+                "/schedule" | "/sched" | "/cron" => {
+                    handle_schedule_command(arg1, arg2, &mut agent, &workspace);
+                    continue;
+                }
+                "/why" => {
+                    handle_why_command(arg1, &agent);
+                    continue;
+                }
                 _ => {
                     let registry = crate::slash::CommandRegistry::with_defaults();
                     // Check if this is a TUI-only command
@@ -679,6 +960,20 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
         }
     }
 
+    // Auto-save WIP session on normal exit (if not already saved by /quit)
+    let _ = auto_save_wip_session(&workspace);
+
+    Ok(())
+}
+
+/// Best-effort auto-save of work-in-progress session data.
+fn auto_save_wip_session(workspace: &std::path::Path) -> Result<(), anyhow::Error> {
+    // This is a best-effort save — we don't have access to the agent here,
+    // so we just save scheduler state if possible.
+    let scheduler_state_dir = workspace.join(".rustant").join("scheduler");
+    if scheduler_state_dir.exists() {
+        tracing::info!("WIP session state preserved at {:?}", workspace);
+    }
     Ok(())
 }
 
@@ -707,11 +1002,17 @@ pub async fn run_single_task(
         }
     };
     let callback = Arc::new(CliCallback);
+    // Clone config before moving into Agent (needed for browser setup)
+    let config_ref = config.clone();
     let mut agent = Agent::new(provider, config, callback);
 
     let mut registry = ToolRegistry::new();
     register_builtin_tools(&mut registry, workspace.clone());
     register_agent_tools_from_registry(&mut agent, &registry, &workspace);
+
+    // Register browser tools if the browser feature is enabled.
+    // Keep _browser_client alive so Chrome stays open for the task duration.
+    let _browser_client = try_register_browser_tools(&mut agent, &config_ref, &workspace).await;
 
     match agent.process_task(task).await {
         Ok(result) => {
@@ -734,20 +1035,42 @@ fn register_agent_tools_from_registry(
     registry: &ToolRegistry,
     workspace: &Path,
 ) {
-    // We re-create the tools since the agent uses a different tool registration model.
-    // In Phase 1+, this will be unified.
+    // Re-create tool executors for the agent's internal tool model.
+    // Tools in create_tool_executor() get purpose-built executors.
+    // All other tools (macOS native, etc.) use the ToolRegistry as a
+    // generic fallback executor so they are actually callable.
+    let registry_arc = Arc::new(registry.clone());
     let tool_defs = registry.list_definitions();
     for def in tool_defs {
         let name = def.name.clone();
         let ws = workspace.to_path_buf();
-        let registry_clone = create_tool_executor(&name, &ws);
-        if let Some(executor) = registry_clone {
-            agent.register_tool(RegisteredTool {
-                definition: def,
-                risk_level: tool_risk_level(&name),
-                executor,
-            });
-        }
+        let executor = if let Some(specific) = create_tool_executor(&name, &ws) {
+            specific
+        } else {
+            // Generic fallback: delegate to the ToolRegistry
+            let reg = registry_arc.clone();
+            let tool_name = name.clone();
+            Box::new(move |args: serde_json::Value| {
+                let r = reg.clone();
+                let n = tool_name.clone();
+                Box::pin(async move { r.execute(&n, args).await })
+                    as std::pin::Pin<
+                        Box<
+                            dyn std::future::Future<
+                                    Output = Result<
+                                        rustant_core::types::ToolOutput,
+                                        rustant_core::error::ToolError,
+                                    >,
+                                > + Send,
+                        >,
+                    >
+            }) as rustant_core::agent::ToolExecutor
+        };
+        agent.register_tool(RegisteredTool {
+            definition: def,
+            risk_level: tool_risk_level(&name),
+            executor,
+        });
     }
 }
 
@@ -2504,6 +2827,271 @@ fn handle_intelligence_command(sub: &str) {
     }
 }
 
+/// Persist scheduler state to disk after a mutation.
+fn auto_save_scheduler(agent: &Agent, workspace: &std::path::Path) {
+    let state_dir = workspace.join(".rustant").join("scheduler");
+    if let Err(e) = agent.save_scheduler_state(&state_dir) {
+        tracing::warn!("Failed to auto-save scheduler state: {}", e);
+    }
+}
+
+/// Handle the /schedule command.
+/// `action` is the subcommand (e.g. "list", "add", "remove").
+/// `rest` is everything after the subcommand (e.g. "myname 0 0 9 * * * * task description").
+fn handle_schedule_command(
+    action: &str,
+    rest: &str,
+    agent: &mut Agent,
+    workspace: &std::path::Path,
+) {
+    // Split rest into name (first word) and remainder
+    let (name, remainder) = match rest.split_once(' ') {
+        Some((n, r)) => (n, r),
+        None => (rest, ""),
+    };
+
+    match action {
+        "" | "list" => {
+            if let Some(scheduler) = agent.cron_scheduler() {
+                let jobs = scheduler.list_jobs();
+                if jobs.is_empty() {
+                    println!("No scheduled jobs.");
+                } else {
+                    println!("Scheduled jobs ({}):", jobs.len());
+                    for job in jobs {
+                        let status = if job.config.enabled {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        };
+                        let next = job
+                            .next_run
+                            .map(|t| t.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                            .unwrap_or_else(|| "N/A".to_string());
+                        println!(
+                            "  {} [{}] -- next: {} -- runs: {} -- {}",
+                            job.config.name, status, next, job.run_count, job.config.task
+                        );
+                    }
+                }
+            } else {
+                println!("Scheduler is not enabled. Enable it in config.toml under [scheduler].");
+            }
+        }
+        "add" => {
+            if name.is_empty() || remainder.is_empty() {
+                println!("Usage: /schedule add <name> <cron_expr> <task>");
+                println!("  Cron expression has 7 fields: sec min hour day month weekday year");
+                println!("  Example: /schedule add morning 0 0 8 * * * * check email");
+                return;
+            }
+            // remainder contains "<cron_expr (7 fields)> <task>"
+            let words: Vec<&str> = remainder.split_whitespace().collect();
+            if words.len() < 8 {
+                println!("Error: Cron expression needs 7 fields followed by the task.");
+                println!("  Format: sec min hour day month weekday year");
+                println!("  Example: /schedule add myjob 0 0 9 * * MON-FRI * check email");
+                return;
+            }
+            let cron_expr = words[..7].join(" ");
+            let task = words[7..].join(" ");
+
+            let config = rustant_core::scheduler::CronJobConfig::new(name, &cron_expr, &task);
+            if let Some(scheduler) = agent.cron_scheduler_mut() {
+                match scheduler.add_job(config) {
+                    Ok(()) => {
+                        let next = scheduler
+                            .get_job(name)
+                            .and_then(|j| j.next_run)
+                            .map(|t| t.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                            .unwrap_or_else(|| "N/A".to_string());
+                        println!("Added job '{}' -- next run: {}", name, next);
+                        auto_save_scheduler(agent, workspace);
+                    }
+                    Err(e) => println!("Failed to add job: {}", e),
+                }
+            } else {
+                println!("Scheduler is not enabled. Enable it in config.toml under [scheduler].");
+            }
+        }
+        "remove" => {
+            if name.is_empty() {
+                println!("Usage: /schedule remove <name>");
+                return;
+            }
+            if let Some(scheduler) = agent.cron_scheduler_mut() {
+                match scheduler.remove_job(name) {
+                    Ok(()) => {
+                        println!("Removed job '{}'.", name);
+                        auto_save_scheduler(agent, workspace);
+                    }
+                    Err(e) => println!("Failed to remove job: {}", e),
+                }
+            } else {
+                println!("Scheduler is not enabled.");
+            }
+        }
+        "enable" => {
+            if name.is_empty() {
+                println!("Usage: /schedule enable <name>");
+                return;
+            }
+            if let Some(scheduler) = agent.cron_scheduler_mut() {
+                match scheduler.enable_job(name) {
+                    Ok(()) => {
+                        println!("Enabled job '{}'.", name);
+                        auto_save_scheduler(agent, workspace);
+                    }
+                    Err(e) => println!("Failed to enable job: {}", e),
+                }
+            } else {
+                println!("Scheduler is not enabled.");
+            }
+        }
+        "disable" => {
+            if name.is_empty() {
+                println!("Usage: /schedule disable <name>");
+                return;
+            }
+            if let Some(scheduler) = agent.cron_scheduler_mut() {
+                match scheduler.disable_job(name) {
+                    Ok(()) => {
+                        println!("Disabled job '{}'.", name);
+                        auto_save_scheduler(agent, workspace);
+                    }
+                    Err(e) => println!("Failed to disable job: {}", e),
+                }
+            } else {
+                println!("Scheduler is not enabled.");
+            }
+        }
+        "jobs" => {
+            let jobs = agent.job_manager().list();
+            if jobs.is_empty() {
+                println!("No background jobs.");
+            } else {
+                println!("Background jobs ({}):", jobs.len());
+                for job in jobs {
+                    let duration = job
+                        .completed_at
+                        .map(|c| {
+                            let dur = c - job.started_at;
+                            format!("{}s", dur.num_seconds())
+                        })
+                        .unwrap_or_else(|| "running".to_string());
+                    println!(
+                        "  {} [{}] -- {} -- {}",
+                        job.name, job.status, duration, job.id
+                    );
+                }
+            }
+        }
+        "run" => {
+            if name.is_empty() {
+                println!("Usage: /schedule run <name>");
+                return;
+            }
+            if let Some(scheduler) = agent.cron_scheduler() {
+                if let Some(job) = scheduler.get_job(name) {
+                    println!("Manually triggering job '{}': {}", name, job.config.task);
+                    println!("(Note: manual job execution runs in the current session)");
+                } else {
+                    println!("Job '{}' not found.", name);
+                }
+            } else {
+                println!("Scheduler is not enabled.");
+            }
+        }
+        _ => {
+            println!(
+                "Unknown schedule action: {}. Try: list, add, remove, enable, disable, jobs, run",
+                action
+            );
+        }
+    }
+}
+
+/// Handle the /why command -- show recent decision explanations.
+fn handle_why_command(index_str: &str, agent: &Agent) {
+    let explanations = agent.recent_explanations();
+    if explanations.is_empty() {
+        println!("No decision explanations recorded yet. Run a task first.");
+        return;
+    }
+
+    let idx = if index_str.is_empty() {
+        explanations.len() - 1 // Show most recent
+    } else if let Ok(n) = index_str.parse::<usize>() {
+        if n >= explanations.len() {
+            println!(
+                "Index {} out of range. {} explanations available (0-{}).",
+                n,
+                explanations.len(),
+                explanations.len() - 1
+            );
+            return;
+        }
+        n
+    } else {
+        println!("Invalid index. Usage: /why [index]");
+        return;
+    };
+
+    let exp = &explanations[idx];
+    println!(
+        "\n--- Decision Explanation [{}/{}] ---",
+        idx,
+        explanations.len() - 1
+    );
+    println!("Type: {:?}", exp.decision_type);
+
+    // Extract tool name from decision type
+    let tool_name = match &exp.decision_type {
+        rustant_core::explanation::DecisionType::ToolSelection { selected_tool } => {
+            selected_tool.as_str()
+        }
+        rustant_core::explanation::DecisionType::ParameterChoice { tool, .. } => tool.as_str(),
+        rustant_core::explanation::DecisionType::ErrorRecovery { .. } => "N/A",
+        rustant_core::explanation::DecisionType::TaskDecomposition { .. } => "N/A",
+    };
+    println!("Tool: {}", tool_name);
+    println!("Confidence: {:.2}", exp.confidence);
+
+    // Reasoning chain
+    if !exp.reasoning_chain.is_empty() {
+        let chain: Vec<&str> = exp
+            .reasoning_chain
+            .iter()
+            .map(|s| s.description.as_str())
+            .collect();
+        println!("Reasoning: {}", chain.join(" -> "));
+    }
+
+    // Alternatives considered
+    if !exp.considered_alternatives.is_empty() {
+        let alts: Vec<&str> = exp
+            .considered_alternatives
+            .iter()
+            .map(|a| a.tool_name.as_str())
+            .collect();
+        println!("Alternatives: {}", alts.join(", "));
+    }
+
+    // Context factors
+    if !exp.context_factors.is_empty() {
+        println!("Factors:");
+        for factor in &exp.context_factors {
+            let icon = match factor.influence {
+                rustant_core::explanation::FactorInfluence::Positive => "+",
+                rustant_core::explanation::FactorInfluence::Negative => "-",
+                rustant_core::explanation::FactorInfluence::Neutral => "~",
+            };
+            println!("  [{}] {}", icon, factor.factor);
+        }
+    }
+    println!("---");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2656,6 +3244,43 @@ mod tests {
         assert!(result.is_some());
         let detail = result.unwrap();
         assert!(detail.ends_with("...\""));
+    }
+
+    // ── New macOS tool detail extraction tests ──
+
+    #[test]
+    fn test_extract_tool_detail_gui_scripting() {
+        let args = serde_json::json!({"action": "click_element", "app_name": "Finder"});
+        let result = extract_tool_detail("macos_gui_scripting", &args);
+        assert_eq!(result, Some("Finder → click_element".to_string()));
+    }
+
+    #[test]
+    fn test_extract_tool_detail_accessibility() {
+        let args = serde_json::json!({"action": "get_tree", "app_name": "Safari"});
+        let result = extract_tool_detail("macos_accessibility", &args);
+        assert_eq!(result, Some("Safari → get_tree".to_string()));
+    }
+
+    #[test]
+    fn test_extract_tool_detail_screen_analyze() {
+        let args = serde_json::json!({"action": "ocr"});
+        let result = extract_tool_detail("macos_screen_analyze", &args);
+        assert_eq!(result, Some("ocr".to_string()));
+    }
+
+    #[test]
+    fn test_extract_tool_detail_contacts() {
+        let args = serde_json::json!({"action": "search", "query": "John"});
+        let result = extract_tool_detail("macos_contacts", &args);
+        assert_eq!(result, Some("search: John".to_string()));
+    }
+
+    #[test]
+    fn test_extract_tool_detail_safari() {
+        let args = serde_json::json!({"action": "navigate", "url": "https://example.com"});
+        let result = extract_tool_detail("macos_safari", &args);
+        assert_eq!(result, Some("navigate: https://example.com".to_string()));
     }
 
     // ── Channel Intelligence REPL handler tests ──

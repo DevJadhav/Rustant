@@ -4,7 +4,7 @@
 //! Guardian to autonomously execute tasks through LLM-powered reasoning.
 
 use crate::brain::{Brain, LlmProvider};
-use crate::config::AgentConfig;
+use crate::config::{AgentConfig, MessagePriority};
 use crate::error::{AgentError, LlmError, RustantError, ToolError};
 use crate::explanation::{DecisionExplanation, DecisionType, ExplanationBuilder, FactorInfluence};
 use crate::memory::MemorySystem;
@@ -12,6 +12,7 @@ use crate::safety::{
     ActionDetails, ActionRequest, ApprovalContext, ApprovalDecision, ContractCheckResult,
     PermissionResult, ReversibilityInfo, SafetyGuardian,
 };
+use crate::scheduler::{CronScheduler, HeartbeatManager, JobManager};
 use crate::summarizer::ContextSummarizer;
 use crate::types::{
     AgentState, AgentStatus, CompletionResponse, Content, CostEstimate, Message, ProgressUpdate,
@@ -76,12 +77,16 @@ pub enum ContextHealthEvent {
         usage_percent: u8,
         total_tokens: usize,
         context_window: usize,
+        /// Actionable hint for the user (e.g. "Use /compact to compress context").
+        hint: String,
     },
     /// Context usage is critical (>= 90%).
     Critical {
         usage_percent: u8,
         total_tokens: usize,
         context_window: usize,
+        /// Actionable hint for the user.
+        hint: String,
     },
     /// Context compression just occurred.
     Compressed {
@@ -132,6 +137,11 @@ pub trait AgentCallback: Send + Sync {
     async fn on_clarification_request(&self, _question: &str) -> String {
         String::new()
     }
+
+    /// Called before an LLM call with estimated token count and cost.
+    /// Only called when estimated cost exceeds $0.05 to avoid noise.
+    /// Default is a no-op for backward compatibility.
+    async fn on_cost_prediction(&self, _estimated_tokens: usize, _estimated_cost: f64) {}
 
     /// Notify about context window health changes (warnings, compression events).
     /// Default is a no-op for backward compatibility.
@@ -195,6 +205,17 @@ pub struct Agent {
     knowledge: crate::memory::KnowledgeDistiller,
     /// Per-tool token usage tracking for budget breakdown.
     tool_token_usage: HashMap<String, usize>,
+    /// Optional cron scheduler for time-based task triggers.
+    cron_scheduler: Option<CronScheduler>,
+    /// Optional heartbeat manager for periodic task triggers.
+    heartbeat_manager: Option<HeartbeatManager>,
+    /// Background job manager for long-running tasks.
+    job_manager: JobManager,
+    /// Consecutive failure tracker: (tool_name, failure_count).
+    /// Resets when a different tool succeeds or a different tool is called.
+    consecutive_failures: (String, usize),
+    /// Recent decision explanations for transparency (capped at 50).
+    recent_explanations: Vec<DecisionExplanation>,
 }
 
 impl Agent {
@@ -211,6 +232,31 @@ impl Agent {
         let budget = crate::brain::TokenBudgetManager::new(config.budget.as_ref());
         let knowledge = crate::memory::KnowledgeDistiller::new(config.knowledge.as_ref());
 
+        let cron_scheduler = config.scheduler.as_ref().and_then(|sc| {
+            if sc.enabled {
+                let mut scheduler = CronScheduler::new();
+                for job_config in &sc.cron_jobs {
+                    if let Err(e) = scheduler.add_job(job_config.clone()) {
+                        warn!("Failed to add cron job '{}': {}", job_config.name, e);
+                    }
+                }
+                Some(scheduler)
+            } else {
+                None
+            }
+        });
+        let heartbeat_manager = config.scheduler.as_ref().and_then(|sc| {
+            sc.heartbeat
+                .as_ref()
+                .map(|hb| HeartbeatManager::new(hb.clone()))
+        });
+        let max_bg_jobs = config
+            .scheduler
+            .as_ref()
+            .map(|sc| sc.max_background_jobs)
+            .unwrap_or(10);
+        let job_manager = JobManager::new(max_bg_jobs);
+
         Self {
             brain,
             memory,
@@ -224,6 +270,11 @@ impl Agent {
             budget,
             knowledge,
             tool_token_usage: HashMap::new(),
+            cron_scheduler,
+            heartbeat_manager,
+            job_manager,
+            consecutive_failures: (String::new(), 0),
+            recent_explanations: Vec::new(),
         }
     }
 
@@ -273,6 +324,14 @@ impl Agent {
         self.brain.set_knowledge_addendum(knowledge_addendum);
 
         self.memory.add_message(Message::user(task));
+
+        // Inject a tool-routing hint when the task matches known patterns.
+        // This guides the LLM to call the correct dedicated tool instead of
+        // generic tools like shell_exec or document_read.
+        if let Some(hint) = Self::tool_routing_hint(task) {
+            self.memory.add_message(Message::system(&hint));
+        }
+
         self.callback.on_status_change(AgentStatus::Thinking).await;
 
         let mut final_response = String::new();
@@ -321,6 +380,7 @@ impl Agent {
                             usage_percent,
                             total_tokens: breakdown.total_tokens,
                             context_window: breakdown.context_window,
+                            hint: "Context nearly full — auto-compression imminent. Use /pin to protect important messages.".to_string(),
                         })
                         .await;
                 } else if usage_percent >= 70 {
@@ -329,6 +389,7 @@ impl Agent {
                             usage_percent,
                             total_tokens: breakdown.total_tokens,
                             context_window: breakdown.context_window,
+                            hint: "Context filling up. Use /compact to compress now, or /pin to protect key messages.".to_string(),
                         })
                         .await;
                 }
@@ -372,6 +433,15 @@ impl Agent {
                     debug!("Budget warning: {}", enriched);
                 }
                 crate::brain::BudgetCheckResult::Ok => {}
+            }
+
+            // Cost prediction before LLM call
+            {
+                let est_tokens = estimated_tokens + 500; // +500 for expected response
+                let est_cost = est_tokens as f64 * input_rate;
+                if est_cost > 0.05 {
+                    self.callback.on_cost_prediction(est_tokens, est_cost).await;
+                }
             }
 
             let response = if self.config.llm.use_streaming {
@@ -420,9 +490,42 @@ impl Agent {
                     // Build and emit decision explanation
                     let explanation = self.build_decision_explanation(name, arguments);
                     self.callback.on_decision_explanation(&explanation).await;
+                    self.record_explanation(explanation);
+
+                    // --- Tool call auto-correction ---
+                    // When the LLM calls a generic tool (document_read, file_read,
+                    // shell_exec) but the task clearly maps to a specific macOS tool,
+                    // reroute immediately. This is necessary because some LLMs
+                    // (notably gpt-4o) stubbornly call the wrong tool even with
+                    // explicit system prompt instructions.
+                    let (actual_name, actual_args) = if let Some((corrected_name, corrected_args)) =
+                        Self::auto_correct_tool_call(name, arguments, &self.state)
+                    {
+                        if corrected_name != *name {
+                            info!(
+                                original_tool = name,
+                                corrected_tool = corrected_name,
+                                "Auto-routing to correct macOS tool"
+                            );
+                            self.callback
+                                .on_assistant_message(&format!(
+                                    "[Routed: {} → {}]",
+                                    name, corrected_name
+                                ))
+                                .await;
+                            (corrected_name, corrected_args)
+                        } else {
+                            (name.to_string(), arguments.clone())
+                        }
+                    } else {
+                        (name.to_string(), arguments.clone())
+                    };
 
                     // --- ACT ---
-                    let result = self.execute_tool(id, name, arguments).await;
+                    let result = self.execute_tool(id, &actual_name, &actual_args).await;
+                    if let Err(ref e) = result {
+                        debug!(tool = %actual_name, error = %e, "Tool execution failed");
+                    }
 
                     // --- OBSERVE ---
                     let result_tokens = match &result {
@@ -441,6 +544,17 @@ impl Agent {
                         }
                     };
                     *self.tool_token_usage.entry(name.to_string()).or_insert(0) += result_tokens;
+
+                    // Track consecutive failures for circuit breaker
+                    if result.is_err() {
+                        if self.consecutive_failures.0 == *name {
+                            self.consecutive_failures.1 += 1;
+                        } else {
+                            self.consecutive_failures = (name.to_string(), 1);
+                        }
+                    } else {
+                        self.consecutive_failures = (String::new(), 0);
+                    }
 
                     // Check context compression
                     if self.memory.short_term.needs_compression() {
@@ -515,10 +629,34 @@ impl Agent {
                                 // Build and emit decision explanation (same as single ToolCall path)
                                 let explanation = self.build_decision_explanation(name, arguments);
                                 self.callback.on_decision_explanation(&explanation).await;
+                                self.record_explanation(explanation);
 
-                                let result = self.execute_tool(id, name, arguments).await;
-                                // Note: fact recording for cross-session learning is handled
-                                // inside execute_tool() — no need to duplicate it here.
+                                // Auto-routing (same as single ToolCall path)
+                                let (actual_name, actual_args) = if let Some((cn, ca)) =
+                                    Self::auto_correct_tool_call(name, arguments, &self.state)
+                                {
+                                    if cn != *name {
+                                        info!(
+                                            original_tool = name,
+                                            corrected_tool = cn,
+                                            "Auto-routing to correct macOS tool (multipart)"
+                                        );
+                                        self.callback
+                                            .on_assistant_message(&format!(
+                                                "[Routed: {} → {}]",
+                                                name, cn
+                                            ))
+                                            .await;
+                                        (cn, ca)
+                                    } else {
+                                        (name.to_string(), arguments.clone())
+                                    }
+                                } else {
+                                    (name.to_string(), arguments.clone())
+                                };
+
+                                let result =
+                                    self.execute_tool(id, &actual_name, &actual_args).await;
                                 let result_tokens = match &result {
                                     Ok(output) => {
                                         let msg = Message::tool_result(id, &output.content, false);
@@ -535,7 +673,16 @@ impl Agent {
                                     }
                                 };
 
-                                // Track per-tool token usage (same as single ToolCall path)
+                                // Track failures and token usage
+                                if result.is_err() {
+                                    if self.consecutive_failures.0 == *name {
+                                        self.consecutive_failures.1 += 1;
+                                    } else {
+                                        self.consecutive_failures = (name.to_string(), 1);
+                                    }
+                                } else {
+                                    self.consecutive_failures = (String::new(), 0);
+                                }
                                 *self.tool_token_usage.entry(name.to_string()).or_insert(0) +=
                                     result_tokens;
                             }
@@ -627,7 +774,75 @@ impl Agent {
 
     /// Perform a streaming think operation, sending tokens to the callback as they arrive.
     /// Returns a CompletionResponse equivalent to the non-streaming path.
+    /// Includes retry logic with exponential backoff for transient errors
+    /// (rate limits, timeouts, connection failures).
     async fn think_streaming(
+        &mut self,
+        conversation: &[Message],
+        tools: Option<Vec<ToolDefinition>>,
+    ) -> Result<CompletionResponse, LlmError> {
+        const MAX_RETRIES: usize = 3;
+        let mut last_error: Option<LlmError> = None;
+
+        for attempt in 0..=MAX_RETRIES {
+            match self.think_streaming_once(conversation, tools.clone()).await {
+                Ok(response) => return Ok(response),
+                Err(e) if Self::is_streaming_retryable(&e) => {
+                    if attempt < MAX_RETRIES {
+                        let backoff_secs = std::cmp::min(1u64 << attempt, 32);
+                        let wait = match &e {
+                            LlmError::RateLimited { retry_after_secs } => {
+                                std::cmp::max(*retry_after_secs, backoff_secs)
+                            }
+                            _ => backoff_secs,
+                        };
+                        info!(
+                            attempt = attempt + 1,
+                            max_retries = MAX_RETRIES,
+                            backoff_secs = wait,
+                            error = %e,
+                            "Retrying streaming after transient error"
+                        );
+                        self.callback
+                            .on_token(&format!("\n[Retrying in {}s due to: {}]\n", wait, e))
+                            .await;
+                        tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                        last_error = Some(e);
+                    } else {
+                        return Err(e);
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        Err(last_error.unwrap_or(LlmError::Connection {
+            message: "Max streaming retries exceeded".to_string(),
+        }))
+    }
+
+    /// Check if a streaming error is transient and should be retried.
+    fn is_streaming_retryable(error: &LlmError) -> bool {
+        if Brain::is_retryable(error) {
+            return true;
+        }
+        // Streaming errors may wrap retryable conditions as strings
+        if let LlmError::Streaming { message } = error {
+            let msg = message.to_lowercase();
+            return msg.contains("rate limit")
+                || msg.contains("429")
+                || msg.contains("timeout")
+                || msg.contains("timed out")
+                || msg.contains("connection")
+                || msg.contains("temporarily unavailable")
+                || msg.contains("503")
+                || msg.contains("502");
+        }
+        false
+    }
+
+    /// Single attempt at streaming think — extracted for retry wrapping.
+    async fn think_streaming_once(
         &mut self,
         conversation: &[Message],
         tools: Option<Vec<ToolDefinition>>,
@@ -808,6 +1023,7 @@ impl Agent {
                 builder.set_confidence(1.0);
                 let explanation = builder.build();
                 self.callback.on_decision_explanation(&explanation).await;
+                self.record_explanation(explanation);
 
                 return Err(ToolError::PermissionDenied {
                     name: tool_name.to_string(),
@@ -851,6 +1067,7 @@ impl Agent {
                         builder.set_confidence(1.0);
                         let explanation = builder.build();
                         self.callback.on_decision_explanation(&explanation).await;
+                        self.record_explanation(explanation);
 
                         // Record correction for cross-session learning:
                         // the agent's proposed action was rejected by the user.
@@ -903,6 +1120,7 @@ impl Agent {
             builder.set_confidence(1.0);
             let explanation = builder.build();
             self.callback.on_decision_explanation(&explanation).await;
+            self.record_explanation(explanation);
 
             return Err(ToolError::PermissionDenied {
                 name: tool_name.to_string(),
@@ -972,6 +1190,14 @@ impl Agent {
         }
 
         result
+    }
+
+    /// Record a decision explanation, capping at 50 entries.
+    fn record_explanation(&mut self, explanation: DecisionExplanation) {
+        if self.recent_explanations.len() >= 50 {
+            self.recent_explanations.remove(0);
+        }
+        self.recent_explanations.push(explanation);
     }
 
     /// Build rich approval context from action details, providing users with
@@ -1187,10 +1413,326 @@ impl Agent {
                         .unwrap_or_default(),
                 }
             }
+            "macos_mail" => {
+                let action = arguments["action"]
+                    .as_str()
+                    .unwrap_or("unknown")
+                    .to_string();
+                if action == "send" {
+                    let to = arguments["to"].as_str().unwrap_or("unknown").to_string();
+                    let subject = arguments["subject"]
+                        .as_str()
+                        .unwrap_or("(no subject)")
+                        .to_string();
+                    ActionDetails::Other {
+                        info: format!("SEND EMAIL to {} — subject: {}", to, subject),
+                    }
+                } else {
+                    ActionDetails::Other {
+                        info: format!("macos_mail: {}", action),
+                    }
+                }
+            }
+            "macos_safari" => {
+                let action = arguments["action"]
+                    .as_str()
+                    .unwrap_or("unknown")
+                    .to_string();
+                if action == "run_javascript" {
+                    ActionDetails::ShellCommand {
+                        command: format!(
+                            "Safari JS: {}",
+                            arguments["script"].as_str().unwrap_or("(unknown)")
+                        ),
+                    }
+                } else if action == "navigate" {
+                    ActionDetails::BrowserAction {
+                        action: "navigate".to_string(),
+                        url: arguments["url"].as_str().map(|s| s.to_string()),
+                        selector: None,
+                    }
+                } else {
+                    ActionDetails::Other {
+                        info: format!("macos_safari: {}", action),
+                    }
+                }
+            }
+            "macos_screen_analyze" => {
+                let action = arguments["action"].as_str().unwrap_or("ocr").to_string();
+                let app = arguments["app_name"]
+                    .as_str()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "screen".to_string());
+                ActionDetails::GuiAction {
+                    app_name: app,
+                    action,
+                    element: None,
+                }
+            }
+            "macos_contacts" => {
+                let action = arguments["action"].as_str().unwrap_or("search").to_string();
+                let query = arguments["query"]
+                    .as_str()
+                    .or_else(|| arguments["name"].as_str())
+                    .map(|q| format!("'{}'", q))
+                    .unwrap_or_default();
+                ActionDetails::Other {
+                    info: format!("Contacts: {} {}", action, query),
+                }
+            }
+            "macos_gui_scripting" | "macos_accessibility" => {
+                let app_name = arguments["app_name"]
+                    .as_str()
+                    .unwrap_or("unknown")
+                    .to_string();
+                let action = arguments["action"]
+                    .as_str()
+                    .unwrap_or("unknown")
+                    .to_string();
+                let element = arguments["element_description"]
+                    .as_str()
+                    .map(|s| s.to_string());
+                ActionDetails::GuiAction {
+                    app_name,
+                    action,
+                    element,
+                }
+            }
+            // Browser automation tools → BrowserAction for rich approval context.
+            name if name.starts_with("browser_") => {
+                let action = name.strip_prefix("browser_").unwrap_or(name).to_string();
+                let url = arguments["url"].as_str().map(|s| s.to_string());
+                let selector = arguments["selector"]
+                    .as_str()
+                    .or_else(|| arguments["ref"].as_str())
+                    .map(|s| s.to_string());
+                ActionDetails::BrowserAction {
+                    action,
+                    url,
+                    selector,
+                }
+            }
+            // Web tools → NetworkRequest for approval context.
+            "web_search" | "web_fetch" => {
+                let host = if tool_name == "web_search" {
+                    arguments["query"]
+                        .as_str()
+                        .unwrap_or("web search")
+                        .to_string()
+                } else {
+                    arguments["url"]
+                        .as_str()
+                        .unwrap_or("unknown URL")
+                        .to_string()
+                };
+                ActionDetails::NetworkRequest {
+                    host,
+                    method: if tool_name == "web_search" {
+                        "SEARCH".to_string()
+                    } else {
+                        "GET".to_string()
+                    },
+                }
+            }
+            // iMessage send → ChannelReply for approval gating.
+            "imessage_send" => {
+                let recipient = arguments["recipient"]
+                    .as_str()
+                    .unwrap_or("unknown")
+                    .to_string();
+                let preview = arguments["message"]
+                    .as_str()
+                    .map(|s| {
+                        if s.len() > 100 {
+                            format!("{}...", &s[..97])
+                        } else {
+                            s.to_string()
+                        }
+                    })
+                    .unwrap_or_default();
+                ActionDetails::ChannelReply {
+                    channel: "iMessage".to_string(),
+                    recipient,
+                    preview,
+                    priority: MessagePriority::Normal,
+                }
+            }
             _ => ActionDetails::Other {
                 info: arguments.to_string(),
             },
         }
+    }
+
+    /// Provide a tool-routing hint based on the user's task description.
+    /// Returns Some(hint) if the task matches a known pattern that maps to
+    /// a specific macOS or dedicated tool. This prevents the LLM from
+    /// choosing generic tools (shell_exec, document_read) for tasks that
+    /// have purpose-built tools.
+    #[cfg(target_os = "macos")]
+    fn tool_routing_hint(task: &str) -> Option<String> {
+        let lower = task.to_lowercase();
+
+        let tool_hint = if lower.contains("clipboard")
+            || lower.contains("paste")
+            || lower.contains("copy") && !lower.contains("file")
+        {
+            "For this task, call the 'macos_clipboard' tool with {\"action\":\"read\"} to read the clipboard or {\"action\":\"write\",\"content\":\"...\"} to write to it."
+        } else if lower.contains("battery")
+            || (lower.contains("system") && lower.contains("info"))
+            || lower.contains("disk space")
+            || lower.contains("cpu")
+            || lower.contains("ram")
+            || lower.contains("memory usage")
+        {
+            "For this task, call the 'macos_system_info' tool with the appropriate action: \"battery\", \"disk\", \"memory\", \"cpu\", \"network\", or \"version\"."
+        } else if lower.contains("running app")
+            || lower.contains("open app")
+            || lower.contains("launch")
+            || lower.contains("quit app")
+            || lower.contains("close app")
+        {
+            "For this task, call the 'macos_app_control' tool with the appropriate action: \"list_running\", \"open\", \"quit\", or \"activate\"."
+        } else if lower.contains("calendar")
+            || lower.contains("event")
+            || lower.contains("meeting") && !lower.contains("record")
+        {
+            "For this task, call the 'macos_calendar' tool with the appropriate action."
+        } else if lower.contains("reminder") || lower.contains("todo") || lower.contains("to-do") {
+            "For this task, call the 'macos_reminders' tool with the appropriate action."
+        } else if lower.contains("note") && !lower.contains("notification") {
+            "For this task, call the 'macos_notes' tool with the appropriate action."
+        } else if lower.contains("screenshot")
+            || lower.contains("screen capture")
+            || lower.contains("screen shot")
+        {
+            "For this task, call the 'macos_screenshot' tool with the appropriate action."
+        } else if lower.contains("notification")
+            || lower.contains("notify")
+            || lower.contains("alert me")
+        {
+            "For this task, call the 'macos_notification' tool."
+        } else if lower.contains("spotlight")
+            || lower.contains("find file")
+            || lower.contains("search for file")
+            || lower.contains("locate file")
+        {
+            "For this task, call the 'macos_spotlight' tool to search files using Spotlight."
+        } else if lower.contains("do not disturb")
+            || lower.contains("focus mode")
+            || lower.contains("dnd")
+        {
+            "For this task, call the 'macos_focus_mode' tool."
+        } else if lower.contains("music")
+            || lower.contains("song")
+            || lower.contains("play ")
+            || lower.contains("pause")
+            || lower.contains("now playing")
+        {
+            "For this task, call the 'macos_music' tool with the appropriate action."
+        } else if lower.contains("mail") || lower.contains("email") || lower.contains("inbox") {
+            "For this task, call the 'macos_mail' tool with the appropriate action."
+        } else if lower.contains("finder") || lower.contains("trash") || lower.contains("reveal in")
+        {
+            "For this task, call the 'macos_finder' tool with the appropriate action."
+        } else if lower.contains("contact") && !lower.contains("file") {
+            "For this task, call the 'macos_contacts' tool with the appropriate action."
+        } else if lower.contains("safari") || lower.contains("browser") && lower.contains("tab") {
+            "For this task, call the 'macos_safari' tool with the appropriate action."
+        } else if lower.contains("imessage")
+            || lower.contains("text message")
+            || lower.contains("send message")
+            || lower.contains("sms")
+        {
+            "For this task, call the appropriate iMessage tool: 'imessage_read', 'imessage_send', or 'imessage_contacts'."
+        } else {
+            return None;
+        };
+
+        Some(format!("TOOL ROUTING: {}", tool_hint))
+    }
+
+    /// Non-macOS fallback — no macOS-specific tool routing.
+    #[cfg(not(target_os = "macos"))]
+    fn tool_routing_hint(_task: &str) -> Option<String> {
+        None
+    }
+
+    /// Auto-correct a tool call when the LLM is stuck calling the wrong tool.
+    /// Returns Some((corrected_name, corrected_args)) if a correction is possible.
+    /// Uses the current task from AgentState to determine the correct tool.
+    #[cfg(target_os = "macos")]
+    fn auto_correct_tool_call(
+        failed_tool: &str,
+        _args: &serde_json::Value,
+        state: &AgentState,
+    ) -> Option<(String, serde_json::Value)> {
+        let task = state.current_goal.as_deref().unwrap_or("");
+        let lower = task.to_lowercase();
+
+        match failed_tool {
+            "document_read" | "file_read" | "shell_exec" => {
+                if lower.contains("clipboard")
+                    || lower.contains("paste")
+                    || lower.contains("pasteboard")
+                {
+                    Some((
+                        "macos_clipboard".to_string(),
+                        serde_json::json!({"action": "read"}),
+                    ))
+                } else if lower.contains("battery") {
+                    Some((
+                        "macos_system_info".to_string(),
+                        serde_json::json!({"action": "battery"}),
+                    ))
+                } else if lower.contains("disk") {
+                    Some((
+                        "macos_system_info".to_string(),
+                        serde_json::json!({"action": "disk"}),
+                    ))
+                } else if lower.contains("cpu") || lower.contains("processor") {
+                    Some((
+                        "macos_system_info".to_string(),
+                        serde_json::json!({"action": "cpu"}),
+                    ))
+                } else if (lower.contains("memory") || lower.contains("ram"))
+                    && lower.contains("usage")
+                {
+                    Some((
+                        "macos_system_info".to_string(),
+                        serde_json::json!({"action": "memory"}),
+                    ))
+                } else if lower.contains("running app")
+                    || lower.contains("what app")
+                    || lower.contains("list app")
+                {
+                    Some((
+                        "macos_app_control".to_string(),
+                        serde_json::json!({"action": "list_running"}),
+                    ))
+                } else if lower.contains("system info")
+                    || lower.contains("os version")
+                    || lower.contains("macos version")
+                {
+                    Some((
+                        "macos_system_info".to_string(),
+                        serde_json::json!({"action": "version"}),
+                    ))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Non-macOS fallback — no auto-correction available.
+    #[cfg(not(target_os = "macos"))]
+    fn auto_correct_tool_call(
+        _failed_tool: &str,
+        _args: &serde_json::Value,
+        _state: &AgentState,
+    ) -> Option<(String, serde_json::Value)> {
+        None
     }
 
     /// Build a decision explanation for a tool selection.
@@ -1258,17 +1800,44 @@ impl Agent {
             }
         }
 
-        // Set confidence based on risk level
-        let confidence = match risk_level {
-            RiskLevel::ReadOnly => 0.95,
-            RiskLevel::Write => 0.80,
-            RiskLevel::Execute => 0.70,
-            RiskLevel::Network => 0.75,
-            RiskLevel::Destructive => 0.50,
-        };
+        // Improved confidence scoring using multiple signals
+        let confidence = self.calculate_tool_confidence(tool_name, risk_level);
         builder.set_confidence(confidence);
 
         builder.build()
+    }
+
+    /// Calculate confidence score for a tool call based on multiple factors.
+    ///
+    /// Considers risk level, prior usage in this session, and iteration depth.
+    fn calculate_tool_confidence(&self, tool_name: &str, risk_level: RiskLevel) -> f32 {
+        // Base confidence from risk level
+        let mut confidence: f32 = match risk_level {
+            RiskLevel::ReadOnly => 0.90,
+            RiskLevel::Write => 0.75,
+            RiskLevel::Execute => 0.65,
+            RiskLevel::Network => 0.70,
+            RiskLevel::Destructive => 0.45,
+        };
+
+        // +0.05 if tool has been used successfully before in this session
+        if self.tool_token_usage.contains_key(tool_name) {
+            confidence += 0.05;
+        }
+
+        // -0.1 if iteration count is high (>10), suggesting the agent may be looping
+        if self.state.iteration > 10 {
+            confidence -= 0.1;
+        }
+
+        // -0.05 if approaching iteration limit (>80% of max)
+        if self.state.max_iterations > 0
+            && (self.state.iteration as f64 / self.state.max_iterations as f64) > 0.8
+        {
+            confidence -= 0.05;
+        }
+
+        confidence.clamp(0.0, 1.0)
     }
 
     /// Get the current agent state.
@@ -1319,6 +1888,114 @@ impl Agent {
     /// Get a mutable reference to the agent configuration.
     pub fn config_mut(&mut self) -> &mut AgentConfig {
         &mut self.config
+    }
+
+    /// Get a reference to the cron scheduler (if enabled).
+    pub fn cron_scheduler(&self) -> Option<&CronScheduler> {
+        self.cron_scheduler.as_ref()
+    }
+
+    /// Get a mutable reference to the cron scheduler (if enabled).
+    pub fn cron_scheduler_mut(&mut self) -> Option<&mut CronScheduler> {
+        self.cron_scheduler.as_mut()
+    }
+
+    /// Get a reference to the job manager.
+    pub fn job_manager(&self) -> &JobManager {
+        &self.job_manager
+    }
+
+    /// Get a mutable reference to the job manager.
+    pub fn job_manager_mut(&mut self) -> &mut JobManager {
+        &mut self.job_manager
+    }
+
+    /// Check scheduler for due tasks and return their task strings.
+    pub fn check_scheduler(&mut self) -> Vec<String> {
+        let mut due_tasks = Vec::new();
+
+        // Check cron scheduler
+        if let Some(ref scheduler) = self.cron_scheduler {
+            let due_jobs: Vec<String> = scheduler
+                .due_jobs()
+                .iter()
+                .map(|j| j.config.name.clone())
+                .collect();
+            for name in &due_jobs {
+                if let Some(ref scheduler) = self.cron_scheduler {
+                    if let Some(job) = scheduler.get_job(name) {
+                        due_tasks.push(job.config.task.clone());
+                    }
+                }
+            }
+            // Mark them executed
+            if let Some(ref mut scheduler) = self.cron_scheduler {
+                for name in &due_jobs {
+                    let _ = scheduler.mark_executed(name);
+                }
+            }
+        }
+
+        // Check heartbeat tasks
+        if let Some(ref mut heartbeat) = self.heartbeat_manager {
+            let ready: Vec<(String, String)> = heartbeat
+                .ready_tasks()
+                .iter()
+                .map(|t| (t.name.clone(), t.action.clone()))
+                .collect();
+            for (name, action) in &ready {
+                if let Some(ref task_condition) = heartbeat
+                    .config()
+                    .tasks
+                    .iter()
+                    .find(|t| t.name == *name)
+                    .and_then(|t| t.condition.clone())
+                {
+                    if HeartbeatManager::check_condition(task_condition) {
+                        due_tasks.push(action.clone());
+                        heartbeat.mark_executed(name);
+                    }
+                } else {
+                    due_tasks.push(action.clone());
+                    heartbeat.mark_executed(name);
+                }
+            }
+        }
+
+        due_tasks
+    }
+
+    /// Save scheduler state (cron jobs + background jobs) to the given directory.
+    pub fn save_scheduler_state(
+        &self,
+        state_dir: &std::path::Path,
+    ) -> Result<(), crate::error::SchedulerError> {
+        if let Some(ref scheduler) = self.cron_scheduler {
+            crate::scheduler::save_state(scheduler, &self.job_manager, state_dir)
+        } else {
+            // Nothing to save when scheduler is disabled
+            Ok(())
+        }
+    }
+
+    /// Load scheduler state from disk and replace current scheduler/job_manager.
+    pub fn load_scheduler_state(&mut self, state_dir: &std::path::Path) {
+        if self.cron_scheduler.is_some() {
+            let (loaded_scheduler, loaded_jm) = crate::scheduler::load_state(state_dir);
+            if !loaded_scheduler.is_empty() {
+                self.cron_scheduler = Some(loaded_scheduler);
+                info!("Restored cron scheduler state from {:?}", state_dir);
+            }
+            if !loaded_jm.is_empty() {
+                self.job_manager = loaded_jm;
+                info!("Restored job manager state from {:?}", state_dir);
+            }
+        }
+    }
+
+    /// Get recent decision explanations for transparency.
+    pub fn recent_explanations(&self) -> &[DecisionExplanation] {
+        &self.recent_explanations
     }
 
     /// Get per-tool token usage breakdown (tool_name -> estimated tokens).
@@ -2154,5 +2831,69 @@ mod tests {
             "Correction context should mention denial: {}",
             correction.context
         );
+    }
+
+    #[test]
+    fn test_scheduler_fields_none_when_disabled() {
+        let provider = Arc::new(MockLlmProvider::new());
+        let (agent, _) = create_test_agent(provider);
+        // Default config has no scheduler section, so fields should be None
+        assert!(agent.cron_scheduler().is_none());
+    }
+
+    #[test]
+    fn test_save_scheduler_state_noop_when_disabled() {
+        let provider = Arc::new(MockLlmProvider::new());
+        let (agent, _) = create_test_agent(provider);
+        let dir = tempfile::TempDir::new().unwrap();
+        // Should succeed silently when scheduler is disabled
+        assert!(agent.save_scheduler_state(dir.path()).is_ok());
+    }
+
+    #[test]
+    fn test_load_scheduler_state_noop_when_disabled() {
+        let provider = Arc::new(MockLlmProvider::new());
+        let (mut agent, _) = create_test_agent(provider);
+        let dir = tempfile::TempDir::new().unwrap();
+        // Should not panic when scheduler is disabled
+        agent.load_scheduler_state(dir.path());
+        assert!(agent.cron_scheduler().is_none());
+    }
+
+    #[test]
+    fn test_save_load_scheduler_roundtrip() {
+        let provider = Arc::new(MockLlmProvider::new());
+        let callback = Arc::new(RecordingCallback::new());
+        let mut config = AgentConfig::default();
+        config.llm.use_streaming = false;
+        config.scheduler = Some(crate::config::SchedulerConfig {
+            enabled: true,
+            cron_jobs: vec![crate::scheduler::CronJobConfig::new(
+                "test_job",
+                "0 0 9 * * * *",
+                "do something",
+            )],
+            ..Default::default()
+        });
+        let agent = Agent::new(provider.clone(), config, callback);
+        assert_eq!(agent.cron_scheduler().unwrap().len(), 1);
+
+        let dir = tempfile::TempDir::new().unwrap();
+        agent.save_scheduler_state(dir.path()).unwrap();
+
+        // Create a new agent with an empty scheduler and load state
+        let callback2 = Arc::new(RecordingCallback::new());
+        let mut config2 = AgentConfig::default();
+        config2.llm.use_streaming = false;
+        config2.scheduler = Some(crate::config::SchedulerConfig {
+            enabled: true,
+            cron_jobs: vec![],
+            ..Default::default()
+        });
+        let mut agent2 = Agent::new(provider, config2, callback2);
+        assert_eq!(agent2.cron_scheduler().unwrap().len(), 0);
+
+        agent2.load_scheduler_state(dir.path());
+        assert_eq!(agent2.cron_scheduler().unwrap().len(), 1);
     }
 }

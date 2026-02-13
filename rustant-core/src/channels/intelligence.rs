@@ -13,6 +13,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::sync::RwLock;
 
 /// The type/intent of a channel message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -324,7 +325,7 @@ fn message_hash(msg: &ChannelMessage) -> u64 {
 /// This is acceptable for typical cache sizes (<1000 entries). Entries also expire after
 /// the configured TTL (default: 30 minutes).
 pub struct ClassificationCache {
-    entries: HashMap<u64, CachedClassification>,
+    entries: RwLock<HashMap<u64, CachedClassification>>,
     max_entries: usize,
     /// Time-to-live for cached entries. Entries older than this are treated as expired.
     ttl: chrono::Duration,
@@ -351,7 +352,7 @@ impl ClassificationCache {
     /// and a default TTL of 30 minutes.
     pub fn new(max_entries: usize) -> Self {
         Self {
-            entries: HashMap::new(),
+            entries: RwLock::new(HashMap::new()),
             max_entries,
             ttl: chrono::Duration::minutes(30),
         }
@@ -360,7 +361,7 @@ impl ClassificationCache {
     /// Create a new classification cache with a custom TTL.
     pub fn with_ttl(max_entries: usize, ttl: chrono::Duration) -> Self {
         Self {
-            entries: HashMap::new(),
+            entries: RwLock::new(HashMap::new()),
             max_entries,
             ttl,
         }
@@ -370,7 +371,8 @@ impl ClassificationCache {
     /// Returns `None` if not cached or if the cached entry has expired.
     pub fn get(&self, msg: &ChannelMessage) -> Option<ClassifiedMessage> {
         let hash = message_hash(msg);
-        self.entries.get(&hash).and_then(|cached| {
+        let entries = self.entries.read().unwrap();
+        entries.get(&hash).and_then(|cached| {
             // Check TTL expiration
             if Utc::now() - cached.cached_at > self.ttl {
                 return None;
@@ -388,20 +390,20 @@ impl ClassificationCache {
     }
 
     /// Insert a classification into the cache.
-    pub fn insert(&mut self, msg: &ChannelMessage, classified: &ClassifiedMessage) {
+    pub fn insert(&self, msg: &ChannelMessage, classified: &ClassifiedMessage) {
+        let mut entries = self.entries.write().unwrap();
         // Evict oldest if at capacity
-        if self.entries.len() >= self.max_entries {
-            let oldest_key = self
-                .entries
+        if entries.len() >= self.max_entries {
+            let oldest_key = entries
                 .iter()
                 .min_by_key(|(_, v)| v.cached_at)
                 .map(|(k, _)| *k);
             if let Some(key) = oldest_key {
-                self.entries.remove(&key);
+                entries.remove(&key);
             }
         }
         let hash = message_hash(msg);
-        self.entries.insert(
+        entries.insert(
             hash,
             CachedClassification {
                 priority: classified.priority,
@@ -416,17 +418,17 @@ impl ClassificationCache {
 
     /// Number of cached entries.
     pub fn len(&self) -> usize {
-        self.entries.len()
+        self.entries.read().unwrap().len()
     }
 
     /// Whether the cache is empty.
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.entries.read().unwrap().is_empty()
     }
 
     /// Clear all cached entries.
-    pub fn clear(&mut self) {
-        self.entries.clear();
+    pub fn clear(&self) {
+        self.entries.write().unwrap().clear();
     }
 }
 
@@ -1017,7 +1019,7 @@ mod tests {
 
     #[test]
     fn test_cache_hit_returns_classification() {
-        let mut cache = ClassificationCache::new(100);
+        let cache = ClassificationCache::new(100);
         let msg = make_text_message("what is the status?");
         let classified = ClassifiedMessage {
             original: msg.clone(),
@@ -1037,7 +1039,7 @@ mod tests {
 
     #[test]
     fn test_cache_eviction_at_capacity() {
-        let mut cache = ClassificationCache::new(2);
+        let cache = ClassificationCache::new(2);
         let msg1 = make_text_message("message one");
         let msg2 = make_text_message("message two");
         let msg3 = make_text_message("message three");
@@ -1083,7 +1085,7 @@ mod tests {
 
     #[test]
     fn test_cache_clear() {
-        let mut cache = ClassificationCache::new(100);
+        let cache = ClassificationCache::new(100);
         let msg = make_text_message("test");
         let classified = ClassifiedMessage {
             original: msg.clone(),
@@ -1102,7 +1104,7 @@ mod tests {
 
     #[test]
     fn test_cache_same_message_overwrites() {
-        let mut cache = ClassificationCache::new(100);
+        let cache = ClassificationCache::new(100);
         let msg = make_text_message("duplicate");
         let classified1 = ClassifiedMessage {
             original: msg.clone(),
@@ -1387,7 +1389,7 @@ mod tests {
     fn test_cache_overwrites_on_hash_collision() {
         // This test documents that hash collisions cause cache overwrites.
         // Since we use u64 hashes, collisions are extremely rare in practice.
-        let mut cache = ClassificationCache::new(100);
+        let cache = ClassificationCache::new(100);
         let msg = make_text_message("hello");
         let classifier = default_classifier();
         let classified = classifier.classify(&msg);
@@ -1445,7 +1447,7 @@ mod tests {
 
     #[test]
     fn test_cache_ttl_expiration() {
-        let mut cache = ClassificationCache::with_ttl(100, chrono::Duration::seconds(0));
+        let cache = ClassificationCache::with_ttl(100, chrono::Duration::seconds(0));
         let msg = make_text_message("hello");
         let classifier = default_classifier();
         let classified = classifier.classify(&msg);
@@ -1460,7 +1462,7 @@ mod tests {
 
     #[test]
     fn test_cache_ttl_not_expired() {
-        let mut cache = ClassificationCache::with_ttl(100, chrono::Duration::hours(1));
+        let cache = ClassificationCache::with_ttl(100, chrono::Duration::hours(1));
         let msg = make_text_message("hello");
         let classifier = default_classifier();
         let classified = classifier.classify(&msg);
@@ -1477,7 +1479,7 @@ mod tests {
 
     #[test]
     fn test_cache_evicts_oldest_at_capacity() {
-        let mut cache = ClassificationCache::new(2);
+        let cache = ClassificationCache::new(2);
         let classifier = default_classifier();
 
         let msg1 = make_text_message("first");

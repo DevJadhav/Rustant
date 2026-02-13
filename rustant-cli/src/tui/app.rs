@@ -14,6 +14,7 @@ use crate::tui::widgets::input_area::{InputAction, InputWidget};
 use crate::tui::widgets::keys_overlay::{render_keys_overlay, KeysOverlay};
 use crate::tui::widgets::markdown::SyntaxHighlighter;
 use crate::tui::widgets::progress_bar::{render_progress_bar, ProgressState};
+use crate::tui::widgets::replay_panel::{render_replay_panel, ReplayPanel};
 use crate::tui::widgets::sidebar::{render_sidebar, FileEntry, FileStatus, SidebarData};
 use crate::tui::widgets::status_bar::{render_status_bar, InputMode};
 use crate::tui::widgets::task_board::{render_task_board, TaskBoard};
@@ -73,6 +74,9 @@ pub struct App {
 
     // Safety Transparency Dashboard
     pub explanation_panel: ExplanationPanel,
+
+    // Replay Panel (Ctrl+R)
+    pub replay_panel: ReplayPanel,
 
     // Streaming Progress Pipeline
     pub progress: ProgressState,
@@ -152,6 +156,7 @@ impl App {
             audit_store: AuditStore::new(),
             replay_session: ReplaySession::new(),
             explanation_panel: ExplanationPanel::new(),
+            replay_panel: ReplayPanel::new(),
             progress: ProgressState::new(),
             progress_rx,
             task_board: TaskBoard::new(),
@@ -339,6 +344,11 @@ impl App {
             render_explanation_panel(frame, frame.area(), &self.explanation_panel, &self.theme);
         }
 
+        // Replay panel overlay (Ctrl+R)
+        if self.replay_panel.is_visible() {
+            render_replay_panel(frame, frame.area(), &self.replay_panel, &self.theme);
+        }
+
         // Multi-Agent Task Board overlay
         if self.task_board.is_visible() {
             render_task_board(frame, frame.area(), &self.task_board, &self.theme);
@@ -374,6 +384,10 @@ impl App {
             }
             if self.explanation_panel.is_visible() {
                 self.explanation_panel.toggle();
+                return;
+            }
+            if self.replay_panel.is_visible() {
+                self.replay_panel.toggle();
                 return;
             }
             if self.diff_view.is_visible() {
@@ -424,6 +438,12 @@ impl App {
         // Ctrl+E: Toggle explanation panel (Safety Transparency Dashboard)
         if key.code == KeyCode::Char('e') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.explanation_panel.toggle();
+            return;
+        }
+
+        // Ctrl+R: Toggle replay panel
+        if key.code == KeyCode::Char('r') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.replay_panel.toggle();
             return;
         }
 
@@ -492,6 +512,37 @@ impl App {
                 }
                 KeyCode::Down => {
                     self.explanation_panel.scroll_down();
+                    return;
+                }
+                _ => {} // Other keys pass through
+            }
+        }
+
+        // Replay panel navigation when visible
+        if self.replay_panel.is_visible() {
+            match key.code {
+                KeyCode::Left => {
+                    self.replay_panel.step_backward();
+                    return;
+                }
+                KeyCode::Right => {
+                    self.replay_panel.step_forward();
+                    return;
+                }
+                KeyCode::Up => {
+                    self.replay_panel.scroll_up();
+                    return;
+                }
+                KeyCode::Down => {
+                    self.replay_panel.scroll_down();
+                    return;
+                }
+                KeyCode::Home => {
+                    self.replay_panel.rewind();
+                    return;
+                }
+                KeyCode::End => {
+                    self.replay_panel.fast_forward();
                     return;
                 }
                 _ => {} // Other keys pass through
@@ -2235,17 +2286,19 @@ impl App {
                         usage_percent,
                         total_tokens,
                         context_window,
+                        hint,
                     } => format!(
-                        "[Context: {}% used ({}/{})] Consider using /pin for important messages",
-                        usage_percent, total_tokens, context_window
+                        "[Context: {}% used ({}/{})] {}",
+                        usage_percent, total_tokens, context_window, hint
                     ),
                     rustant_core::ContextHealthEvent::Critical {
                         usage_percent,
                         total_tokens,
                         context_window,
+                        hint,
                     } => format!(
-                        "[Context: {}% used ({}/{})] Use /pin for critical messages or /compact to compress now",
-                        usage_percent, total_tokens, context_window
+                        "[Context: {}% used ({}/{})] {}",
+                        usage_percent, total_tokens, context_window, hint
                     ),
                     rustant_core::ContextHealthEvent::Compressed {
                         messages_compressed,
@@ -2509,17 +2562,38 @@ impl App {
 
 /// Register tools from registry into the agent (shared logic with repl.rs).
 fn register_agent_tools(agent: &mut Agent, registry: &ToolRegistry, workspace: &Path) {
+    let registry_arc = Arc::new(registry.clone());
     let tool_defs = registry.list_definitions();
     for def in tool_defs {
         let name = def.name.clone();
         let ws = workspace.to_path_buf();
-        if let Some(executor) = create_tool_executor(&name, &ws) {
-            agent.register_tool(RegisteredTool {
-                definition: def,
-                risk_level: tool_risk_level(&name),
-                executor,
-            });
-        }
+        let executor = if let Some(specific) = create_tool_executor(&name, &ws) {
+            specific
+        } else {
+            // Generic fallback: delegate to the ToolRegistry
+            let reg = registry_arc.clone();
+            let tool_name = name.clone();
+            Box::new(move |args: serde_json::Value| {
+                let r = reg.clone();
+                let n = tool_name.clone();
+                Box::pin(async move { r.execute(&n, args).await })
+                    as std::pin::Pin<
+                        Box<
+                            dyn std::future::Future<
+                                    Output = Result<
+                                        rustant_core::types::ToolOutput,
+                                        rustant_core::error::ToolError,
+                                    >,
+                                > + Send,
+                        >,
+                    >
+            }) as rustant_core::agent::ToolExecutor
+        };
+        agent.register_tool(RegisteredTool {
+            definition: def,
+            risk_level: tool_risk_level(&name),
+            executor,
+        });
     }
 }
 

@@ -12,6 +12,7 @@ pub mod canvas;
 pub mod channels;
 pub mod config;
 pub mod credentials;
+pub mod encryption;
 pub mod error;
 pub mod explanation;
 pub mod gateway;
@@ -19,6 +20,7 @@ pub mod indexer;
 pub mod injection;
 pub mod memory;
 pub mod merkle;
+pub mod metrics;
 pub mod multi;
 pub mod nodes;
 pub mod oauth;
@@ -70,6 +72,7 @@ pub use config::{
 pub use credentials::{
     CredentialError, CredentialStore, InMemoryCredentialStore, KeyringCredentialStore,
 };
+pub use encryption::{EncryptionError, SessionEncryptor};
 pub use error::BrowserError;
 pub use error::SchedulerError;
 pub use error::VoiceError;
@@ -109,6 +112,7 @@ pub use providers::{
 pub use safety::{
     AdaptiveTrust, ApprovalContext, ApprovalDecision, BehavioralFingerprint, ContractEnforcer,
     Invariant, Predicate, ResourceBounds, ReversibilityInfo, SafetyContract, SafetyGuardian,
+    ToolRateLimiter,
 };
 pub use sandbox::SandboxedFs;
 pub use scheduler::{

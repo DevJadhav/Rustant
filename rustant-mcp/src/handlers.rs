@@ -12,6 +12,10 @@ use serde_json::Value;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
+/// Maximum tool output size in bytes (10 MB). Outputs exceeding this are truncated
+/// to prevent OOM in MCP clients with limited buffer capacity.
+const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
+
 /// Handles MCP protocol requests by delegating to the tool registry and resource manager.
 pub struct RequestHandler {
     tool_registry: Arc<ToolRegistry>,
@@ -127,10 +131,30 @@ impl RequestHandler {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
 
+                // Truncate oversized output to prevent OOM in MCP clients.
+                let text = if output.content.len() > MAX_OUTPUT_BYTES {
+                    warn!(
+                        tool = %tool_name,
+                        size = output.content.len(),
+                        limit = MAX_OUTPUT_BYTES,
+                        "Tool output truncated"
+                    );
+                    let mut end = MAX_OUTPUT_BYTES;
+                    while end > 0 && !output.content.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    format!(
+                        "{}\n\n[output truncated — {} bytes exceeded {} byte limit]",
+                        &output.content[..end],
+                        output.content.len(),
+                        MAX_OUTPUT_BYTES
+                    )
+                } else {
+                    output.content
+                };
+
                 let result = CallToolResult {
-                    content: vec![ToolContent::Text {
-                        text: output.content,
-                    }],
+                    content: vec![ToolContent::Text { text }],
                     is_error: if is_error { Some(true) } else { None },
                 };
 
@@ -309,11 +333,11 @@ mod tests {
 
         let result = handler.handle_tools_list().unwrap();
         let tools = result["tools"].as_array().unwrap();
-        // 12 base + 3 web + 1 smart_edit + 1 codebase_search + 3 iMessage + 10 macOS on macOS
+        // 28 base + 3 iMessage + 24 macOS native = 55 on macOS
         #[cfg(target_os = "macos")]
-        assert_eq!(tools.len(), 30);
+        assert_eq!(tools.len(), 55);
         #[cfg(not(target_os = "macos"))]
-        assert_eq!(tools.len(), 17);
+        assert_eq!(tools.len(), 28);
 
         // Check that each tool has required fields
         for tool in tools {
@@ -529,5 +553,11 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("fn main()"));
+    }
+
+    #[test]
+    fn test_max_output_bytes_constant() {
+        // Ensure the safety limit is 10 MB
+        assert_eq!(MAX_OUTPUT_BYTES, 10 * 1024 * 1024);
     }
 }

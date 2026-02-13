@@ -755,4 +755,173 @@ mod tests {
         let result = tool.execute(serde_json::json!({})).await;
         assert!(result.is_err());
     }
+
+    // --- Security-oriented tests ---
+
+    #[tokio::test]
+    async fn test_web_fetch_rejects_file_protocol() {
+        let tool = WebFetchTool::new();
+        let result = tool
+            .execute(serde_json::json!({"url": "file:///etc/passwd"}))
+            .await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ToolError::InvalidArguments { reason, .. } => {
+                assert!(
+                    reason.contains("http://") || reason.contains("https://"),
+                    "Error should mention valid protocols, got: {}",
+                    reason
+                );
+            }
+            e => panic!("Expected InvalidArguments, got: {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_web_fetch_rejects_javascript_protocol() {
+        let tool = WebFetchTool::new();
+        let result = tool
+            .execute(serde_json::json!({"url": "javascript:alert(1)"}))
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_web_fetch_rejects_data_protocol() {
+        let tool = WebFetchTool::new();
+        let result = tool
+            .execute(serde_json::json!({"url": "data:text/html,<script>alert(1)</script>"}))
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_web_fetch_rejects_ftp_protocol() {
+        let tool = WebFetchTool::new();
+        let result = tool
+            .execute(serde_json::json!({"url": "ftp://example.com/file"}))
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_web_fetch_missing_url_param() {
+        let tool = WebFetchTool::new();
+        let result = tool.execute(serde_json::json!({})).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ToolError::InvalidArguments { name, reason } => {
+                assert_eq!(name, "web_fetch");
+                assert!(reason.contains("url"));
+            }
+            e => panic!("Expected InvalidArguments, got: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_web_search_timeout() {
+        let tool = WebSearchTool::new();
+        assert_eq!(tool.timeout(), Duration::from_secs(15));
+    }
+
+    #[test]
+    fn test_web_fetch_timeout() {
+        let tool = WebFetchTool::new();
+        assert_eq!(tool.timeout(), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn test_document_read_timeout() {
+        let dir = TempDir::new().unwrap();
+        let tool = DocumentReadTool::new(dir.path().to_path_buf());
+        assert_eq!(tool.timeout(), Duration::from_secs(10));
+    }
+
+    #[tokio::test]
+    async fn test_document_read_nonexistent_file() {
+        let dir = TempDir::new().unwrap();
+        let tool = DocumentReadTool::new(dir.path().to_path_buf());
+        let result = tool
+            .execute(serde_json::json!({"path": "/nonexistent/file.txt"}))
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_text_from_html_nested_scripts() {
+        // Ensure nested script/style tags don't leak content
+        let html = "<script>alert('xss')</script><p>safe</p><style>body{}</style>";
+        let text = extract_text_from_html(html);
+        assert!(!text.contains("alert"));
+        assert!(!text.contains("xss"));
+        assert!(!text.contains("body{}"));
+        assert!(text.contains("safe"));
+    }
+
+    #[test]
+    fn test_extract_text_from_html_empty() {
+        let text = extract_text_from_html("");
+        assert!(text.is_empty());
+    }
+
+    #[test]
+    fn test_extract_text_from_html_plain_text() {
+        let text = extract_text_from_html("Just plain text with no tags");
+        assert!(text.contains("Just plain text with no tags"));
+    }
+
+    #[tokio::test]
+    async fn test_document_read_json_file() {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("data.json");
+        std::fs::write(&file_path, r#"{"key": "value"}"#).unwrap();
+
+        let tool = DocumentReadTool::new(dir.path().to_path_buf());
+        let result = tool
+            .execute(serde_json::json!({"path": file_path.to_str().unwrap()}))
+            .await
+            .unwrap();
+
+        assert!(result.content.contains(r#""key": "value""#));
+    }
+
+    #[tokio::test]
+    async fn test_document_read_toml_file() {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("config.toml");
+        std::fs::write(&file_path, "[section]\nkey = \"value\"").unwrap();
+
+        let tool = DocumentReadTool::new(dir.path().to_path_buf());
+        let result = tool
+            .execute(serde_json::json!({"path": file_path.to_str().unwrap()}))
+            .await
+            .unwrap();
+
+        assert!(result.content.contains("key = \"value\""));
+    }
+
+    #[tokio::test]
+    async fn test_web_search_schema_has_required() {
+        let tool = WebSearchTool::new();
+        let schema = tool.parameters_schema();
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.contains(&serde_json::json!("query")));
+    }
+
+    #[tokio::test]
+    async fn test_web_fetch_schema_has_required() {
+        let tool = WebFetchTool::new();
+        let schema = tool.parameters_schema();
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.contains(&serde_json::json!("url")));
+    }
+
+    #[tokio::test]
+    async fn test_document_read_schema_has_required() {
+        let dir = TempDir::new().unwrap();
+        let tool = DocumentReadTool::new(dir.path().to_path_buf());
+        let schema = tool.parameters_schema();
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.contains(&serde_json::json!("path")));
+    }
 }

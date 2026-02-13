@@ -659,6 +659,7 @@ mod tests {
             fallback_providers: Vec::new(),
             credential_store_key: None,
             auth_method: String::new(),
+            api_key: None,
         }
     }
 

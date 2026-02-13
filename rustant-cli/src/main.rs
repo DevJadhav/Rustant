@@ -39,7 +39,7 @@ struct Cli {
     no_tui: bool,
 
     /// Approval mode: safe, cautious, paranoid, yolo
-    #[arg(long)]
+    #[arg(short = 'a', long)]
     approval: Option<String>,
 
     /// Increase verbosity (-v, -vv, -vvv)
@@ -49,6 +49,10 @@ struct Cli {
     /// Suppress non-essential output
     #[arg(short, long)]
     quiet: bool,
+
+    /// Enable voice input mode (requires microphone access)
+    #[arg(long)]
+    voice: bool,
 
     /// Subcommand
     #[command(subcommand)]
@@ -301,6 +305,23 @@ enum BrowserAction {
         #[arg(default_value = "https://example.com")]
         url: String,
     },
+    /// Connect to an existing Chrome instance with remote debugging enabled
+    Connect {
+        /// Remote debugging port (default: 9222)
+        #[arg(short, long, default_value = "9222")]
+        port: u16,
+    },
+    /// Launch a new Chrome instance with remote debugging enabled
+    Launch {
+        /// Remote debugging port (default: 9222)
+        #[arg(short, long, default_value = "9222")]
+        port: u16,
+        /// Run Chrome headless (no visible window)
+        #[arg(long)]
+        headless: bool,
+    },
+    /// Show browser connection status and open tabs
+    Status,
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -501,6 +522,16 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Track the approval mode source for diagnostics
+    let approval_before_cli = config.safety.approval_mode;
+    let mut approval_source = if std::env::var("RUSTANT_SAFETY__APPROVAL_MODE").is_ok() {
+        "env(RUSTANT_SAFETY__APPROVAL_MODE)"
+    } else if approval_before_cli != rustant_core::ApprovalMode::Safe {
+        "config file"
+    } else {
+        "default"
+    };
+
     // Apply CLI overrides
     if let Some(model) = &cli.model {
         config.llm.model = model.clone();
@@ -516,7 +547,22 @@ async fn main() -> anyhow::Result<()> {
                 rustant_core::ApprovalMode::Safe
             }
         };
+        approval_source = "CLI --approval flag";
     }
+
+    // Always show approval mode when non-default (helps diagnose env var issues)
+    if config.safety.approval_mode != rustant_core::ApprovalMode::Safe {
+        eprintln!(
+            "  \x1b[33m⚠ Approval mode: {} (source: {})\x1b[0m",
+            config.safety.approval_mode, approval_source
+        );
+    }
+
+    tracing::debug!(
+        approval_mode = %config.safety.approval_mode,
+        source = approval_source,
+        "Config loaded — approval mode"
+    );
 
     // Start TUI, REPL, or execute single task
     if let Some(task) = cli.task {

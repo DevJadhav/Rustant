@@ -1226,7 +1226,8 @@ async fn handle_voice(action: VoiceAction) -> anyhow::Result<()> {
     }
 }
 
-async fn handle_browser(action: BrowserAction, _workspace: &Path) -> anyhow::Result<()> {
+#[allow(unused_variables)]
+async fn handle_browser(action: BrowserAction, workspace: &Path) -> anyhow::Result<()> {
     match action {
         BrowserAction::Test { url } => {
             #[cfg(feature = "browser")]
@@ -1298,6 +1299,196 @@ async fn handle_browser(action: BrowserAction, _workspace: &Path) -> anyhow::Res
             #[cfg(not(feature = "browser"))]
             {
                 let _ = url;
+                eprintln!(
+                    "Browser feature not enabled.\n\
+                     Recompile with: cargo build --features browser"
+                );
+                Ok(())
+            }
+        }
+
+        BrowserAction::Connect { port } => {
+            #[cfg(feature = "browser")]
+            {
+                use rustant_core::browser::{
+                    BrowserConnectionInfo, BrowserSessionStore, CdpClient, ChromiumCdpClient,
+                };
+
+                let url = format!("http://127.0.0.1:{}", port);
+                println!("Connecting to Chrome at {}...", url);
+
+                let client = ChromiumCdpClient::connect(&url, port)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to connect: {}", e))?;
+
+                let tabs = client
+                    .list_tabs()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to list tabs: {}", e))?;
+
+                println!("Connected! {} tab(s) open:", tabs.len());
+                for tab in &tabs {
+                    let marker = if tab.active { " *" } else { "" };
+                    println!("  [{}]{} {} — {}", tab.id, marker, tab.title, tab.url);
+                }
+
+                // Save session for REPL reconnection
+                let info = BrowserConnectionInfo {
+                    debug_port: port,
+                    ws_url: None,
+                    user_data_dir: None,
+                    tabs,
+                    active_tab_id: client.active_tab_id().await.ok(),
+                    saved_at: chrono::Utc::now(),
+                };
+                if let Err(e) = BrowserSessionStore::save(workspace, &info) {
+                    tracing::warn!("Failed to save browser session: {}", e);
+                } else {
+                    println!("Session saved. Rustant REPL will auto-reconnect.");
+                }
+
+                Ok(())
+            }
+
+            #[cfg(not(feature = "browser"))]
+            {
+                let _ = port;
+                eprintln!(
+                    "Browser feature not enabled.\n\
+                     Recompile with: cargo build --features browser"
+                );
+                Ok(())
+            }
+        }
+
+        BrowserAction::Launch { port, headless } => {
+            #[cfg(feature = "browser")]
+            {
+                use rustant_core::browser::{
+                    BrowserConnectionInfo, BrowserSessionStore, CdpClient, ChromiumCdpClient,
+                };
+                use rustant_core::config::BrowserConfig;
+
+                let config = BrowserConfig {
+                    enabled: true,
+                    headless,
+                    debug_port: port,
+                    ..Default::default()
+                };
+
+                println!(
+                    "Launching Chrome with remote debugging on port {}{}...",
+                    port,
+                    if headless { " (headless)" } else { "" }
+                );
+
+                let client = ChromiumCdpClient::launch_with_debugging(&config)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to launch Chrome: {}", e))?;
+
+                let tabs = client
+                    .list_tabs()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to list tabs: {}", e))?;
+
+                println!("Chrome launched. {} tab(s) open.", tabs.len());
+
+                // Save session for REPL reconnection
+                let info = BrowserConnectionInfo {
+                    debug_port: port,
+                    ws_url: None,
+                    user_data_dir: None,
+                    tabs,
+                    active_tab_id: client.active_tab_id().await.ok(),
+                    saved_at: chrono::Utc::now(),
+                };
+                if let Err(e) = BrowserSessionStore::save(workspace, &info) {
+                    tracing::warn!("Failed to save browser session: {}", e);
+                } else {
+                    println!("Session saved. Rustant REPL will auto-reconnect.");
+                }
+
+                // Keep Chrome alive until user presses Enter
+                println!("\nPress Enter to close Chrome...");
+                let _ = std::io::stdin().read_line(&mut String::new());
+                let _ = client.close().await;
+                BrowserSessionStore::clear(workspace).ok();
+                println!("Chrome closed.");
+
+                Ok(())
+            }
+
+            #[cfg(not(feature = "browser"))]
+            {
+                let _ = (port, headless);
+                eprintln!(
+                    "Browser feature not enabled.\n\
+                     Recompile with: cargo build --features browser"
+                );
+                Ok(())
+            }
+        }
+
+        BrowserAction::Status => {
+            #[cfg(feature = "browser")]
+            {
+                use rustant_core::browser::{BrowserSessionStore, CdpClient, ChromiumCdpClient};
+
+                // Check for saved session
+                match BrowserSessionStore::load(workspace) {
+                    Ok(Some(info)) => {
+                        println!("Saved browser session found:");
+                        println!("  Port: {}", info.debug_port);
+                        if let Some(ref ws) = info.ws_url {
+                            println!("  WebSocket: {}", ws);
+                        }
+                        println!(
+                            "  Saved at: {}",
+                            info.saved_at.format("%Y-%m-%d %H:%M:%S UTC")
+                        );
+                        println!("  Tabs: {}", info.tabs.len());
+                        for tab in &info.tabs {
+                            let marker = if tab.active { " *" } else { "" };
+                            println!("    [{}]{} {} — {}", tab.id, marker, tab.title, tab.url);
+                        }
+
+                        // Try to actually connect to verify it's still alive
+                        let url = format!("http://127.0.0.1:{}", info.debug_port);
+                        match ChromiumCdpClient::connect(&url, info.debug_port).await {
+                            Ok(client) => {
+                                let live_tabs = client.list_tabs().await.unwrap_or_default();
+                                println!(
+                                    "\n  Status: \x1b[32mConnected\x1b[0m ({} live tabs)",
+                                    live_tabs.len()
+                                );
+                            }
+                            Err(_) => {
+                                println!("\n  Status: \x1b[31mDisconnected\x1b[0m (Chrome not reachable)");
+                                println!("  Clearing stale session...");
+                                BrowserSessionStore::clear(workspace).ok();
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        println!("No saved browser session.");
+                        println!("\nTo start one:");
+                        println!(
+                            "  rustant browser launch            # Launch Chrome with debugging"
+                        );
+                        println!(
+                            "  rustant browser connect -p 9222   # Connect to existing Chrome"
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("Error reading session: {}", e);
+                    }
+                }
+
+                Ok(())
+            }
+
+            #[cfg(not(feature = "browser"))]
+            {
                 eprintln!(
                     "Browser feature not enabled.\n\
                      Recompile with: cargo build --features browser"

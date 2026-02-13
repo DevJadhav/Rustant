@@ -5,9 +5,23 @@
 
 use crate::error::BrowserError;
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Mutex;
+
+/// Metadata about an open browser tab/page.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TabInfo {
+    /// Unique tab identifier (Chrome target ID).
+    pub id: String,
+    /// Current URL of the tab.
+    pub url: String,
+    /// Current title of the tab.
+    pub title: String,
+    /// Whether this is the currently active tab.
+    pub active: bool,
+}
 
 /// Trait abstracting Chrome DevTools Protocol operations.
 ///
@@ -77,6 +91,23 @@ pub trait CdpClient: Send + Sync {
 
     /// Close the current page/tab.
     async fn close(&self) -> Result<(), BrowserError>;
+
+    // --- Tab/page management methods ---
+
+    /// Open a new tab and navigate to the given URL. Returns the tab ID.
+    async fn new_tab(&self, url: &str) -> Result<String, BrowserError>;
+
+    /// List all open tabs with their metadata.
+    async fn list_tabs(&self) -> Result<Vec<TabInfo>, BrowserError>;
+
+    /// Switch the active tab to the one with the given ID.
+    async fn switch_tab(&self, tab_id: &str) -> Result<(), BrowserError>;
+
+    /// Close a specific tab by ID.
+    async fn close_tab(&self, tab_id: &str) -> Result<(), BrowserError>;
+
+    /// Get the ID of the currently active tab.
+    async fn active_tab_id(&self) -> Result<String, BrowserError>;
 }
 
 /// A mock CDP client for testing. Records all calls and returns configurable results.
@@ -105,10 +136,17 @@ pub struct MockCdpClient {
     pub wait_error: Mutex<Option<BrowserError>>,
     /// Whether the client is "closed".
     pub closed: Mutex<bool>,
+    /// Open tabs for tab management testing.
+    pub tabs: Mutex<Vec<TabInfo>>,
+    /// ID of the currently active tab.
+    pub active_tab: Mutex<String>,
+    /// Counter for generating unique tab IDs.
+    tab_counter: Mutex<u32>,
 }
 
 impl Default for MockCdpClient {
     fn default() -> Self {
+        let default_tab_id = "tab-0".to_string();
         Self {
             current_url: Mutex::new("about:blank".to_string()),
             current_title: Mutex::new(String::new()),
@@ -122,6 +160,14 @@ impl Default for MockCdpClient {
             click_error: Mutex::new(None),
             wait_error: Mutex::new(None),
             closed: Mutex::new(false),
+            tabs: Mutex::new(vec![TabInfo {
+                id: default_tab_id.clone(),
+                url: "about:blank".to_string(),
+                title: String::new(),
+                active: true,
+            }]),
+            active_tab: Mutex::new(default_tab_id),
+            tab_counter: Mutex::new(1),
         }
     }
 }
@@ -334,6 +380,64 @@ impl CdpClient for MockCdpClient {
         *self.closed.lock().unwrap() = true;
         Ok(())
     }
+
+    async fn new_tab(&self, url: &str) -> Result<String, BrowserError> {
+        self.log_call("new_tab", vec![url.to_string()]);
+        let mut counter = self.tab_counter.lock().unwrap();
+        let tab_id = format!("tab-{}", *counter);
+        *counter += 1;
+        drop(counter);
+
+        let tab = TabInfo {
+            id: tab_id.clone(),
+            url: url.to_string(),
+            title: String::new(),
+            active: false,
+        };
+        self.tabs.lock().unwrap().push(tab);
+        Ok(tab_id)
+    }
+
+    async fn list_tabs(&self) -> Result<Vec<TabInfo>, BrowserError> {
+        self.log_call("list_tabs", vec![]);
+        let active = self.active_tab.lock().unwrap().clone();
+        let mut tabs = self.tabs.lock().unwrap().clone();
+        for tab in &mut tabs {
+            tab.active = tab.id == active;
+        }
+        Ok(tabs)
+    }
+
+    async fn switch_tab(&self, tab_id: &str) -> Result<(), BrowserError> {
+        self.log_call("switch_tab", vec![tab_id.to_string()]);
+        let tabs = self.tabs.lock().unwrap();
+        if !tabs.iter().any(|t| t.id == tab_id) {
+            return Err(BrowserError::TabNotFound {
+                tab_id: tab_id.to_string(),
+            });
+        }
+        drop(tabs);
+        *self.active_tab.lock().unwrap() = tab_id.to_string();
+        Ok(())
+    }
+
+    async fn close_tab(&self, tab_id: &str) -> Result<(), BrowserError> {
+        self.log_call("close_tab", vec![tab_id.to_string()]);
+        let mut tabs = self.tabs.lock().unwrap();
+        let initial_len = tabs.len();
+        tabs.retain(|t| t.id != tab_id);
+        if tabs.len() == initial_len {
+            return Err(BrowserError::TabNotFound {
+                tab_id: tab_id.to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    async fn active_tab_id(&self) -> Result<String, BrowserError> {
+        self.log_call("active_tab_id", vec![]);
+        Ok(self.active_tab.lock().unwrap().clone())
+    }
 }
 
 #[cfg(test)]
@@ -518,5 +622,80 @@ mod tests {
         let calls = client.calls();
         assert_eq!(calls[0].0, "upload_file");
         assert_eq!(calls[0].1[1], "/tmp/test.txt");
+    }
+
+    // --- Tab management tests ---
+
+    #[tokio::test]
+    async fn test_mock_default_has_one_tab() {
+        let client = MockCdpClient::new();
+        let tabs = client.list_tabs().await.unwrap();
+        assert_eq!(tabs.len(), 1);
+        assert_eq!(tabs[0].id, "tab-0");
+        assert!(tabs[0].active);
+    }
+
+    #[tokio::test]
+    async fn test_mock_new_tab() {
+        let client = MockCdpClient::new();
+        let tab_id = client.new_tab("https://example.com").await.unwrap();
+        assert_eq!(tab_id, "tab-1");
+        let tabs = client.list_tabs().await.unwrap();
+        assert_eq!(tabs.len(), 2);
+        assert_eq!(tabs[1].url, "https://example.com");
+    }
+
+    #[tokio::test]
+    async fn test_mock_switch_tab() {
+        let client = MockCdpClient::new();
+        let tab_id = client.new_tab("https://example.com").await.unwrap();
+        client.switch_tab(&tab_id).await.unwrap();
+        assert_eq!(client.active_tab_id().await.unwrap(), tab_id);
+        // The new tab should be marked active in list
+        let tabs = client.list_tabs().await.unwrap();
+        assert!(!tabs[0].active);
+        assert!(tabs[1].active);
+    }
+
+    #[tokio::test]
+    async fn test_mock_switch_tab_not_found() {
+        let client = MockCdpClient::new();
+        let result = client.switch_tab("nonexistent").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_mock_close_tab() {
+        let client = MockCdpClient::new();
+        let tab_id = client.new_tab("https://example.com").await.unwrap();
+        assert_eq!(client.list_tabs().await.unwrap().len(), 2);
+        client.close_tab(&tab_id).await.unwrap();
+        assert_eq!(client.list_tabs().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_mock_close_tab_not_found() {
+        let client = MockCdpClient::new();
+        let result = client.close_tab("nonexistent").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_mock_active_tab_id() {
+        let client = MockCdpClient::new();
+        assert_eq!(client.active_tab_id().await.unwrap(), "tab-0");
+    }
+
+    #[tokio::test]
+    async fn test_mock_multiple_tabs() {
+        let client = MockCdpClient::new();
+        let t1 = client.new_tab("https://one.com").await.unwrap();
+        let t2 = client.new_tab("https://two.com").await.unwrap();
+        let _t3 = client.new_tab("https://three.com").await.unwrap();
+        assert_eq!(client.list_tabs().await.unwrap().len(), 4); // default + 3 new
+        client.close_tab(&t1).await.unwrap();
+        assert_eq!(client.list_tabs().await.unwrap().len(), 3);
+        client.switch_tab(&t2).await.unwrap();
+        assert_eq!(client.active_tab_id().await.unwrap(), t2);
     }
 }

@@ -14,6 +14,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 use uuid::Uuid;
 
 /// Result of a permission check.
@@ -128,6 +129,40 @@ impl ApprovalContext {
                     channel, recipient, priority, truncated
                 ))
             }
+            (
+                _,
+                ActionDetails::GuiAction {
+                    app_name,
+                    action,
+                    element,
+                },
+            ) => {
+                let elem_str = element
+                    .as_deref()
+                    .map(|e| format!(" → \"{}\"", e))
+                    .unwrap_or_default();
+                Some(format!("GUI: {} {} in '{}'", action, elem_str, app_name))
+            }
+            // Browser automation previews.
+            (
+                _,
+                ActionDetails::BrowserAction {
+                    action,
+                    url,
+                    selector,
+                },
+            ) => {
+                let target = url.as_deref().or(selector.as_deref()).unwrap_or("page");
+                Some(format!("Browser: {} {}", action, target))
+            }
+            // Network request previews.
+            (_, ActionDetails::NetworkRequest { host, method }) => {
+                Some(format!("{} {}", method, host))
+            }
+            // File deletion preview.
+            (_, ActionDetails::FileDelete { path }) => {
+                Some(format!("Will delete {}", path.display()))
+            }
             _ => None,
         };
         if let Some(p) = preview {
@@ -230,6 +265,15 @@ pub enum ActionDetails {
         preview: String,
         /// The classified priority of the original message.
         priority: MessagePriority,
+    },
+    /// A GUI scripting action on a native macOS application.
+    GuiAction {
+        /// The target application name.
+        app_name: String,
+        /// The GUI action being performed (click_element, type_text, menu_action, etc.).
+        action: String,
+        /// The target element description, if any.
+        element: Option<String>,
     },
     Other {
         info: String,
@@ -721,6 +765,63 @@ impl AdaptiveTrust {
     }
 }
 
+/// Rate limiter for tool calls using a sliding window.
+pub struct ToolRateLimiter {
+    /// Tool name -> timestamps of recent calls.
+    calls: HashMap<String, VecDeque<Instant>>,
+    /// Maximum calls per minute (0 = unlimited).
+    max_per_minute: usize,
+}
+
+impl ToolRateLimiter {
+    /// Create a new rate limiter.
+    pub fn new(max_per_minute: usize) -> Self {
+        Self {
+            calls: HashMap::new(),
+            max_per_minute,
+        }
+    }
+
+    /// Check if a tool call is allowed and record it.
+    /// Returns true if allowed, false if rate-limited.
+    pub fn check_and_record(&mut self, tool_name: &str) -> bool {
+        if self.max_per_minute == 0 {
+            return true; // Unlimited
+        }
+
+        let now = Instant::now();
+        let window = std::time::Duration::from_secs(60);
+
+        let timestamps = self.calls.entry(tool_name.to_string()).or_default();
+
+        // Remove expired entries
+        while let Some(front) = timestamps.front() {
+            if now.duration_since(*front) > window {
+                timestamps.pop_front();
+            } else {
+                break;
+            }
+        }
+
+        if timestamps.len() >= self.max_per_minute {
+            false
+        } else {
+            timestamps.push_back(now);
+            true
+        }
+    }
+
+    /// Get current call count for a tool within the window.
+    pub fn current_count(&self, tool_name: &str) -> usize {
+        self.calls.get(tool_name).map(|v| v.len()).unwrap_or(0)
+    }
+
+    /// Whether the rate limiter is enabled (max > 0).
+    pub fn is_enabled(&self) -> bool {
+        self.max_per_minute > 0
+    }
+}
+
 /// The Safety Guardian enforcing all safety policies.
 pub struct SafetyGuardian {
     config: SafetyConfig,
@@ -734,6 +835,8 @@ pub struct SafetyGuardian {
     adaptive_trust: AdaptiveTrust,
     /// Contract enforcer for formal safety verification.
     contract_enforcer: ContractEnforcer,
+    /// Rate limiter for tool calls.
+    rate_limiter: ToolRateLimiter,
 }
 
 impl SafetyGuardian {
@@ -747,6 +850,7 @@ impl SafetyGuardian {
         };
         let adaptive_trust = AdaptiveTrust::new(config.adaptive_trust.as_ref());
         let contract_enforcer = ContractEnforcer::new(None);
+        let rate_limiter = ToolRateLimiter::new(config.max_tool_calls_per_minute);
         Self {
             config,
             session_id: Uuid::new_v4(),
@@ -756,6 +860,7 @@ impl SafetyGuardian {
             session_allowlist: HashSet::new(),
             adaptive_trust,
             contract_enforcer,
+            rate_limiter,
         }
     }
 
@@ -1177,6 +1282,39 @@ impl SafetyGuardian {
         &mut self.contract_enforcer
     }
 
+    /// Check if a tool call is rate-limited.
+    pub fn check_rate_limit(&mut self, tool_name: &str) -> PermissionResult {
+        if self.rate_limiter.check_and_record(tool_name) {
+            PermissionResult::Allowed
+        } else {
+            PermissionResult::Denied {
+                reason: format!(
+                    "Rate limit exceeded for '{}': max {} calls/minute",
+                    tool_name, self.rate_limiter.max_per_minute
+                ),
+            }
+        }
+    }
+
+    /// Check if a network request to the given host is allowed.
+    pub fn check_network_egress(&self, host: &str) -> PermissionResult {
+        if self.config.allowed_hosts.is_empty() {
+            return PermissionResult::Allowed; // No whitelist = allow all
+        }
+        if self
+            .config
+            .allowed_hosts
+            .iter()
+            .any(|h| h == host || h == "*" || (h.starts_with("*.") && host.ends_with(&h[1..])))
+        {
+            PermissionResult::Allowed
+        } else {
+            PermissionResult::Denied {
+                reason: format!("Host '{}' is not in allowed_hosts whitelist", host),
+            }
+        }
+    }
+
     /// Create an action request helper.
     pub fn create_action_request(
         tool_name: impl Into<String>,
@@ -1550,6 +1688,51 @@ mod tests {
         assert_eq!(action.tool_name, "file_read");
         assert_eq!(action.risk_level, RiskLevel::ReadOnly);
         assert_eq!(action.description, "Reading source file");
+    }
+
+    #[test]
+    fn test_gui_action_preview_with_element() {
+        let details = ActionDetails::GuiAction {
+            app_name: "TextEdit".to_string(),
+            action: "click_element".to_string(),
+            element: Some("Save".to_string()),
+        };
+        let ctx =
+            ApprovalContext::default().with_preview_from_tool("macos_gui_scripting", &details);
+        assert!(ctx.preview.is_some());
+        let preview = ctx.preview.unwrap();
+        assert!(
+            preview.contains("click_element"),
+            "Preview should contain action: {}",
+            preview
+        );
+        assert!(
+            preview.contains("TextEdit"),
+            "Preview should contain app name: {}",
+            preview
+        );
+        assert!(
+            preview.contains("Save"),
+            "Preview should contain element: {}",
+            preview
+        );
+    }
+
+    #[test]
+    fn test_gui_action_preview_without_element() {
+        let details = ActionDetails::GuiAction {
+            app_name: "Finder".to_string(),
+            action: "get_tree".to_string(),
+            element: None,
+        };
+        let ctx =
+            ApprovalContext::default().with_preview_from_tool("macos_accessibility", &details);
+        assert!(ctx.preview.is_some());
+        let preview = ctx.preview.unwrap();
+        assert!(preview.contains("get_tree"));
+        assert!(preview.contains("Finder"));
+        // Should NOT contain "Save" or other element text
+        assert!(!preview.contains("Save"));
     }
 
     #[test]
@@ -2219,5 +2402,153 @@ mod tests {
         assert!(preview.contains("$ echo"));
         assert!(preview.ends_with("..."));
         // Must not panic — that's the main assertion (reaching this line = success)
+    }
+
+    #[test]
+    fn test_preview_browser_action() {
+        let details = ActionDetails::BrowserAction {
+            action: "navigate".to_string(),
+            url: Some("https://example.com".to_string()),
+            selector: None,
+        };
+        let ctx = ApprovalContext::new().with_preview_from_tool("browser_navigate", &details);
+        let preview = ctx.preview.unwrap();
+        assert!(preview.contains("Browser: navigate"));
+        assert!(preview.contains("https://example.com"));
+    }
+
+    #[test]
+    fn test_preview_browser_action_with_selector() {
+        let details = ActionDetails::BrowserAction {
+            action: "click".to_string(),
+            url: None,
+            selector: Some("#submit-btn".to_string()),
+        };
+        let ctx = ApprovalContext::new().with_preview_from_tool("browser_click", &details);
+        let preview = ctx.preview.unwrap();
+        assert!(preview.contains("Browser: click"));
+        assert!(preview.contains("#submit-btn"));
+    }
+
+    #[test]
+    fn test_preview_network_request() {
+        let details = ActionDetails::NetworkRequest {
+            host: "https://api.example.com/data".to_string(),
+            method: "GET".to_string(),
+        };
+        let ctx = ApprovalContext::new().with_preview_from_tool("web_fetch", &details);
+        let preview = ctx.preview.unwrap();
+        assert_eq!(preview, "GET https://api.example.com/data");
+    }
+
+    #[test]
+    fn test_preview_file_delete() {
+        let details = ActionDetails::FileDelete {
+            path: PathBuf::from("src/old_file.rs"),
+        };
+        let ctx = ApprovalContext::new().with_preview_from_tool("file_delete", &details);
+        let preview = ctx.preview.unwrap();
+        assert!(preview.contains("Will delete"));
+        assert!(preview.contains("src/old_file.rs"));
+    }
+
+    // --- ToolRateLimiter Tests ---
+
+    #[test]
+    fn test_rate_limiter_allows_under_limit() {
+        let mut limiter = ToolRateLimiter::new(5);
+        assert!(limiter.check_and_record("tool_a"));
+        assert!(limiter.check_and_record("tool_a"));
+        assert!(limiter.check_and_record("tool_a"));
+        assert_eq!(limiter.current_count("tool_a"), 3);
+    }
+
+    #[test]
+    fn test_rate_limiter_blocks_over_limit() {
+        let mut limiter = ToolRateLimiter::new(3);
+        assert!(limiter.check_and_record("tool_a"));
+        assert!(limiter.check_and_record("tool_a"));
+        assert!(limiter.check_and_record("tool_a"));
+        assert!(!limiter.check_and_record("tool_a")); // 4th call blocked
+    }
+
+    #[test]
+    fn test_rate_limiter_unlimited() {
+        let mut limiter = ToolRateLimiter::new(0);
+        for _ in 0..100 {
+            assert!(limiter.check_and_record("tool_a"));
+        }
+    }
+
+    #[test]
+    fn test_rate_limiter_independent_tools() {
+        let mut limiter = ToolRateLimiter::new(2);
+        assert!(limiter.check_and_record("tool_a"));
+        assert!(limiter.check_and_record("tool_a"));
+        assert!(!limiter.check_and_record("tool_a")); // blocked
+        assert!(limiter.check_and_record("tool_b")); // different tool, ok
+    }
+
+    // --- Network Egress Tests ---
+
+    #[test]
+    fn test_network_egress_empty_whitelist_allows_all() {
+        let config = SafetyConfig {
+            allowed_hosts: vec![],
+            ..SafetyConfig::default()
+        };
+        let guardian = SafetyGuardian::new(config);
+        assert_eq!(
+            guardian.check_network_egress("example.com"),
+            PermissionResult::Allowed
+        );
+    }
+
+    #[test]
+    fn test_network_egress_whitelist_allows_listed() {
+        let config = SafetyConfig {
+            allowed_hosts: vec!["api.openai.com".to_string(), "example.com".to_string()],
+            ..SafetyConfig::default()
+        };
+        let guardian = SafetyGuardian::new(config);
+        assert_eq!(
+            guardian.check_network_egress("api.openai.com"),
+            PermissionResult::Allowed
+        );
+        assert_eq!(
+            guardian.check_network_egress("example.com"),
+            PermissionResult::Allowed
+        );
+    }
+
+    #[test]
+    fn test_network_egress_whitelist_blocks_unlisted() {
+        let config = SafetyConfig {
+            allowed_hosts: vec!["api.openai.com".to_string()],
+            ..SafetyConfig::default()
+        };
+        let guardian = SafetyGuardian::new(config);
+        let result = guardian.check_network_egress("evil.com");
+        assert!(matches!(result, PermissionResult::Denied { .. }));
+    }
+
+    #[test]
+    fn test_network_egress_wildcard_domain() {
+        let config = SafetyConfig {
+            allowed_hosts: vec!["*.openai.com".to_string()],
+            ..SafetyConfig::default()
+        };
+        let guardian = SafetyGuardian::new(config);
+        assert_eq!(
+            guardian.check_network_egress("api.openai.com"),
+            PermissionResult::Allowed
+        );
+        assert_eq!(
+            guardian.check_network_egress("chat.openai.com"),
+            PermissionResult::Allowed
+        );
+        let result = guardian.check_network_egress("openai.com");
+        // "*.openai.com" should match subdomains but "openai.com" doesn't end with ".openai.com"
+        assert!(matches!(result, PermissionResult::Denied { .. }));
     }
 }

@@ -55,6 +55,7 @@ rcgen = { workspace = true }
 rustls = { workspace = true }
 hound = { workspace = true }
 self_update = { workspace = true }
+aes-gcm = { workspace = true }
 
 # Optional voice dependencies (only compiled with "voice" feature)
 cpal = { workspace = true, optional = true }

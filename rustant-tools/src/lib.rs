@@ -3,21 +3,53 @@
 //! Built-in tool implementations for the Rustant agent.
 //! Provides file operations, search, git integration, and shell execution.
 
+#[cfg(target_os = "macos")]
+pub mod accessibility;
 pub mod browser;
 pub mod canvas;
 pub mod checkpoint;
 pub mod codebase_search;
+pub mod compress;
+
+#[cfg(target_os = "macos")]
+pub mod contacts;
+#[cfg(target_os = "macos")]
+pub mod daily_briefing;
 pub mod file;
+pub mod file_organizer;
+pub mod finance;
+pub mod flashcards;
 pub mod git;
+#[cfg(target_os = "macos")]
+pub mod gui_scripting;
+#[cfg(target_os = "macos")]
+pub mod homekit;
+pub mod http_api;
 pub mod imessage;
+pub mod inbox;
 pub mod lsp;
 #[cfg(target_os = "macos")]
 pub mod macos;
+#[cfg(target_os = "macos")]
+pub mod meeting;
+pub mod pdf_generate;
+#[cfg(target_os = "macos")]
+pub mod photos;
+pub mod pomodoro;
 pub mod registry;
+pub mod relationships;
+#[cfg(target_os = "macos")]
+pub mod safari;
 pub mod sandbox;
+#[cfg(target_os = "macos")]
+pub mod screen_analyze;
 pub mod shell;
 pub mod smart_edit;
+pub mod template;
+pub mod travel;
 pub mod utils;
+#[cfg(target_os = "macos")]
+pub mod voice_tool;
 pub mod web;
 
 use registry::{Tool, ToolRegistry};
@@ -64,6 +96,21 @@ pub fn register_builtin_tools_with_progress(
         Arc::new(smart_edit::SmartEditTool::new(workspace.clone())),
         // Codebase search with auto-indexing
         Arc::new(codebase_search::CodebaseSearchTool::new(workspace.clone())),
+        // Cross-platform utility tools
+        Arc::new(file_organizer::FileOrganizerTool::new(workspace.clone())),
+        Arc::new(compress::CompressTool::new(workspace.clone())),
+        Arc::new(http_api::HttpApiTool::new()),
+        Arc::new(template::TemplateTool::new(workspace.clone())),
+        // PDF generation
+        Arc::new(pdf_generate::PdfGenerateTool::new(workspace.clone())),
+        // Personal productivity tools
+        Arc::new(pomodoro::PomodoroTool::new(workspace.clone())),
+        Arc::new(inbox::InboxTool::new(workspace.clone())),
+        Arc::new(relationships::RelationshipsTool::new(workspace.clone())),
+        // Advanced personal tools
+        Arc::new(finance::FinanceTool::new(workspace.clone())),
+        Arc::new(flashcards::FlashcardsTool::new(workspace.clone())),
+        Arc::new(travel::TravelTool::new(workspace.clone())),
     ];
 
     // iMessage tools — macOS only
@@ -87,6 +134,20 @@ pub fn register_builtin_tools_with_progress(
         tools.push(Arc::new(macos::MacosSystemInfoTool));
         tools.push(Arc::new(macos::MacosSpotlightTool));
         tools.push(Arc::new(macos::MacosFinderTool));
+        tools.push(Arc::new(macos::MacosFocusModeTool));
+        tools.push(Arc::new(macos::MacosMailTool));
+        tools.push(Arc::new(macos::MacosMusicTool));
+        tools.push(Arc::new(macos::MacosShortcutsTool));
+        tools.push(Arc::new(meeting::MacosMeetingRecorderTool));
+        tools.push(Arc::new(daily_briefing::MacosDailyBriefingTool));
+        tools.push(Arc::new(gui_scripting::MacosGuiScriptingTool));
+        tools.push(Arc::new(accessibility::MacosAccessibilityTool));
+        tools.push(Arc::new(screen_analyze::MacosScreenAnalyzeTool));
+        tools.push(Arc::new(contacts::MacosContactsTool));
+        tools.push(Arc::new(safari::MacosSafariTool));
+        tools.push(Arc::new(voice_tool::MacosSayTool::new()));
+        tools.push(Arc::new(photos::MacosPhotosTool::new()));
+        tools.push(Arc::new(homekit::HomeKitTool::new()));
     }
 
     for tool in tools {
@@ -123,11 +184,11 @@ mod tests {
         let mut registry = ToolRegistry::new();
         register_builtin_tools(&mut registry, dir.path().to_path_buf());
 
-        // 17 base + 3 iMessage + 10 macOS native = 30 on macOS
+        // 28 base + 3 iMessage + 24 macOS native = 55 on macOS
         #[cfg(target_os = "macos")]
-        assert_eq!(registry.len(), 30);
+        assert_eq!(registry.len(), 55);
         #[cfg(not(target_os = "macos"))]
-        assert_eq!(registry.len(), 17);
+        assert_eq!(registry.len(), 28);
 
         // Verify all expected tools are registered
         let names = registry.list_names();
@@ -165,7 +226,29 @@ mod tests {
             assert!(names.contains(&"macos_system_info".to_string()));
             assert!(names.contains(&"macos_spotlight".to_string()));
             assert!(names.contains(&"macos_finder".to_string()));
+            assert!(names.contains(&"macos_focus_mode".to_string()));
+            assert!(names.contains(&"macos_mail".to_string()));
+            assert!(names.contains(&"macos_music".to_string()));
+            assert!(names.contains(&"macos_shortcuts".to_string()));
+            assert!(names.contains(&"macos_meeting_recorder".to_string()));
+            assert!(names.contains(&"macos_daily_briefing".to_string()));
+            assert!(names.contains(&"macos_gui_scripting".to_string()));
+            assert!(names.contains(&"macos_accessibility".to_string()));
+            assert!(names.contains(&"macos_screen_analyze".to_string()));
+            assert!(names.contains(&"macos_contacts".to_string()));
+            assert!(names.contains(&"macos_safari".to_string()));
+            assert!(names.contains(&"macos_say".to_string()));
+            assert!(names.contains(&"macos_photos".to_string()));
+            assert!(names.contains(&"homekit".to_string()));
         }
+
+        // Cross-platform productivity tools
+        assert!(names.contains(&"pomodoro".to_string()));
+        assert!(names.contains(&"inbox".to_string()));
+        assert!(names.contains(&"relationships".to_string()));
+        assert!(names.contains(&"finance".to_string()));
+        assert!(names.contains(&"flashcards".to_string()));
+        assert!(names.contains(&"travel".to_string()));
     }
 
     #[test]

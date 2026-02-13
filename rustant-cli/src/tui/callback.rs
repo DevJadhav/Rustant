@@ -349,6 +349,7 @@ mod tests {
             usage_percent: 75,
             total_tokens: 6000,
             context_window: 8000,
+            hint: "Use /compact to compress now, or /pin to protect key messages.".to_string(),
         };
         callback.on_context_health(&event).await;
         match rx.recv().await.unwrap() {
