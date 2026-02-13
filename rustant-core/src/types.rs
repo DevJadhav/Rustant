@@ -394,10 +394,23 @@ impl CostEstimate {
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
     Token(String),
-    ToolCallStart { id: String, name: String },
-    ToolCallDelta { id: String, arguments_delta: String },
-    ToolCallEnd { id: String },
-    Done { usage: TokenUsage },
+    ToolCallStart {
+        id: String,
+        name: String,
+        /// Raw provider-specific function call data (e.g., Gemini's thought_signature).
+        /// Stored in message metadata to echo back in subsequent requests.
+        raw_function_call: Option<serde_json::Value>,
+    },
+    ToolCallDelta {
+        id: String,
+        arguments_delta: String,
+    },
+    ToolCallEnd {
+        id: String,
+    },
+    Done {
+        usage: TokenUsage,
+    },
     Error(String),
 }
 

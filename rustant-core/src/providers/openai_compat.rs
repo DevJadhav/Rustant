@@ -119,22 +119,25 @@ impl OpenAiCompatibleProvider {
             .map(|u| u.contains("localhost") || u.contains("127.0.0.1"))
             .unwrap_or(false);
 
-        let api_key = match std::env::var(&config.api_key_env) {
-            Ok(key) => key,
-            Err(_) if is_local => {
-                // Local providers (Ollama, vLLM, LM Studio) don't require an API key
-                debug!("No API key set for local provider; using dummy bearer token");
-                "ollama".to_string()
-            }
-            Err(_) => {
-                return Err(LlmError::AuthFailed {
-                    provider: format!(
-                        "OpenAI-compatible: env var '{}' not set",
-                        config.api_key_env
-                    ),
-                });
-            }
-        };
+        let api_key = config
+            .api_key
+            .clone()
+            .or_else(|| std::env::var(&config.api_key_env).ok())
+            .or_else(|| {
+                if is_local {
+                    // Local providers (Ollama, vLLM, LM Studio) don't require an API key
+                    debug!("No API key set for local provider; using dummy bearer token");
+                    Some("ollama".to_string())
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| LlmError::AuthFailed {
+                provider: format!(
+                    "OpenAI-compatible: env var '{}' not set",
+                    config.api_key_env
+                ),
+            })?;
         Self::new_with_key(config, api_key)
     }
 
@@ -582,6 +585,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
                                         .send(StreamEvent::ToolCallStart {
                                             id,
                                             name: name.to_string(),
+                                            raw_function_call: None,
                                         })
                                         .await;
                                 }

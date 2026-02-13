@@ -57,9 +57,13 @@ impl GeminiProvider {
     /// Reads the API key from the environment variable specified in `config.api_key_env`.
     /// Returns `LlmError::AuthFailed` if the environment variable is not set.
     pub fn new(config: &LlmConfig) -> Result<Self, LlmError> {
-        let api_key = std::env::var(&config.api_key_env).map_err(|_| LlmError::AuthFailed {
-            provider: format!("Gemini (env var '{}' not set)", config.api_key_env),
-        })?;
+        let api_key = config
+            .api_key
+            .clone()
+            .or_else(|| std::env::var(&config.api_key_env).ok())
+            .ok_or_else(|| LlmError::AuthFailed {
+                provider: format!("Gemini (env var '{}' not set)", config.api_key_env),
+            })?;
         Self::new_with_key(config, api_key)
     }
 
@@ -175,12 +179,27 @@ impl GeminiProvider {
     /// Maps our roles to Gemini roles:
     /// - `User` / `Tool` -> `"user"`
     /// - `Assistant` -> `"model"`
+    ///
+    /// For assistant messages containing function calls, uses stored raw Gemini
+    /// parts (if available) to preserve `thought_signature` fields required by
+    /// Gemini's thinking models.
     fn message_to_gemini_json(msg: &Message) -> Value {
         let role = match msg.role {
             Role::User | Role::Tool => "user",
             Role::Assistant => "model",
             Role::System => "user", // Should not reach here after extraction
         };
+
+        // For assistant messages with stored raw Gemini parts (preserving
+        // thought_signature), use them verbatim instead of reconstructing.
+        if msg.role == Role::Assistant {
+            if let Some(raw_parts) = msg.metadata.get("gemini_raw_parts") {
+                return serde_json::json!({
+                    "role": role,
+                    "parts": raw_parts,
+                });
+            }
+        }
 
         let parts = Self::content_to_gemini_parts(&msg.content);
 
@@ -237,12 +256,64 @@ impl GeminiProvider {
     }
 
     /// Convert a `ToolDefinition` to Gemini function declaration JSON.
+    ///
+    /// Sanitizes the parameters schema to remove fields unsupported by the
+    /// Gemini API (e.g., `additionalProperties`, `default`, `$schema`).
     fn tool_definition_to_json(tool: &ToolDefinition) -> Value {
         serde_json::json!({
             "name": tool.name,
             "description": tool.description,
-            "parameters": tool.parameters,
+            "parameters": Self::sanitize_schema(&tool.parameters),
         })
+    }
+
+    /// Recursively strip JSON Schema fields that the Gemini API does not support.
+    ///
+    /// Gemini function declarations support: `type`, `description`, `properties`,
+    /// `required`, `enum`, `items`, `format`, `nullable`.
+    /// Everything else (e.g., `additionalProperties`, `default`, `$schema`, `$ref`,
+    /// `title`, `examples`, `pattern`, `minimum`, `maximum`, etc.) is removed.
+    fn sanitize_schema(schema: &Value) -> Value {
+        const ALLOWED_KEYS: &[&str] = &[
+            "type",
+            "description",
+            "properties",
+            "required",
+            "enum",
+            "items",
+            "format",
+            "nullable",
+        ];
+
+        match schema {
+            Value::Object(map) => {
+                let mut clean = serde_json::Map::new();
+                for (key, value) in map {
+                    if !ALLOWED_KEYS.contains(&key.as_str()) {
+                        continue;
+                    }
+                    // Recurse into nested schemas (properties, items)
+                    let cleaned_value = match key.as_str() {
+                        "properties" => {
+                            if let Value::Object(props) = value {
+                                let cleaned_props: serde_json::Map<String, Value> = props
+                                    .iter()
+                                    .map(|(k, v)| (k.clone(), Self::sanitize_schema(v)))
+                                    .collect();
+                                Value::Object(cleaned_props)
+                            } else {
+                                value.clone()
+                            }
+                        }
+                        "items" => Self::sanitize_schema(value),
+                        _ => value.clone(),
+                    };
+                    clean.insert(key.clone(), cleaned_value);
+                }
+                Value::Object(clean)
+            }
+            other => other.clone(),
+        }
     }
 
     /// Parse a Gemini API response JSON into a `CompletionResponse`.
@@ -283,7 +354,15 @@ impl GeminiProvider {
             .unwrap_or("gemini")
             .to_string();
 
-        let message = Message::new(Role::Assistant, parsed_content);
+        let mut message = Message::new(Role::Assistant, parsed_content);
+
+        // Store raw Gemini parts to preserve thought_signature for function calls.
+        // When converting messages back to Gemini format, these raw parts are used
+        // verbatim instead of reconstructing from Content (which loses the signature).
+        let has_function_calls = parts.iter().any(|p| p.get("functionCall").is_some());
+        if has_function_calls {
+            message = message.with_metadata("gemini_raw_parts", Value::Array(parts.to_vec()));
+        }
 
         Ok(CompletionResponse {
             message,
@@ -399,10 +478,12 @@ impl GeminiProvider {
                     let id = format!("gemini_call_{}", uuid::Uuid::new_v4());
                     let args = fc["args"].to_string();
 
+                    // Preserve the raw functionCall JSON (includes thought_signature)
                     let _ = tx
                         .send(StreamEvent::ToolCallStart {
                             id: id.clone(),
                             name,
+                            raw_function_call: Some(part.clone()),
                         })
                         .await;
                     let _ = tx
@@ -1100,6 +1181,59 @@ mod tests {
         assert_eq!(json["name"], "shell_exec");
         assert_eq!(json["description"], "Execute a shell command");
         assert_eq!(json["parameters"]["type"], "object");
+    }
+
+    #[test]
+    fn test_sanitize_schema_strips_unsupported_fields() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["get", "post"],
+                    "description": "HTTP method"
+                },
+                "headers": {
+                    "type": "object",
+                    "description": "Custom headers",
+                    "additionalProperties": { "type": "string" }
+                },
+                "count": {
+                    "type": "integer",
+                    "default": 5,
+                    "description": "Number of results"
+                }
+            },
+            "required": ["action"],
+            "additionalProperties": false
+        });
+
+        let sanitized = GeminiProvider::sanitize_schema(&schema);
+
+        // Allowed fields are preserved
+        assert_eq!(sanitized["type"], "object");
+        assert!(sanitized["required"].is_array());
+        assert_eq!(sanitized["properties"]["action"]["type"], "string");
+        assert_eq!(sanitized["properties"]["action"]["enum"][0], "get");
+        assert_eq!(
+            sanitized["properties"]["action"]["description"],
+            "HTTP method"
+        );
+
+        // Unsupported fields are removed
+        assert!(sanitized.get("additionalProperties").is_none());
+        assert!(sanitized["properties"]["headers"]
+            .get("additionalProperties")
+            .is_none());
+        assert!(sanitized["properties"]["count"].get("default").is_none());
+
+        // But supported fields within those properties still exist
+        assert_eq!(sanitized["properties"]["headers"]["type"], "object");
+        assert_eq!(sanitized["properties"]["count"]["type"], "integer");
+        assert_eq!(
+            sanitized["properties"]["count"]["description"],
+            "Number of results"
+        );
     }
 
     #[test]

@@ -884,6 +884,9 @@ impl Agent {
         let mut tool_calls: std::collections::HashMap<String, (String, String)> =
             std::collections::HashMap::new();
         let mut tool_call_order: Vec<String> = Vec::new(); // preserve order
+                                                           // Raw provider-specific function call data (e.g., Gemini thought_signature)
+        let mut raw_function_calls: std::collections::HashMap<String, serde_json::Value> =
+            std::collections::HashMap::new();
 
         while let Some(event) = rx.recv().await {
             match event {
@@ -891,9 +894,16 @@ impl Agent {
                     self.callback.on_token(&token).await;
                     text_parts.push_str(&token);
                 }
-                StreamEvent::ToolCallStart { id, name } => {
+                StreamEvent::ToolCallStart {
+                    id,
+                    name,
+                    raw_function_call,
+                } => {
                     tool_call_order.push(id.clone());
-                    tool_calls.insert(id, (name, String::new()));
+                    tool_calls.insert(id.clone(), (name, String::new()));
+                    if let Some(raw_fc) = raw_function_call {
+                        raw_function_calls.insert(id, raw_fc);
+                    }
                 }
                 StreamEvent::ToolCallDelta {
                     id,
@@ -924,6 +934,23 @@ impl Agent {
         // Track usage in brain
         self.brain.track_usage(&usage);
 
+        // Build raw provider-specific parts (e.g., Gemini thought_signature) BEFORE
+        // consuming text_parts, since we need to reference it for the raw parts array.
+        let raw_parts_metadata = if !raw_function_calls.is_empty() {
+            let mut raw_parts = Vec::new();
+            if !text_parts.is_empty() {
+                raw_parts.push(serde_json::json!({"text": &text_parts}));
+            }
+            for id in &tool_call_order {
+                if let Some(raw_fc) = raw_function_calls.get(id) {
+                    raw_parts.push(raw_fc.clone());
+                }
+            }
+            Some(serde_json::Value::Array(raw_parts))
+        } else {
+            None
+        };
+
         // Build the response content based on what was streamed
         let content = if !tool_call_order.is_empty() {
             // Use the first tool call (single tool call is most common)
@@ -953,7 +980,14 @@ impl Agent {
             "tool_calls"
         };
 
-        let message = Message::new(Role::Assistant, content);
+        let mut message = Message::new(Role::Assistant, content);
+
+        // Attach raw provider-specific function call data (e.g., Gemini thought_signature)
+        // so the provider can echo it back in subsequent requests.
+        if let Some(raw_parts) = raw_parts_metadata {
+            message = message.with_metadata("gemini_raw_parts", raw_parts);
+        }
+
         Ok(CompletionResponse {
             message,
             usage,

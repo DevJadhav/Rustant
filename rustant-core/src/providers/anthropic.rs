@@ -50,9 +50,13 @@ impl AnthropicProvider {
     /// Reads the API key from the environment variable specified in `config.api_key_env`.
     /// Returns `LlmError::AuthFailed` if the environment variable is not set.
     pub fn new(config: &LlmConfig) -> Result<Self, LlmError> {
-        let api_key = std::env::var(&config.api_key_env).map_err(|_| LlmError::AuthFailed {
-            provider: format!("Anthropic (env var '{}' not set)", config.api_key_env),
-        })?;
+        let api_key = config
+            .api_key
+            .clone()
+            .or_else(|| std::env::var(&config.api_key_env).ok())
+            .ok_or_else(|| LlmError::AuthFailed {
+                provider: format!("Anthropic (env var '{}' not set)", config.api_key_env),
+            })?;
         Self::new_with_key(config, api_key)
     }
 
@@ -364,7 +368,13 @@ impl AnthropicProvider {
 
                     *current_block_id = Some(id.clone());
 
-                    let _ = tx.send(StreamEvent::ToolCallStart { id, name }).await;
+                    let _ = tx
+                        .send(StreamEvent::ToolCallStart {
+                            id,
+                            name,
+                            raw_function_call: None,
+                        })
+                        .await;
                 }
 
                 Ok(None)
@@ -1120,7 +1130,7 @@ mod tests {
 
         let event = rx.recv().await.unwrap();
         match event {
-            StreamEvent::ToolCallStart { id, name } => {
+            StreamEvent::ToolCallStart { id, name, .. } => {
                 assert_eq!(id, "toolu_01test");
                 assert_eq!(name, "file_read");
             }
