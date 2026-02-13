@@ -119,7 +119,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 axum = { version = "0.8", features = ["ws"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "trace"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
 
 # TLS certificate generation (self-signed, for local OAuth callbacks)
 rcgen = "0.13"

@@ -43,6 +43,8 @@ similar = { workspace = true }
 dialoguer = { workspace = true }
 keyring = { workspace = true }
 reqwest = { workspace = true }
+axum = { workspace = true }
+tower-http = { workspace = true }
 
 [features]
 default = []

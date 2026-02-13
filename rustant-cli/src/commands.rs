@@ -1499,10 +1499,61 @@ async fn handle_browser(action: BrowserAction, workspace: &Path) -> anyhow::Resu
     }
 }
 
+/// Resolve the path to the `frontend/` directory containing static assets.
+///
+/// Checks several locations in order:
+/// 1. `RUSTANT_FRONTEND_DIR` environment variable
+/// 2. `./frontend` relative to the current executable
+/// 3. `./rustant-ui/frontend` relative to the working directory (development)
+fn resolve_frontend_dir() -> Option<std::path::PathBuf> {
+    // 1. Explicit env var
+    if let Ok(dir) = std::env::var("RUSTANT_FRONTEND_DIR") {
+        let p = std::path::PathBuf::from(dir);
+        if p.join("index.html").exists() {
+            return Some(p);
+        }
+    }
+
+    // 2. Next to the executable
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let p = exe_dir.join("frontend");
+            if p.join("index.html").exists() {
+                return Some(p);
+            }
+        }
+    }
+
+    // 3. Workspace development layout
+    let workspace_candidates = ["rustant-ui/frontend", "frontend"];
+    if let Ok(cwd) = std::env::current_dir() {
+        for candidate in &workspace_candidates {
+            let p = cwd.join(candidate);
+            if p.join("index.html").exists() {
+                return Some(p);
+            }
+        }
+    }
+
+    None
+}
+
 async fn handle_ui(port: u16) -> anyhow::Result<()> {
+    use tower_http::services::{ServeDir, ServeFile};
+
     println!("Starting Rustant Dashboard...");
-    println!("Gateway will listen on: http://127.0.0.1:{}", port);
     println!();
+
+    // Resolve frontend static assets
+    let frontend_dir = resolve_frontend_dir();
+    if let Some(ref dir) = frontend_dir {
+        println!("Frontend directory: {}", dir.display());
+    } else {
+        println!("Warning: Frontend directory not found.");
+        println!("  Set RUSTANT_FRONTEND_DIR or run from the workspace root.");
+        println!("  The API will still be available but the dashboard UI won't load.");
+        println!();
+    }
 
     // Start the gateway server in the background
     let config = rustant_core::gateway::GatewayConfig {
@@ -1520,21 +1571,52 @@ async fn handle_ui(port: u16) -> anyhow::Result<()> {
 
     let gw_for_server = gw.clone();
 
+    // Build the API router
+    let api_router = rustant_core::gateway::gateway_router(gw_for_server);
+
+    // Merge with static file serving if frontend is available
+    let addr = format!("127.0.0.1:{}", port);
+
     tokio::spawn(async move {
-        if let Err(e) = rustant_core::gateway::run_gateway(gw_for_server).await {
-            eprintln!("Gateway error: {}", e);
+        let listener = match tokio::net::TcpListener::bind(&addr).await {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("Failed to bind to {}: {}", addr, e);
+                return;
+            }
+        };
+
+        if let Some(dir) = frontend_dir {
+            // Serve frontend files as fallback — "/" returns index.html
+            let index_file = dir.join("index.html");
+            let static_service = ServeDir::new(&dir).not_found_service(ServeFile::new(&index_file));
+            let app = api_router.fallback_service(static_service);
+
+            if let Err(e) = axum::serve(listener, app).await {
+                eprintln!("Gateway error: {}", e);
+            }
+        } else {
+            // API-only mode (no frontend)
+            if let Err(e) = axum::serve(listener, api_router).await {
+                eprintln!("Gateway error: {}", e);
+            }
         }
     });
 
     // Give the server a moment to start
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-    println!("Gateway running. Open your browser to:");
-    println!("  http://127.0.0.1:{}/api/status", port);
     println!();
-    println!("Dashboard UI requires the rustant-ui binary (Tauri).");
-    println!("  Build it with: cargo build -p rustant-ui");
-    println!("  Or run the gateway-only mode and open the API in a browser.");
+    println!("Rustant Dashboard running at:");
+    println!("  http://127.0.0.1:{}", port);
+    println!();
+    println!("API endpoints:");
+    println!("  http://127.0.0.1:{}/api/status", port);
+    println!("  http://127.0.0.1:{}/api/sessions", port);
+    println!("  http://127.0.0.1:{}/api/config", port);
+    println!("  http://127.0.0.1:{}/api/metrics", port);
+    println!("  http://127.0.0.1:{}/health", port);
+    println!("  ws://127.0.0.1:{}/ws", port);
     println!();
     println!("Press Ctrl+C to stop.");
 

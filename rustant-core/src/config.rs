@@ -1052,8 +1052,16 @@ pub fn load_config(
 }
 
 /// Resolve credential references in config.
-/// If api_key starts with "keychain:", load from system keyring.
+///
+/// Tries these sources in order of priority:
+/// 1. `api_key` field with `"keychain:"` prefix — resolves from OS keyring by service name
+/// 2. `credential_store_key` field — resolves from OS keyring by provider name
+/// 3. (At provider init time) environment variable via `api_key_env`
+///
+/// The resolved key is stored in `config.llm.api_key` so providers can read it
+/// without needing direct access to the credential store.
 pub fn resolve_credentials(config: &mut AgentConfig) {
+    // 1. Resolve "keychain:" prefix in api_key field
     let key_value = config.llm.api_key.clone();
     if let Some(key) = key_value {
         if let Some(service) = key.strip_prefix("keychain:") {
@@ -1062,9 +1070,33 @@ pub fn resolve_credentials(config: &mut AgentConfig) {
                 Ok(resolved_key) => {
                     config.llm.api_key = Some(resolved_key);
                     tracing::info!("Resolved API key from keyring service: {}", service);
+                    return; // Already resolved, no need to check credential_store_key
                 }
                 Err(e) => {
                     tracing::warn!("Failed to resolve keyring credential '{}': {}", service, e);
+                }
+            }
+        }
+    }
+
+    // 2. Resolve from credential_store_key (set by `rustant setup`)
+    if config.llm.api_key.is_none() {
+        if let Some(ref cs_key) = config.llm.credential_store_key {
+            let store = crate::credentials::KeyringCredentialStore::new();
+            match crate::credentials::CredentialStore::get_key(&store, cs_key) {
+                Ok(resolved_key) => {
+                    config.llm.api_key = Some(resolved_key);
+                    tracing::info!(
+                        "Resolved API key from credential store for provider: {}",
+                        cs_key
+                    );
+                }
+                Err(e) => {
+                    tracing::debug!(
+                        "No credential in keyring for '{}': {} (will try env var)",
+                        cs_key,
+                        e
+                    );
                 }
             }
         }
