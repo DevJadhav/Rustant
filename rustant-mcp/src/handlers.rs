@@ -333,11 +333,11 @@ mod tests {
 
         let result = handler.handle_tools_list().unwrap();
         let tools = result["tools"].as_array().unwrap();
-        // 28 base + 3 iMessage + 24 macOS native = 55 on macOS
+        // 39 base + 3 iMessage + 24 macOS native = 66 on macOS
         #[cfg(target_os = "macos")]
-        assert_eq!(tools.len(), 55);
+        assert_eq!(tools.len(), 66);
         #[cfg(not(target_os = "macos"))]
-        assert_eq!(tools.len(), 28);
+        assert_eq!(tools.len(), 39);
 
         // Check that each tool has required fields
         for tool in tools {

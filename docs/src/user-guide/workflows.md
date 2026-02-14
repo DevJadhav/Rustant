@@ -56,6 +56,16 @@ Supported pattern matches include:
 - "pr review" / "pull request review" → `pr_review`
 - "changelog" / "release notes" → `changelog`
 - "email triage" → `email_triage`
+- "knowledge graph" / "concept mapping" → `knowledge_graph`
+- "experiment" / "hypothesis" → `experiment_tracking`
+- "code analysis" / "architecture review" → `code_analysis`
+- "content strategy" / "blog pipeline" → `content_pipeline`
+- "skill assessment" / "learning plan" → `skill_development`
+- "career planning" / "portfolio" → `career_planning`
+- "service monitoring" / "health check" → `system_monitoring`
+- "daily planning" / "productivity" → `life_planning`
+- "privacy audit" / "data management" → `privacy_audit`
+- "self improvement" / "performance analysis" → `self_improvement_loop`
 
 ## Managing Runs
 

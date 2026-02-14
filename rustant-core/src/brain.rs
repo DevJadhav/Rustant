@@ -528,6 +528,10 @@ Git: git_status, git_diff, git_commit
 Shell: shell_exec (last resort only)
 Utilities: calculator, datetime, echo, web_search, web_fetch, http_api, template, pdf_generate, compress, file_organizer
 Personal Productivity: pomodoro, inbox, finance, flashcards, travel, relationships
+Research & Intelligence: arxiv_research, knowledge_graph (concepts, papers, relationships, BFS traversal), experiment_tracker (hypotheses, experiments, evidence)
+Code Analysis: code_intelligence (architecture, patterns, tech debt, API surface, dependency map), codebase_search
+Professional Growth: skill_tracker (proficiency, practice logs, learning paths), career_intel (goals, achievements, portfolio), content_engine (multi-platform content pipeline, calendar)
+Life Management: life_planner (energy-aware scheduling, deadlines, habits), system_monitor (service topology, health checks, incidents), privacy_manager (data boundaries, compliance, audit), self_improvement (usage patterns, performance, preferences)
 macOS Native: macos_calendar, macos_reminders, macos_notes, macos_clipboard, macos_system_info, macos_app_control, macos_notification, macos_screenshot, macos_spotlight, macos_finder, macos_focus_mode, macos_mail, macos_music, macos_shortcuts, macos_meeting_recorder, macos_daily_briefing, macos_contacts, homekit
 macOS Automation: macos_gui_scripting, macos_accessibility, macos_screen_analyze, macos_safari
 iMessage: imessage_contacts, imessage_send, imessage_read
@@ -537,7 +541,10 @@ Workflows (structured multi-step templates — run via shell_exec "rustant workf
   code_review, refactor, test_generation, documentation, dependency_update,
   security_scan, deployment, incident_response, morning_briefing, pr_review,
   dependency_audit, changelog, meeting_recorder, daily_briefing_full,
-  end_of_day_summary, app_automation, email_triage
+  end_of_day_summary, app_automation, email_triage, arxiv_research,
+  knowledge_graph, experiment_tracking, code_analysis, content_pipeline,
+  skill_development, career_planning, system_monitoring, life_planning,
+  privacy_audit, self_improvement_loop
 When a user asks for one of these tasks by name or description, execute the workflow or accomplish it step by step.
 
 Security rules:

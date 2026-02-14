@@ -77,7 +77,7 @@ rustant --model gpt-4o --approval cautious --workspace ./project "add tests for 
 ```
 rustant/
 ├── rustant-core/      # Agent orchestrator, brain, memory, safety, channels, gateway
-├── rustant-tools/     # 17 built-in tools + 7 LSP tools
+├── rustant-tools/     # 39 built-in tools + 7 LSP tools
 ├── rustant-cli/       # CLI with REPL, TUI, and subcommands
 ├── rustant-mcp/       # MCP server + client (JSON-RPC 2.0)
 ├── rustant-ui/        # Tauri desktop dashboard
@@ -97,7 +97,7 @@ rustant/
 | **Channels** | 13 platform integrations with unified `Channel` trait |
 | **Skills** | SKILL.md-based declarative tool definitions with security validation |
 | **Plugins** | Native (.so/.dll/.dylib) and WASM (wasmi) sandboxed extensions |
-| **Workflow Engine** | YAML-based multi-step automation with 12 built-in templates and approval gates |
+| **Workflow Engine** | YAML-based multi-step automation with 28 built-in templates and approval gates |
 | **Search Engine** | Hybrid Tantivy full-text + SQLite vector search |
 | **Project Indexer** | Background workspace indexer with .gitignore-aware walking and multi-language signature extraction |
 | **Session Manager** | Persistent sessions with auto-save, resume by name/ID, task continuations, search, tagging, auto-recovery on startup, and exit save prompts |
@@ -188,7 +188,7 @@ REPL/TUI commands: `/digest`, `/digest history`, `/replies`, `/replies approve <
 ### More Capabilities
 
 - **Canvas** — Rich content rendering: charts (Chart.js), tables, forms, Mermaid diagrams, code, HTML, markdown
-- **Workflow Engine** — Declarative YAML DSL with 12 built-in templates (code_review, morning_briefing, pr_review, dependency_audit, changelog, and more), step dependencies, approval gates, and conditional execution
+- **Workflow Engine** — Declarative YAML DSL with 28 built-in templates (code_review, morning_briefing, pr_review, dependency_audit, changelog, knowledge_graph, experiment_tracking, code_analysis, content_pipeline, skill_development, career_planning, system_monitoring, life_planning, privacy_audit, self_improvement_loop, and more), step dependencies, approval gates, and conditional execution
 - **Cron Scheduler** — Background job management, heartbeat monitoring, webhook endpoints
 - **Multi-Agent** — Agent spawning with parent-child relationships, message bus, resource limits, sandboxed workspaces
 - **WebSocket Gateway** — axum-based remote access with TLS, REST API, session management
@@ -247,6 +247,8 @@ All `/command` slash commands are registered in a categorized command registry w
 
 ### Core Tools (17)
 
+> **Tool count summary:** 39 base tools + 3 iMessage + 24 macOS native = **66 on macOS**, 39 on non-macOS. Plus 20 browser automation, 5 canvas, and 7 LSP tools.
+
 | Tool | Risk Level | Description |
 |------|------------|-------------|
 | `file_read` | Read-only | Read file contents with optional line range |
@@ -280,6 +282,53 @@ Code intelligence powered by language servers (Rust, Python, TypeScript, Go, Jav
 | `lsp_completions` | Code completion suggestions |
 | `lsp_rename` | Rename symbol across project |
 | `lsp_format` | Format document |
+
+### Productivity Tools (11)
+
+| Tool | Description |
+|------|-------------|
+| `organizer` | Task and project organization |
+| `compress` | File compression and archiving |
+| `http_api` | HTTP API client for REST endpoints |
+| `template` | Template rendering engine |
+| `pdf` | PDF generation and manipulation |
+| `pomodoro` | Focus timer with Pomodoro technique |
+| `inbox` | Capture and triage incoming items |
+| `relationships` | Contact and relationship management |
+| `finance` | Personal finance tracking (transactions, budgets) |
+| `flashcards` | Spaced repetition flashcard system |
+| `travel` | Trip planning and itinerary management |
+
+### Research (1)
+
+| Tool | Description |
+|------|-------------|
+| `arxiv_research` | ArXiv paper search, analysis, library management, BibTeX export, paper-to-code |
+
+### Cognitive Extension Tools (10)
+
+Deep research intelligence, codebase analysis, experiment tracking, content strategy, production monitoring, skill development, career strategy, life planning, privacy management, and self-improvement — all through plain English commands.
+
+| Tool | Actions | Description |
+|------|---------|-------------|
+| `knowledge_graph` | 13 | Local knowledge graph of concepts, papers, methods, people, and their relationships |
+| `experiment_tracker` | 14 | Hypothesis lifecycle, experiment management, evidence recording, comparison |
+| `code_intelligence` | 7 | Cross-language architecture analysis, pattern detection, tech debt scanning, API surface |
+| `content_engine` | 14 | Multi-platform content pipeline with lifecycle, calendar, audience-aware drafting |
+| `skill_tracker` | 8 | Skill progression tracking, knowledge gaps, learning paths, daily practice |
+| `career_intel` | 8 | Career goals, achievements, portfolio management, networking notes |
+| `system_monitor` | 8 | Service topology, health monitoring, incident tracking, cascade impact analysis |
+| `life_planner` | 8 | Energy-aware scheduling, deadline tracking, habit management, context switching |
+| `privacy_manager` | 8 | Data boundary management, access auditing, data export/deletion |
+| `self_improvement` | 8 | Usage pattern analysis, performance tracking, cognitive load estimation, feedback |
+
+### macOS Native Tools (24)
+
+Deep integration with macOS applications (Calendar, Reminders, Notes, Mail, Music, Contacts, Safari, and more) via AppleScript and system APIs. Includes GUI scripting, accessibility inspection, screen OCR, HomeKit, and meeting recording.
+
+### iMessage Tools (3)
+
+Send, read, and search iMessage conversations directly from the agent.
 
 ## Safety Model
 
@@ -494,7 +543,7 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting and security policy.
 cargo build --workspace
 cargo build --workspace --release
 
-# Test (1,974+ tests)
+# Test (2,900+ tests)
 cargo test --workspace
 
 # Lint & Format

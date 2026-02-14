@@ -755,6 +755,222 @@ impl CommandRegistry {
                  Configure in .rustant/config.toml under [plan].",
             ),
         });
+
+        // ── ArXiv Research ──
+        self.register(CommandInfo {
+            name: "/arxiv",
+            aliases: &["/paper", "/research"],
+            description: "Search and manage arXiv research papers",
+            usage:
+                "/arxiv search <query> | fetch <id> | trending [category] | library | analyze <id>",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "Search, fetch, and manage academic papers from arXiv.\n\n\
+                 Usage:\n  /arxiv search <query>       — Search for papers by topic\n  \
+                 /arxiv fetch <id>            — Get full paper details by ArXiv ID\n  \
+                 /arxiv analyze <id>          — Get structured analysis of a paper\n  \
+                 /arxiv trending [category]   — Show recent trending papers\n  \
+                 /arxiv library               — List saved papers\n  \
+                 /arxiv save <id>             — Save a paper to your library\n  \
+                 /arxiv bibtex                — Export library as BibTeX\n  \
+                 /arxiv paper_to_code <id>    — Generate code from paper\n  \
+                 /arxiv paper_to_notebook <id> — Generate Jupyter notebook\n\n\
+                 Examples:\n  /arxiv search transformer fine-tuning\n  \
+                 /arxiv fetch 1706.03762\n  \
+                 /arxiv trending cs.AI\n  \
+                 /arxiv analyze 2301.12345\n\n\
+                 Papers are stored locally in .rustant/arxiv/library.json.\n\
+                 Requires internet connection for search/fetch/trending.",
+            ),
+        });
+
+        // Cognitive extension tools
+        self.register(CommandInfo {
+            name: "/knowledge",
+            aliases: &["/kg", "/graph"],
+            description: "Manage knowledge graph of concepts and relationships",
+            usage: "/knowledge search <query> | add <name> | import <arxiv_id> | stats",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "Build and query a local knowledge graph of concepts, papers, methods, and people.\n\n\
+                 Usage:\n  /knowledge add <name>         — Add a concept node\n  \
+                 /knowledge search <query>      — Search nodes by name/tag\n  \
+                 /knowledge import <arxiv_id>   — Import paper from arxiv library\n  \
+                 /knowledge neighbors <id>      — Find connected nodes\n  \
+                 /knowledge path <from> <to>    — Shortest path between nodes\n  \
+                 /knowledge stats               — Graph statistics\n  \
+                 /knowledge export              — Export as Graphviz DOT\n\n\
+                 Data stored in .rustant/knowledge/graph.json.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/experiment",
+            aliases: &["/exp", "/hypothesis"],
+            description: "Track hypotheses, experiments, and results",
+            usage: "/experiment add <title> | list | start <id> | complete <id>",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "Track scientific hypotheses and experiments with evidence recording.\n\n\
+                 Usage:\n  /experiment add <title>       — Add a new hypothesis\n  \
+                 /experiment list               — List hypotheses and experiments\n  \
+                 /experiment start <id>         — Start an experiment\n  \
+                 /experiment complete <id>      — Complete with metrics\n  \
+                 /experiment evidence <hyp_id>  — Record evidence\n  \
+                 /experiment compare <ids>      — Compare experiments\n  \
+                 /experiment summary            — Evidence summary\n\n\
+                 Data stored in .rustant/experiments/tracker.json.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/codeintel",
+            aliases: &["/ci", "/analyze"],
+            description: "Analyze codebase architecture, patterns, and tech debt",
+            usage: "/codeintel architecture | debt | patterns | translate | api | deps",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "Cross-language codebase analysis and intelligence.\n\n\
+                 Usage:\n  /codeintel architecture       — Analyze project structure\n  \
+                 /codeintel debt                — Scan for tech debt (TODO/FIXME/complexity)\n  \
+                 /codeintel patterns            — Detect design patterns\n  \
+                 /codeintel translate           — Translate code between languages\n  \
+                 /codeintel api                 — Extract public API surface\n  \
+                 /codeintel deps               — Map dependencies\n  \
+                 /codeintel compare <a> <b>    — Compare two files\n\n\
+                 Read-only analysis cached in .rustant/code_intel/cache.json.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/content",
+            aliases: &["/write", "/publish"],
+            description: "Content creation and publishing pipeline",
+            usage: "/content create <title> | list | calendar | adapt <id> | stats",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "Multi-platform content pipeline with lifecycle tracking.\n\n\
+                 Usage:\n  /content create <title>       — Create new content piece\n  \
+                 /content list                  — List content by status\n  \
+                 /content calendar              — Show content calendar\n  \
+                 /content adapt <id>            — Adapt content for another platform\n  \
+                 /content schedule <id> <date>  — Schedule for publishing\n  \
+                 /content stats                 — Content statistics\n\n\
+                 Platforms: Blog, Twitter, LinkedIn, GitHub, Medium, Newsletter.\n\
+                 Data stored in .rustant/content/library.json.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/skills",
+            aliases: &["/learn"],
+            description: "Track skill development and learning paths",
+            usage: "/skills add <name> | gaps | practice | progress | daily",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "Track skill progression, knowledge gaps, and practice sessions.\n\n\
+                 Usage:\n  /skills add <name>            — Add a skill to track\n  \
+                 /skills gaps                   — Show knowledge gaps\n  \
+                 /skills practice <id> <mins>   — Log practice session\n  \
+                 /skills progress               — Progress report\n  \
+                 /skills daily                  — Daily practice suggestions\n  \
+                 /skills path create <name>     — Create learning path\n\n\
+                 Data stored in .rustant/skills/tracker.json.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/career",
+            aliases: &["/portfolio"],
+            description: "Career strategy, achievements, and portfolio management",
+            usage: "/career goals | achieve <title> | portfolio | gaps | network",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "Career goal tracking, achievement logging, and portfolio management.\n\n\
+                 Usage:\n  /career goals                 — List career goals\n  \
+                 /career achieve <title>        — Log an achievement\n  \
+                 /career portfolio              — View portfolio items\n  \
+                 /career gaps                   — Gap analysis\n  \
+                 /career network <person>       — Add networking note\n  \
+                 /career strategy               — Strategy review\n\n\
+                 Data stored in .rustant/career/intel.json.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/monitor",
+            aliases: &["/sysmon", "/health"],
+            description: "Service monitoring, health checks, and incident tracking",
+            usage: "/monitor add <name> | topology | check | incident | impact <id>",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "Service topology management and health monitoring.\n\n\
+                 Usage:\n  /monitor add <name> <url>     — Register a service\n  \
+                 /monitor topology              — Show service dependency graph\n  \
+                 /monitor check [id]            — Run health checks\n  \
+                 /monitor incident <title>      — Log an incident\n  \
+                 /monitor impact <id>           — Cascade impact analysis\n  \
+                 /monitor services              — List all services\n\n\
+                 Data stored in .rustant/monitoring/topology.json.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/planner",
+            aliases: &["/plan-life", "/deadlines"],
+            description: "Life planning with energy-aware scheduling and habits",
+            usage: "/planner deadline <title> | habits | daily | review | energy",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "Energy-aware scheduling, deadline tracking, and habit management.\n\n\
+                 Usage:\n  /planner deadline <title>     — Add a deadline\n  \
+                 /planner habits                — View habit streaks\n  \
+                 /planner daily                 — Generate daily plan\n  \
+                 /planner review                — Weekly review\n  \
+                 /planner energy                — Set energy profile\n  \
+                 /planner balance               — Work-life balance report\n\n\
+                 Data stored in .rustant/life/planner.json.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/privacy",
+            aliases: &["/priv"],
+            description: "Privacy management, data boundaries, and compliance",
+            usage: "/privacy boundaries | audit | compliance | export | delete <domain>",
+            category: CommandCategory::Safety,
+            tui_only: false,
+            detailed_help: Some(
+                "Data boundary management, access auditing, and privacy controls.\n\n\
+                 Usage:\n  /privacy boundaries           — List data boundaries\n  \
+                 /privacy audit [limit]         — Show access log\n  \
+                 /privacy compliance            — Run compliance check\n  \
+                 /privacy export                — Export all data as JSON\n  \
+                 /privacy delete <domain>       — Delete data for a domain\n  \
+                 /privacy report                — Full privacy report\n\n\
+                 WARNING: /privacy delete is destructive and requires confirmation.\n\
+                 Data stored in .rustant/privacy/config.json.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/improve",
+            aliases: &["/meta"],
+            description: "Self-improvement: usage patterns, performance, and preferences",
+            usage: "/improve patterns | performance | preferences | feedback | load",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "Analyze usage patterns and optimize agent performance.\n\n\
+                 Usage:\n  /improve patterns             — Analyze tool usage patterns\n  \
+                 /improve performance           — Performance metrics report\n  \
+                 /improve suggestions           — Get improvement suggestions\n  \
+                 /improve preferences           — View/set preferences\n  \
+                 /improve feedback <1-5>        — Record task satisfaction\n  \
+                 /improve load                  — Cognitive load estimate\n\n\
+                 Data stored in .rustant/meta/improvement.json.",
+            ),
+        });
     }
 
     /// Look up a command by name or alias.
@@ -950,10 +1166,10 @@ mod tests {
     #[test]
     fn test_register_defaults_populates() {
         let registry = CommandRegistry::with_defaults();
-        // We have 41 commands registered (25 core + 7 TUI-only + 9 CLI parity)
+        // We have 42+ commands registered (25 core + 7 TUI-only + 9 CLI parity + 1 arxiv)
         assert!(
-            registry.len() >= 42,
-            "Expected at least 42 commands, got {}",
+            registry.len() >= 43,
+            "Expected at least 43 commands, got {}",
             registry.len()
         );
     }

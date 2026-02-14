@@ -29,6 +29,19 @@ pub fn list_builtin_names() -> Vec<&'static str> {
         // macOS screen automation workflows
         "app_automation",
         "email_triage",
+        // Research workflows
+        "arxiv_research",
+        // Cognitive extension workflows
+        "knowledge_graph",
+        "experiment_tracking",
+        "code_analysis",
+        "content_pipeline",
+        "skill_development",
+        "career_planning",
+        "system_monitoring",
+        "life_planning",
+        "privacy_audit",
+        "self_improvement_loop",
     ]
 }
 
@@ -52,6 +65,17 @@ pub fn get_builtin(name: &str) -> Option<WorkflowDefinition> {
         "end_of_day_summary" => END_OF_DAY_SUMMARY_WORKFLOW,
         "app_automation" => APP_AUTOMATION_WORKFLOW,
         "email_triage" => EMAIL_TRIAGE_WORKFLOW,
+        "arxiv_research" => ARXIV_RESEARCH_WORKFLOW,
+        "knowledge_graph" => KNOWLEDGE_GRAPH_WORKFLOW,
+        "experiment_tracking" => EXPERIMENT_TRACKING_WORKFLOW,
+        "code_analysis" => CODE_ANALYSIS_WORKFLOW,
+        "content_pipeline" => CONTENT_PIPELINE_WORKFLOW,
+        "skill_development" => SKILL_DEVELOPMENT_WORKFLOW,
+        "career_planning" => CAREER_PLANNING_WORKFLOW,
+        "system_monitoring" => SYSTEM_MONITORING_WORKFLOW,
+        "life_planning" => LIFE_PLANNING_WORKFLOW,
+        "privacy_audit" => PRIVACY_AUDIT_WORKFLOW,
+        "self_improvement_loop" => SELF_IMPROVEMENT_LOOP_WORKFLOW,
         _ => return None,
     };
     parse_workflow(yaml).ok()
@@ -703,6 +727,388 @@ outputs:
     value: "{{ steps.summary.output }}"
 "#;
 
+const ARXIV_RESEARCH_WORKFLOW: &str = r#"
+name: arxiv_research
+description: Search, analyze, and manage academic papers from arXiv
+version: "1.0"
+author: rustant
+inputs:
+  - name: topic
+    type: string
+    description: Research topic or search query
+  - name: category
+    type: string
+    optional: true
+    description: ArXiv category filter (e.g., cs.AI, cs.LG, cs.CL)
+  - name: max_results
+    type: number
+    optional: true
+    default: 5
+    description: Maximum number of papers to return
+steps:
+  - id: search_papers
+    tool: arxiv_research
+    params:
+      action: "search"
+      query: "{{ inputs.topic }}"
+      max_results: "{{ inputs.max_results }}"
+  - id: analyze_top
+    tool: arxiv_research
+    params:
+      action: "analyze"
+      arxiv_id: "{{ steps.search_papers.top_id }}"
+      depth: "standard"
+  - id: save_paper
+    tool: arxiv_research
+    params:
+      action: "save"
+      arxiv_id: "{{ steps.search_papers.top_id }}"
+    gate:
+      type: approval_required
+      message: "Save the top paper to your library?"
+  - id: summary
+    tool: echo
+    params:
+      text: "ArXiv research complete. Papers searched, analyzed, and optionally saved."
+outputs:
+  - name: research_report
+    value: "{{ steps.analyze_top.output }}"
+"#;
+
+const KNOWLEDGE_GRAPH_WORKFLOW: &str = r#"
+name: knowledge_graph
+description: Build and query a knowledge graph of concepts and relationships
+version: "1.0"
+author: rustant
+inputs:
+  - name: topic
+    type: string
+    description: Topic or concept to add to the knowledge graph
+steps:
+  - id: search_existing
+    tool: knowledge_graph
+    params:
+      action: "search"
+      query: "{{ inputs.topic }}"
+  - id: add_node
+    tool: knowledge_graph
+    params:
+      action: "add_node"
+      name: "{{ inputs.topic }}"
+      node_type: "Concept"
+    gate:
+      type: approval_required
+      message: "Add '{{ inputs.topic }}' to the knowledge graph?"
+  - id: add_edges
+    tool: knowledge_graph
+    params:
+      action: "list"
+  - id: summary
+    tool: echo
+    params:
+      text: "Knowledge graph updated. Review connections and add edges as needed."
+outputs:
+  - name: graph_update
+    value: "{{ steps.summary.output }}"
+"#;
+
+const EXPERIMENT_TRACKING_WORKFLOW: &str = r#"
+name: experiment_tracking
+description: Track hypotheses, run experiments, and record evidence
+version: "1.0"
+author: rustant
+inputs:
+  - name: hypothesis
+    type: string
+    description: The hypothesis to test
+  - name: experiment_name
+    type: string
+    description: Name for the experiment
+steps:
+  - id: create_hypothesis
+    tool: experiment_tracker
+    params:
+      action: "add_hypothesis"
+      title: "{{ inputs.hypothesis }}"
+  - id: create_experiment
+    tool: experiment_tracker
+    params:
+      action: "add_experiment"
+      name: "{{ inputs.experiment_name }}"
+      hypothesis_id: "{{ steps.create_hypothesis.id }}"
+  - id: start_experiment
+    tool: experiment_tracker
+    params:
+      action: "start_experiment"
+      id: "{{ steps.create_experiment.id }}"
+  - id: summary
+    tool: echo
+    params:
+      text: "Experiment started. Complete it with results when done."
+outputs:
+  - name: experiment_status
+    value: "{{ steps.summary.output }}"
+"#;
+
+const CODE_ANALYSIS_WORKFLOW: &str = r#"
+name: code_analysis
+description: Analyze codebase architecture, tech debt, and API surface
+version: "1.0"
+author: rustant
+inputs:
+  - name: path
+    type: string
+    optional: true
+    default: "."
+    description: Path to analyze
+steps:
+  - id: architecture
+    tool: code_intelligence
+    params:
+      action: "analyze_architecture"
+      path: "{{ inputs.path }}"
+  - id: tech_debt
+    tool: code_intelligence
+    params:
+      action: "tech_debt_report"
+      path: "{{ inputs.path }}"
+  - id: api_surface
+    tool: code_intelligence
+    params:
+      action: "api_surface"
+      path: "{{ inputs.path }}"
+  - id: summary
+    tool: echo
+    params:
+      text: "Code analysis complete. Architecture, tech debt, and API surface reports generated."
+outputs:
+  - name: analysis_report
+    value: "{{ steps.summary.output }}"
+"#;
+
+const CONTENT_PIPELINE_WORKFLOW: &str = r#"
+name: content_pipeline
+description: Content creation pipeline from idea to publication
+version: "1.0"
+author: rustant
+inputs:
+  - name: title
+    type: string
+    description: Content title
+  - name: platform
+    type: string
+    optional: true
+    default: "Blog"
+    description: Target platform (Blog, Twitter, LinkedIn, etc.)
+steps:
+  - id: create_draft
+    tool: content_engine
+    params:
+      action: "create"
+      title: "{{ inputs.title }}"
+      platform: "{{ inputs.platform }}"
+  - id: review
+    tool: echo
+    params:
+      text: "Draft created. Review and edit the content."
+    gate:
+      type: approval_required
+      message: "Ready to schedule content for publishing?"
+  - id: schedule
+    tool: content_engine
+    params:
+      action: "stats"
+  - id: summary
+    tool: echo
+    params:
+      text: "Content pipeline complete. Draft created and ready for scheduling."
+outputs:
+  - name: pipeline_status
+    value: "{{ steps.summary.output }}"
+"#;
+
+const SKILL_DEVELOPMENT_WORKFLOW: &str = r#"
+name: skill_development
+description: Assess skill gaps and create practice plans
+version: "1.0"
+author: rustant
+inputs:
+  - name: focus_area
+    type: string
+    optional: true
+    description: Specific skill area to focus on
+steps:
+  - id: gaps
+    tool: skill_tracker
+    params:
+      action: "knowledge_gaps"
+  - id: daily_practice
+    tool: skill_tracker
+    params:
+      action: "daily_practice"
+  - id: summary
+    tool: echo
+    params:
+      text: "Skill assessment complete. Practice plan generated."
+outputs:
+  - name: skill_report
+    value: "{{ steps.summary.output }}"
+"#;
+
+const CAREER_PLANNING_WORKFLOW: &str = r#"
+name: career_planning
+description: Career goal setting and gap analysis
+version: "1.0"
+author: rustant
+inputs:
+  - name: goal
+    type: string
+    description: Career goal to plan for
+steps:
+  - id: set_goal
+    tool: career_intel
+    params:
+      action: "set_goal"
+      title: "{{ inputs.goal }}"
+  - id: gap_analysis
+    tool: career_intel
+    params:
+      action: "gap_analysis"
+  - id: strategy
+    tool: career_intel
+    params:
+      action: "strategy_review"
+  - id: summary
+    tool: echo
+    params:
+      text: "Career planning complete. Goal set with gap analysis and strategy review."
+outputs:
+  - name: career_plan
+    value: "{{ steps.summary.output }}"
+"#;
+
+const SYSTEM_MONITORING_WORKFLOW: &str = r#"
+name: system_monitoring
+description: Health check services and handle incidents
+version: "1.0"
+author: rustant
+inputs:
+  - name: service_id
+    type: string
+    optional: true
+    description: Specific service to check (omit for all)
+steps:
+  - id: health_check
+    tool: system_monitor
+    params:
+      action: "health_check"
+  - id: topology
+    tool: system_monitor
+    params:
+      action: "topology"
+  - id: summary
+    tool: echo
+    params:
+      text: "System monitoring complete. Health checks run and topology reviewed."
+outputs:
+  - name: monitoring_report
+    value: "{{ steps.summary.output }}"
+"#;
+
+const LIFE_PLANNING_WORKFLOW: &str = r#"
+name: life_planning
+description: Generate daily plan with energy-aware scheduling
+version: "1.0"
+author: rustant
+inputs:
+  - name: date
+    type: string
+    optional: true
+    description: Date to plan for (default today)
+steps:
+  - id: daily_plan
+    tool: life_planner
+    params:
+      action: "daily_plan"
+  - id: optimize
+    tool: life_planner
+    params:
+      action: "optimize_schedule"
+  - id: summary
+    tool: echo
+    params:
+      text: "Daily plan generated with energy-optimized schedule."
+outputs:
+  - name: daily_plan
+    value: "{{ steps.summary.output }}"
+"#;
+
+const PRIVACY_AUDIT_WORKFLOW: &str = r#"
+name: privacy_audit
+description: Audit data boundaries and compliance
+version: "1.0"
+author: rustant
+inputs:
+  - name: scope
+    type: string
+    optional: true
+    default: "full"
+    description: Audit scope (full, boundaries, access)
+steps:
+  - id: compliance
+    tool: privacy_manager
+    params:
+      action: "compliance_check"
+  - id: audit
+    tool: privacy_manager
+    params:
+      action: "audit_access"
+      limit: 50
+  - id: report
+    tool: privacy_manager
+    params:
+      action: "privacy_report"
+  - id: summary
+    tool: echo
+    params:
+      text: "Privacy audit complete. Compliance check, access audit, and report generated."
+outputs:
+  - name: audit_report
+    value: "{{ steps.summary.output }}"
+"#;
+
+const SELF_IMPROVEMENT_LOOP_WORKFLOW: &str = r#"
+name: self_improvement_loop
+description: Analyze usage patterns and suggest optimizations
+version: "1.0"
+author: rustant
+inputs:
+  - name: focus
+    type: string
+    optional: true
+    description: Specific area to focus improvement on
+steps:
+  - id: patterns
+    tool: self_improvement
+    params:
+      action: "analyze_patterns"
+  - id: performance
+    tool: self_improvement
+    params:
+      action: "performance_report"
+  - id: suggestions
+    tool: self_improvement
+    params:
+      action: "suggest_improvements"
+  - id: summary
+    tool: echo
+    params:
+      text: "Self-improvement analysis complete. Patterns, performance, and suggestions generated."
+outputs:
+  - name: improvement_report
+    value: "{{ steps.summary.output }}"
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -748,7 +1154,7 @@ mod tests {
     #[test]
     fn test_list_builtin_names() {
         let names = list_builtin_names();
-        assert_eq!(names.len(), 17);
+        assert_eq!(names.len(), 28);
         assert!(names.contains(&"code_review"));
         assert!(names.contains(&"refactor"));
         assert!(names.contains(&"test_generation"));
@@ -769,6 +1175,19 @@ mod tests {
         // macOS screen automation workflows
         assert!(names.contains(&"app_automation"));
         assert!(names.contains(&"email_triage"));
+        // Research workflows
+        assert!(names.contains(&"arxiv_research"));
+        // Cognitive extension workflows
+        assert!(names.contains(&"knowledge_graph"));
+        assert!(names.contains(&"experiment_tracking"));
+        assert!(names.contains(&"code_analysis"));
+        assert!(names.contains(&"content_pipeline"));
+        assert!(names.contains(&"skill_development"));
+        assert!(names.contains(&"career_planning"));
+        assert!(names.contains(&"system_monitoring"));
+        assert!(names.contains(&"life_planning"));
+        assert!(names.contains(&"privacy_audit"));
+        assert!(names.contains(&"self_improvement_loop"));
     }
 
     #[test]
@@ -839,5 +1258,13 @@ mod tests {
         let wf = parse_workflow(EMAIL_TRIAGE_WORKFLOW).unwrap();
         assert_eq!(wf.name, "email_triage");
         assert!(!wf.steps.is_empty());
+    }
+
+    #[test]
+    fn test_builtin_arxiv_research_parses() {
+        let wf = parse_workflow(ARXIV_RESEARCH_WORKFLOW).unwrap();
+        assert_eq!(wf.name, "arxiv_research");
+        assert!(!wf.steps.is_empty());
+        assert!(wf.inputs.iter().any(|i| i.name == "topic"));
     }
 }

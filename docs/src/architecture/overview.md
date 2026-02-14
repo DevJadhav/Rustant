@@ -60,7 +60,7 @@ trait Tool: Send + Sync {
 }
 ```
 
-12 built-in tools: `file_read`, `file_list`, `file_search`, `file_write`, `file_patch`, `git_status`, `git_diff`, `git_commit`, `shell_exec`, `echo`, `datetime`, `calculator`.
+39 built-in tools across 6 categories: core (file_read, file_list, file_search, file_write, file_patch, git_status, git_diff, git_commit, shell_exec, echo, datetime, calculator, web_search, web_fetch, document_read, smart_edit, codebase_search), productivity (organizer, compress, http_api, template, pdf, pomodoro, inbox, relationships, finance, flashcards, travel), research (arxiv_research), and cognitive extension (knowledge_graph, experiment_tracker, code_intelligence, content_engine, skill_tracker, career_intel, system_monitor, life_planner, privacy_manager, self_improvement).
 
 The `ToolRegistry` handles registration, lookup, and invocation with configurable timeouts.
 

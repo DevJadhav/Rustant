@@ -291,6 +291,173 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
             .get("action")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
+        "arxiv_research" => {
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("search");
+            let detail = args
+                .get("query")
+                .or_else(|| args.get("arxiv_id"))
+                .and_then(|v| v.as_str());
+            Some(if let Some(d) = detail {
+                format!("{}: {}", action, d)
+            } else {
+                action.to_string()
+            })
+        }
+        // Cognitive extension tools — action + key param display
+        "knowledge_graph" => {
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("list");
+            let detail = args
+                .get("name")
+                .or_else(|| args.get("id"))
+                .or_else(|| args.get("query"))
+                .and_then(|v| v.as_str());
+            Some(if let Some(d) = detail {
+                format!("{}: {}", action, d)
+            } else {
+                action.to_string()
+            })
+        }
+        "experiment_tracker" => {
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("list_experiments");
+            let detail = args
+                .get("title")
+                .or_else(|| args.get("name"))
+                .or_else(|| args.get("id"))
+                .and_then(|v| v.as_str());
+            Some(if let Some(d) = detail {
+                format!("{}: {}", action, d)
+            } else {
+                action.to_string()
+            })
+        }
+        "code_intelligence" => {
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("analyze_architecture");
+            let path = args.get("path").and_then(|v| v.as_str());
+            Some(if let Some(p) = path {
+                format!("{}: {}", action, p)
+            } else {
+                action.to_string()
+            })
+        }
+        "content_engine" => {
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("list");
+            let detail = args
+                .get("title")
+                .or_else(|| args.get("id"))
+                .or_else(|| args.get("query"))
+                .and_then(|v| v.as_str());
+            Some(if let Some(d) = detail {
+                format!("{}: {}", action, d)
+            } else {
+                action.to_string()
+            })
+        }
+        "skill_tracker" => {
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("list_skills");
+            let detail = args
+                .get("name")
+                .or_else(|| args.get("skill_id"))
+                .and_then(|v| v.as_str());
+            Some(if let Some(d) = detail {
+                format!("{}: {}", action, d)
+            } else {
+                action.to_string()
+            })
+        }
+        "career_intel" => {
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("progress_report");
+            let detail = args
+                .get("title")
+                .or_else(|| args.get("person_name"))
+                .and_then(|v| v.as_str());
+            Some(if let Some(d) = detail {
+                format!("{}: {}", action, d)
+            } else {
+                action.to_string()
+            })
+        }
+        "system_monitor" => {
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("list_services");
+            let detail = args
+                .get("name")
+                .or_else(|| args.get("service_id"))
+                .or_else(|| args.get("title"))
+                .and_then(|v| v.as_str());
+            Some(if let Some(d) = detail {
+                format!("{}: {}", action, d)
+            } else {
+                action.to_string()
+            })
+        }
+        "life_planner" => {
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("daily_plan");
+            let detail = args
+                .get("title")
+                .or_else(|| args.get("name"))
+                .and_then(|v| v.as_str());
+            Some(if let Some(d) = detail {
+                format!("{}: {}", action, d)
+            } else {
+                action.to_string()
+            })
+        }
+        "privacy_manager" => {
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("list_boundaries");
+            let detail = args
+                .get("name")
+                .or_else(|| args.get("domain"))
+                .and_then(|v| v.as_str());
+            Some(if let Some(d) = detail {
+                format!("{}: {}", action, d)
+            } else {
+                action.to_string()
+            })
+        }
+        "self_improvement" => {
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("analyze_patterns");
+            let detail = args
+                .get("key")
+                .or_else(|| args.get("task_description"))
+                .and_then(|v| v.as_str());
+            Some(if let Some(d) = detail {
+                format!("{}: {}", action, d)
+            } else {
+                action.to_string()
+            })
+        }
         _ => None,
     }
 }

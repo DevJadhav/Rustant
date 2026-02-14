@@ -7,8 +7,8 @@ The name: **Rust** + **Ass**istant = **Rustant**.
 ## Key Features
 
 - **Multi-provider LLM support** — OpenAI, Anthropic, Gemini, Azure, Ollama, vLLM with circuit-breaker failover
-- **12 built-in tools** — File I/O, Git, shell execution, search, and more
-- **12 messaging channels** — Slack, Discord, Telegram, Email, Teams, WhatsApp, Signal, Matrix, IRC, SMS, iMessage, WebChat
+- **39 built-in tools** — File I/O, Git, shell execution, search, productivity, research, cognitive extension (knowledge graph, experiments, code intelligence, content, skills, career, monitoring, life planning, privacy, self-improvement), and more
+- **13 messaging channels** — Slack, Discord, Telegram, Email, Teams, WhatsApp, Signal, Matrix, IRC, SMS, iMessage, WebChat, Webhook
 - **Three-tier memory** — Working, short-term, and long-term memory with auto-summarization
 - **Five-layer safety** — Input validation, authorization, sandboxing, output validation, and audit trail
 - **Voice interface** — Text-to-speech and speech-to-text via OpenAI

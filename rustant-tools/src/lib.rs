@@ -5,11 +5,17 @@
 
 #[cfg(target_os = "macos")]
 pub mod accessibility;
+pub mod arxiv;
+pub mod arxiv_api;
 pub mod browser;
 pub mod canvas;
+pub mod career_intel;
 pub mod checkpoint;
+pub mod code_intelligence;
 pub mod codebase_search;
 pub mod compress;
+pub mod content_engine;
+pub mod experiment_tracker;
 
 #[cfg(target_os = "macos")]
 pub mod contacts;
@@ -27,6 +33,8 @@ pub mod homekit;
 pub mod http_api;
 pub mod imessage;
 pub mod inbox;
+pub mod knowledge_graph;
+pub mod life_planner;
 pub mod lsp;
 #[cfg(target_os = "macos")]
 pub mod macos;
@@ -36,6 +44,7 @@ pub mod pdf_generate;
 #[cfg(target_os = "macos")]
 pub mod photos;
 pub mod pomodoro;
+pub mod privacy_manager;
 pub mod registry;
 pub mod relationships;
 #[cfg(target_os = "macos")]
@@ -43,8 +52,11 @@ pub mod safari;
 pub mod sandbox;
 #[cfg(target_os = "macos")]
 pub mod screen_analyze;
+pub mod self_improvement;
 pub mod shell;
+pub mod skill_tracker;
 pub mod smart_edit;
+pub mod system_monitor;
 pub mod template;
 pub mod travel;
 pub mod utils;
@@ -107,10 +119,31 @@ pub fn register_builtin_tools_with_progress(
         Arc::new(pomodoro::PomodoroTool::new(workspace.clone())),
         Arc::new(inbox::InboxTool::new(workspace.clone())),
         Arc::new(relationships::RelationshipsTool::new(workspace.clone())),
+        // Life planner — energy-aware scheduling, deadlines, habits
+        Arc::new(life_planner::LifePlannerTool::new(workspace.clone())),
         // Advanced personal tools
         Arc::new(finance::FinanceTool::new(workspace.clone())),
         Arc::new(flashcards::FlashcardsTool::new(workspace.clone())),
         Arc::new(travel::TravelTool::new(workspace.clone())),
+        // Career intelligence
+        Arc::new(career_intel::CareerIntelTool::new(workspace.clone())),
+        // Research tools
+        Arc::new(arxiv::ArxivResearchTool::new(workspace.clone())),
+        // Cognitive extension tools
+        Arc::new(knowledge_graph::KnowledgeGraphTool::new(workspace.clone())),
+        Arc::new(experiment_tracker::ExperimentTrackerTool::new(
+            workspace.clone(),
+        )),
+        Arc::new(code_intelligence::CodeIntelligenceTool::new(
+            workspace.clone(),
+        )),
+        Arc::new(content_engine::ContentEngineTool::new(workspace.clone())),
+        Arc::new(skill_tracker::SkillTrackerTool::new(workspace.clone())),
+        Arc::new(system_monitor::SystemMonitorTool::new(workspace.clone())),
+        Arc::new(privacy_manager::PrivacyManagerTool::new(workspace.clone())),
+        Arc::new(self_improvement::SelfImprovementTool::new(
+            workspace.clone(),
+        )),
     ];
 
     // iMessage tools — macOS only
@@ -184,11 +217,11 @@ mod tests {
         let mut registry = ToolRegistry::new();
         register_builtin_tools(&mut registry, dir.path().to_path_buf());
 
-        // 28 base + 3 iMessage + 24 macOS native = 55 on macOS
+        // 39 base + 3 iMessage + 24 macOS native = 66 on macOS
         #[cfg(target_os = "macos")]
-        assert_eq!(registry.len(), 55);
+        assert_eq!(registry.len(), 66);
         #[cfg(not(target_os = "macos"))]
-        assert_eq!(registry.len(), 28);
+        assert_eq!(registry.len(), 39);
 
         // Verify all expected tools are registered
         let names = registry.list_names();
@@ -241,6 +274,21 @@ mod tests {
             assert!(names.contains(&"macos_photos".to_string()));
             assert!(names.contains(&"homekit".to_string()));
         }
+
+        // Research tools
+        assert!(names.contains(&"arxiv_research".to_string()));
+
+        // Cognitive extension tools
+        assert!(names.contains(&"knowledge_graph".to_string()));
+        assert!(names.contains(&"experiment_tracker".to_string()));
+        assert!(names.contains(&"code_intelligence".to_string()));
+        assert!(names.contains(&"content_engine".to_string()));
+        assert!(names.contains(&"skill_tracker".to_string()));
+        assert!(names.contains(&"career_intel".to_string()));
+        assert!(names.contains(&"system_monitor".to_string()));
+        assert!(names.contains(&"life_planner".to_string()));
+        assert!(names.contains(&"privacy_manager".to_string()));
+        assert!(names.contains(&"self_improvement".to_string()));
 
         // Cross-platform productivity tools
         assert!(names.contains(&"pomodoro".to_string()));

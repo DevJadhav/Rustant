@@ -1637,6 +1637,209 @@ impl Agent {
                     priority: MessagePriority::Normal,
                 }
             }
+            // ArXiv research → NetworkRequest for search/fetch, FileWrite for save.
+            "arxiv_research" => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("search");
+                match action {
+                    "save" | "remove" | "collections" | "digest_config" => {
+                        ActionDetails::FileWrite {
+                            path: ".rustant/arxiv/library.json".into(),
+                            size_bytes: 0,
+                        }
+                    }
+                    _ => {
+                        let query = arguments
+                            .get("query")
+                            .or_else(|| arguments.get("arxiv_id"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(action);
+                        ActionDetails::NetworkRequest {
+                            host: format!("arXiv: {}", query),
+                            method: "GET".to_string(),
+                        }
+                    }
+                }
+            }
+            // Knowledge graph — write actions modify state file
+            "knowledge_graph" => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("list");
+                match action {
+                    "add_node" | "update_node" | "remove_node" | "add_edge" | "remove_edge"
+                    | "import_arxiv" => ActionDetails::FileWrite {
+                        path: ".rustant/knowledge/graph.json".into(),
+                        size_bytes: 0,
+                    },
+                    _ => ActionDetails::FileRead {
+                        path: ".rustant/knowledge/graph.json".into(),
+                    },
+                }
+            }
+            // Experiment tracker — write actions modify state file
+            "experiment_tracker" => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("list_experiments");
+                match action {
+                    "add_hypothesis"
+                    | "update_hypothesis"
+                    | "add_experiment"
+                    | "start_experiment"
+                    | "complete_experiment"
+                    | "fail_experiment"
+                    | "record_evidence" => ActionDetails::FileWrite {
+                        path: ".rustant/experiments/tracker.json".into(),
+                        size_bytes: 0,
+                    },
+                    _ => ActionDetails::FileRead {
+                        path: ".rustant/experiments/tracker.json".into(),
+                    },
+                }
+            }
+            // Code intelligence — read-only analysis tool
+            "code_intelligence" => {
+                let path = arguments
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(".");
+                ActionDetails::FileRead { path: path.into() }
+            }
+            // Content engine — write actions modify state file
+            "content_engine" => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("list");
+                match action {
+                    "create" | "update" | "set_status" | "delete" | "schedule" | "calendar_add"
+                    | "calendar_remove" => ActionDetails::FileWrite {
+                        path: ".rustant/content/library.json".into(),
+                        size_bytes: 0,
+                    },
+                    _ => ActionDetails::FileRead {
+                        path: ".rustant/content/library.json".into(),
+                    },
+                }
+            }
+            // Skill tracker — write actions modify state file
+            "skill_tracker" => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("list_skills");
+                match action {
+                    "add_skill" | "log_practice" | "learning_path" => ActionDetails::FileWrite {
+                        path: ".rustant/skills/tracker.json".into(),
+                        size_bytes: 0,
+                    },
+                    _ => ActionDetails::FileRead {
+                        path: ".rustant/skills/tracker.json".into(),
+                    },
+                }
+            }
+            // Career intel — write actions modify state file
+            "career_intel" => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("progress_report");
+                match action {
+                    "set_goal" | "log_achievement" | "add_portfolio" | "network_note" => {
+                        ActionDetails::FileWrite {
+                            path: ".rustant/career/intel.json".into(),
+                            size_bytes: 0,
+                        }
+                    }
+                    _ => ActionDetails::FileRead {
+                        path: ".rustant/career/intel.json".into(),
+                    },
+                }
+            }
+            // System monitor — health_check uses network, others modify state
+            "system_monitor" => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("list_services");
+                match action {
+                    "health_check" => ActionDetails::NetworkRequest {
+                        host: "service health check".to_string(),
+                        method: "GET".to_string(),
+                    },
+                    "add_service" | "log_incident" => ActionDetails::FileWrite {
+                        path: ".rustant/monitoring/topology.json".into(),
+                        size_bytes: 0,
+                    },
+                    _ => ActionDetails::FileRead {
+                        path: ".rustant/monitoring/topology.json".into(),
+                    },
+                }
+            }
+            // Life planner — write actions modify state file
+            "life_planner" => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("daily_plan");
+                match action {
+                    "set_energy_profile" | "add_deadline" | "log_habit" | "context_switch_log" => {
+                        ActionDetails::FileWrite {
+                            path: ".rustant/life/planner.json".into(),
+                            size_bytes: 0,
+                        }
+                    }
+                    _ => ActionDetails::FileRead {
+                        path: ".rustant/life/planner.json".into(),
+                    },
+                }
+            }
+            // Privacy manager — delete_data is destructive, others vary
+            "privacy_manager" => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("list_boundaries");
+                match action {
+                    "delete_data" => {
+                        let domain = arguments
+                            .get("domain")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        ActionDetails::FileDelete {
+                            path: format!(".rustant/{}/", domain).into(),
+                        }
+                    }
+                    "set_boundary" | "encrypt_store" => ActionDetails::FileWrite {
+                        path: ".rustant/privacy/config.json".into(),
+                        size_bytes: 0,
+                    },
+                    _ => ActionDetails::FileRead {
+                        path: ".rustant/privacy/config.json".into(),
+                    },
+                }
+            }
+            // Self-improvement — some actions write, others read
+            "self_improvement" => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("analyze_patterns");
+                match action {
+                    "set_preference" | "feedback" | "reset_baseline" => ActionDetails::FileWrite {
+                        path: ".rustant/meta/improvement.json".into(),
+                        size_bytes: 0,
+                    },
+                    _ => ActionDetails::FileRead {
+                        path: ".rustant/meta/improvement.json".into(),
+                    },
+                }
+            }
             _ => ActionDetails::Other {
                 info: arguments.to_string(),
             },
@@ -1689,6 +1892,32 @@ impl Agent {
             "meeting_recorder"
         } else if lower.contains("app automation") || lower.contains("automate app") {
             "app_automation"
+        } else if lower.contains("arxiv")
+            || lower.contains("research paper")
+            || lower.contains("academic paper")
+            || lower.contains("literature review")
+        {
+            "arxiv_research"
+        } else if lower.contains("knowledge graph") || lower.contains("concept map") {
+            "knowledge_graph"
+        } else if lower.contains("experiment") || lower.contains("hypothesis") {
+            "experiment_tracking"
+        } else if lower.contains("code analysis") || lower.contains("architecture review") {
+            "code_analysis"
+        } else if lower.contains("content strategy") || lower.contains("blog pipeline") {
+            "content_pipeline"
+        } else if lower.contains("skill assessment") || lower.contains("learning plan") {
+            "skill_development"
+        } else if lower.contains("career planning") || lower.contains("portfolio review") {
+            "career_planning"
+        } else if lower.contains("service monitoring") || lower.contains("health check") {
+            "system_monitoring"
+        } else if lower.contains("daily planning") || lower.contains("productivity review") {
+            "life_planning"
+        } else if lower.contains("privacy audit") || lower.contains("data management") {
+            "privacy_audit"
+        } else if lower.contains("self improvement") || lower.contains("performance analysis") {
+            "self_improvement_loop"
         } else {
             return None;
         };
@@ -1782,6 +2011,92 @@ impl Agent {
             || lower.contains("sms")
         {
             "For this task, call the appropriate iMessage tool: 'imessage_read', 'imessage_send', or 'imessage_contacts'."
+        } else if lower.contains("arxiv")
+            || lower.contains("research paper")
+            || lower.contains("academic paper")
+            || lower.contains("paper search")
+            || lower.contains("literature review")
+            || lower.contains("paper summary")
+            || lower.contains("paper to code")
+            || lower.contains("paper to notebook")
+            || lower.contains("bibtex")
+        {
+            "For this task, call the 'arxiv_research' tool. Actions: search (find papers), fetch (get by ID), analyze (LLM summary), trending (recent papers), paper_to_code (generate implementation), paper_to_notebook (generate Jupyter notebook), save/library/remove (manage library), export_bibtex."
+        } else if lower.contains("knowledge graph")
+            || lower.contains("concept")
+            || lower.contains("citation")
+            || lower.contains("paper relationship")
+        {
+            "For this task, call the 'knowledge_graph' tool. Actions: add_node, get_node, update_node, remove_node, add_edge, remove_edge, neighbors, search, list, path, stats, import_arxiv, export_dot."
+        } else if lower.contains("experiment")
+            || lower.contains("hypothesis")
+            || lower.contains("test result")
+            || lower.contains("lab ")
+        {
+            "For this task, call the 'experiment_tracker' tool. Actions: add_hypothesis, update_hypothesis, list_hypotheses, get_hypothesis, add_experiment, start_experiment, complete_experiment, fail_experiment, get_experiment, list_experiments, record_evidence, compare_experiments, summary, export_markdown."
+        } else if lower.contains("code architecture")
+            || lower.contains("tech debt")
+            || lower.contains("translate code")
+            || lower.contains("api surface")
+            || lower.contains("pattern detection")
+        {
+            "For this task, call the 'code_intelligence' tool. Actions: analyze_architecture, detect_patterns, translate_snippet, compare_implementations, tech_debt_report, api_surface, dependency_map."
+        } else if lower.contains("blog")
+            || lower.contains("content")
+            || lower.contains("article")
+            || lower.contains("publish")
+            || lower.contains("twitter")
+            || lower.contains("linkedin")
+            || lower.contains("newsletter")
+        {
+            "For this task, call the 'content_engine' tool. Actions: create, update, set_status, get, list, search, delete, schedule, calendar_add, calendar_list, calendar_remove, stats, adapt, export_markdown."
+        } else if lower.contains("skill")
+            || lower.contains("learning")
+            || lower.contains("practice")
+            || lower.contains("proficiency")
+            || lower.contains("knowledge gap")
+        {
+            "For this task, call the 'skill_tracker' tool. Actions: add_skill, log_practice, assess, list_skills, knowledge_gaps, learning_path, progress_report, daily_practice."
+        } else if lower.contains("career")
+            || lower.contains("achievement")
+            || lower.contains("portfolio")
+            || lower.contains("job")
+            || lower.contains("resume")
+            || lower.contains("networking")
+        {
+            "For this task, call the 'career_intel' tool. Actions: set_goal, log_achievement, add_portfolio, gap_analysis, market_scan, network_note, progress_report, strategy_review."
+        } else if lower.contains("service monitor")
+            || lower.contains("health check")
+            || lower.contains("incident")
+            || lower.contains("topology")
+            || lower.contains("runbook")
+        {
+            "For this task, call the 'system_monitor' tool. Actions: add_service, topology, health_check, log_incident, correlate, generate_runbook, impact_analysis, list_services."
+        } else if lower.contains("schedule")
+            || lower.contains("deadline")
+            || lower.contains("habit")
+            || lower.contains("energy")
+            || lower.contains("daily plan")
+            || lower.contains("weekly review")
+            || lower.contains("context switch")
+        {
+            "For this task, call the 'life_planner' tool. Actions: set_energy_profile, add_deadline, log_habit, daily_plan, weekly_review, context_switch_log, balance_report, optimize_schedule."
+        } else if lower.contains("privacy")
+            || lower.contains("data boundary")
+            || lower.contains("encrypt")
+            || lower.contains("delete data")
+            || lower.contains("compliance")
+            || lower.contains("audit access")
+        {
+            "For this task, call the 'privacy_manager' tool. Actions: set_boundary, list_boundaries, audit_access, compliance_check, export_data, delete_data, encrypt_store, privacy_report."
+        } else if lower.contains("usage pattern")
+            || lower.contains("performance")
+            || lower.contains("cognitive load")
+            || lower.contains("preference")
+            || lower.contains("feedback")
+            || lower.contains("self-improvement")
+        {
+            "For this task, call the 'self_improvement' tool. Actions: analyze_patterns, performance_report, suggest_improvements, set_preference, get_preferences, cognitive_load, feedback, reset_baseline."
         } else {
             return None;
         };
@@ -1789,11 +2104,110 @@ impl Agent {
         Some(format!("TOOL ROUTING: {}", tool_hint))
     }
 
-    /// Non-macOS fallback — only workflow routing (no macOS-specific tool routing).
+    /// Non-macOS fallback — workflow routing + cross-platform tool routing.
     #[cfg(not(target_os = "macos"))]
     fn tool_routing_hint(task: &str) -> Option<String> {
         let lower = task.to_lowercase();
-        Self::workflow_routing_hint(&lower)
+
+        // Workflow routing (platform-independent, checked first)
+        if let Some(hint) = Self::workflow_routing_hint(&lower) {
+            return Some(hint);
+        }
+
+        // Cross-platform tool routing
+        if lower.contains("arxiv")
+            || lower.contains("research paper")
+            || lower.contains("academic paper")
+            || lower.contains("paper search")
+            || lower.contains("literature review")
+            || lower.contains("paper summary")
+            || lower.contains("paper to code")
+            || lower.contains("paper to notebook")
+            || lower.contains("bibtex")
+        {
+            return Some("TOOL ROUTING: For this task, call the 'arxiv_research' tool. Actions: search (find papers), fetch (get by ID), analyze (LLM summary), trending (recent papers), paper_to_code (generate implementation), paper_to_notebook (generate Jupyter notebook), save/library/remove (manage library), export_bibtex.".to_string());
+        }
+
+        let tool_hint = if lower.contains("knowledge graph")
+            || lower.contains("concept")
+            || lower.contains("citation")
+            || lower.contains("paper relationship")
+        {
+            "For this task, call the 'knowledge_graph' tool. Actions: add_node, get_node, update_node, remove_node, add_edge, remove_edge, neighbors, search, list, path, stats, import_arxiv, export_dot."
+        } else if lower.contains("experiment")
+            || lower.contains("hypothesis")
+            || lower.contains("test result")
+            || lower.contains("lab ")
+        {
+            "For this task, call the 'experiment_tracker' tool. Actions: add_hypothesis, update_hypothesis, list_hypotheses, get_hypothesis, add_experiment, start_experiment, complete_experiment, fail_experiment, get_experiment, list_experiments, record_evidence, compare_experiments, summary, export_markdown."
+        } else if lower.contains("code architecture")
+            || lower.contains("tech debt")
+            || lower.contains("translate code")
+            || lower.contains("api surface")
+            || lower.contains("pattern detection")
+        {
+            "For this task, call the 'code_intelligence' tool. Actions: analyze_architecture, detect_patterns, translate_snippet, compare_implementations, tech_debt_report, api_surface, dependency_map."
+        } else if lower.contains("blog")
+            || lower.contains("content")
+            || lower.contains("article")
+            || lower.contains("publish")
+            || lower.contains("twitter")
+            || lower.contains("linkedin")
+            || lower.contains("newsletter")
+        {
+            "For this task, call the 'content_engine' tool. Actions: create, update, set_status, get, list, search, delete, schedule, calendar_add, calendar_list, calendar_remove, stats, adapt, export_markdown."
+        } else if lower.contains("skill")
+            || lower.contains("learning")
+            || lower.contains("practice")
+            || lower.contains("proficiency")
+            || lower.contains("knowledge gap")
+        {
+            "For this task, call the 'skill_tracker' tool. Actions: add_skill, log_practice, assess, list_skills, knowledge_gaps, learning_path, progress_report, daily_practice."
+        } else if lower.contains("career")
+            || lower.contains("achievement")
+            || lower.contains("portfolio")
+            || lower.contains("job")
+            || lower.contains("resume")
+            || lower.contains("networking")
+        {
+            "For this task, call the 'career_intel' tool. Actions: set_goal, log_achievement, add_portfolio, gap_analysis, market_scan, network_note, progress_report, strategy_review."
+        } else if lower.contains("service monitor")
+            || lower.contains("health check")
+            || lower.contains("incident")
+            || lower.contains("topology")
+            || lower.contains("runbook")
+        {
+            "For this task, call the 'system_monitor' tool. Actions: add_service, topology, health_check, log_incident, correlate, generate_runbook, impact_analysis, list_services."
+        } else if lower.contains("schedule")
+            || lower.contains("deadline")
+            || lower.contains("habit")
+            || lower.contains("energy")
+            || lower.contains("daily plan")
+            || lower.contains("weekly review")
+            || lower.contains("context switch")
+        {
+            "For this task, call the 'life_planner' tool. Actions: set_energy_profile, add_deadline, log_habit, daily_plan, weekly_review, context_switch_log, balance_report, optimize_schedule."
+        } else if lower.contains("privacy")
+            || lower.contains("data boundary")
+            || lower.contains("encrypt")
+            || lower.contains("delete data")
+            || lower.contains("compliance")
+            || lower.contains("audit access")
+        {
+            "For this task, call the 'privacy_manager' tool. Actions: set_boundary, list_boundaries, audit_access, compliance_check, export_data, delete_data, encrypt_store, privacy_report."
+        } else if lower.contains("usage pattern")
+            || lower.contains("performance")
+            || lower.contains("cognitive load")
+            || lower.contains("preference")
+            || lower.contains("feedback")
+            || lower.contains("self-improvement")
+        {
+            "For this task, call the 'self_improvement' tool. Actions: analyze_patterns, performance_report, suggest_improvements, set_preference, get_preferences, cognitive_load, feedback, reset_baseline."
+        } else {
+            return None;
+        };
+
+        Some(format!("TOOL ROUTING: {}", tool_hint))
     }
 
     /// Auto-correct a tool call when the LLM is stuck calling the wrong tool.
