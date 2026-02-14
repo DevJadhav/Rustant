@@ -94,6 +94,94 @@ impl Transport for StdioTransport {
 }
 
 // ---------------------------------------------------------------------------
+// ProcessTransport
+// ---------------------------------------------------------------------------
+
+/// Transport that communicates with a child process via stdin/stdout.
+///
+/// Used to connect to external MCP servers spawned as subprocesses (e.g.,
+/// `npx chrome-devtools-mcp@latest`). Messages are framed as NDJSON, the
+/// same as `StdioTransport` but operating on child process pipes.
+pub struct ProcessTransport {
+    child_stdin: tokio::process::ChildStdin,
+    reader: BufReader<tokio::process::ChildStdout>,
+}
+
+impl std::fmt::Debug for ProcessTransport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProcessTransport").finish()
+    }
+}
+
+impl ProcessTransport {
+    /// Spawn a child process and create a transport.
+    ///
+    /// Returns the transport and the child process handle (which the caller
+    /// should keep alive or use to gracefully terminate the server).
+    pub async fn spawn(
+        command: &str,
+        args: &[String],
+        env: &std::collections::HashMap<String, String>,
+    ) -> Result<(Self, tokio::process::Child), McpError> {
+        let mut cmd = tokio::process::Command::new(command);
+        cmd.args(args)
+            .envs(env)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        let mut child = cmd.spawn().map_err(|e| McpError::TransportError {
+            message: format!("Failed to spawn {}: {}", command, e),
+        })?;
+
+        let stdin = child.stdin.take().ok_or_else(|| McpError::TransportError {
+            message: "Failed to capture child stdin".into(),
+        })?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| McpError::TransportError {
+                message: "Failed to capture child stdout".into(),
+            })?;
+
+        Ok((
+            Self {
+                child_stdin: stdin,
+                reader: BufReader::new(stdout),
+            },
+            child,
+        ))
+    }
+}
+
+#[async_trait]
+impl Transport for ProcessTransport {
+    async fn read_message(&mut self) -> Result<Option<String>, McpError> {
+        let mut line = String::new();
+        let bytes_read = self.reader.read_line(&mut line).await?;
+        if bytes_read == 0 {
+            return Ok(None);
+        }
+        let trimmed = line.trim_end().to_string();
+        Ok(Some(trimmed))
+    }
+
+    async fn write_message(&mut self, message: &str) -> Result<(), McpError> {
+        use tokio::io::AsyncWriteExt;
+        self.child_stdin.write_all(message.as_bytes()).await?;
+        self.child_stdin.write_all(b"\n").await?;
+        self.child_stdin.flush().await?;
+        Ok(())
+    }
+
+    async fn close(&mut self) -> Result<(), McpError> {
+        use tokio::io::AsyncWriteExt;
+        self.child_stdin.flush().await?;
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ChannelTransport
 // ---------------------------------------------------------------------------
 
@@ -302,5 +390,39 @@ mod tests {
 
         let close_result = transport.close().await;
         assert!(close_result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_process_transport_spawn_failure() {
+        let result = ProcessTransport::spawn(
+            "nonexistent_binary_that_does_not_exist",
+            &[],
+            &std::collections::HashMap::new(),
+        )
+        .await;
+        match result {
+            Err(e) => assert!(e.to_string().contains("Failed to spawn")),
+            Ok(_) => panic!("Expected spawn to fail"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_process_transport_echo_roundtrip() {
+        // Use `cat` as a simple echo server (it copies stdin to stdout)
+        let result = ProcessTransport::spawn("cat", &[], &std::collections::HashMap::new()).await;
+
+        if let Ok((mut transport, _child)) = result {
+            transport
+                .write_message(r#"{"jsonrpc":"2.0","method":"test","id":1}"#)
+                .await
+                .unwrap();
+
+            let received = transport.read_message().await.unwrap();
+            assert_eq!(
+                received,
+                Some(r#"{"jsonrpc":"2.0","method":"test","id":1}"#.to_string())
+            );
+        }
+        // If cat is not available, skip gracefully
     }
 }

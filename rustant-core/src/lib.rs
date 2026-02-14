@@ -11,6 +11,7 @@ pub mod browser;
 pub mod canvas;
 pub mod channels;
 pub mod config;
+pub mod council;
 pub mod credentials;
 pub mod encryption;
 pub mod error;
@@ -63,10 +64,17 @@ pub use channels::{
     SuggestedAction, TeamsChannel, TeamsConfig, ThreadId, WebhookChannel, WebhookConfig,
 };
 pub use config::MultiAgentConfig;
-pub use config::{config_exists, AgentConfig, ApprovalMode, KnowledgeConfig};
+pub use config::{
+    config_exists, AgentConfig, ApprovalMode, CouncilConfig, CouncilMemberConfig,
+    ExternalMcpServerConfig, KnowledgeConfig, VotingStrategy,
+};
 pub use config::{
     AutoReplyMode, ChannelIntelligenceConfig, DigestFrequency, IntelligenceConfig,
     MessagePriority as ChannelMessagePriority,
+};
+pub use council::{
+    detect_available_providers, should_use_council, CouncilMemberResponse, CouncilResult,
+    DetectedProvider, PeerReview, PlanningCouncil,
 };
 
 pub use credentials::{
@@ -106,8 +114,8 @@ pub use project_detect::{
     detect_project, example_tasks, recommended_allowed_commands, ProjectInfo, ProjectType,
 };
 pub use providers::{
-    create_provider, create_provider_with_auth, CircuitBreaker, CircuitState, FailoverProvider,
-    GeminiProvider, ModelInfo,
+    create_council_members, create_provider, create_provider_with_auth, CircuitBreaker,
+    CircuitState, FailoverProvider, GeminiProvider, ModelInfo,
 };
 pub use safety::{
     AdaptiveTrust, ApprovalContext, ApprovalDecision, BehavioralFingerprint, ContractEnforcer,

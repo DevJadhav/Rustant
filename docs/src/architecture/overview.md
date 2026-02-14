@@ -39,10 +39,11 @@ Budget tracking surfaces real-time cost information to users through `BudgetSeve
 
 - **OpenAI-compatible** — Also covers Azure OpenAI, Ollama, vLLM
 - **Anthropic** — Claude models
-- **Gemini** — Google's Gemini models
+- **Gemini** — Google's Gemini models (includes `fix_gemini_turns()` post-processing for API sequencing: merges consecutive same-role turns, fixes functionResponse names, filters empty parts, ensures user-first ordering). Uses 120s request timeout, 10s connect timeout, and true incremental SSE streaming.
 - **FailoverProvider** — Circuit-breaker failover across multiple providers
+- **PlanningCouncil** — Multi-model deliberation (inspired by [karpathy/llm-council](https://github.com/karpathy/llm-council)): three-stage protocol with parallel query, anonymous peer review, and chairman synthesis. Supports 2+ providers (cloud or Ollama).
 
-Token counting uses tiktoken-rs for accurate context window management.
+Token counting uses tiktoken-rs for accurate context window management. Centralized model pricing in `models.rs` covers OpenAI, Anthropic, Gemini, and Ollama models.
 
 ## Tool System
 

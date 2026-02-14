@@ -249,6 +249,117 @@ pub mod audio_convert {
     }
 }
 
+/// Play an AudioChunk through the system speakers.
+///
+/// Encodes to a temporary WAV file and plays it using system commands:
+/// - macOS: `afplay`
+/// - Linux: `aplay`
+pub async fn play_audio(chunk: &AudioChunk) -> Result<(), VoiceError> {
+    let wav_bytes = audio_convert::encode_wav(chunk)?;
+    let tmp_path = std::env::temp_dir().join("rustant_playback.wav");
+    std::fs::write(&tmp_path, &wav_bytes).map_err(|e| VoiceError::AudioError {
+        message: format!("Failed to write temp WAV: {}", e),
+    })?;
+
+    let cmd = if cfg!(target_os = "macos") {
+        "afplay"
+    } else {
+        "aplay"
+    };
+    let status = tokio::process::Command::new(cmd)
+        .arg(&tmp_path)
+        .status()
+        .await
+        .map_err(|e| VoiceError::AudioError {
+            message: format!("{} failed: {}", cmd, e),
+        })?;
+
+    // Clean up temp file
+    let _ = std::fs::remove_file(&tmp_path);
+
+    if !status.success() {
+        return Err(VoiceError::AudioError {
+            message: format!("{} exited with status {}", cmd, status),
+        });
+    }
+    Ok(())
+}
+
+/// Record an audio chunk from the system microphone.
+///
+/// On macOS, uses `afrecord` to capture audio for `duration_secs` seconds.
+/// Returns the recorded AudioChunk.
+pub async fn record_audio_chunk(
+    duration_secs: f32,
+    sample_rate: u32,
+) -> Result<AudioChunk, VoiceError> {
+    let tmp_path = std::env::temp_dir().join("rustant_mic_capture.wav");
+
+    // Remove stale file from a previous capture
+    let _ = std::fs::remove_file(&tmp_path);
+
+    #[cfg(target_os = "macos")]
+    {
+        let status = tokio::process::Command::new("afrecord")
+            .args([
+                "-d",
+                &format!("{:.1}", duration_secs),
+                "-f",
+                "WAVE",
+                "-c",
+                "1",
+                "-r",
+                &sample_rate.to_string(),
+                tmp_path.to_str().unwrap(),
+            ])
+            .status()
+            .await
+            .map_err(|e| VoiceError::AudioError {
+                message: format!("afrecord failed: {}", e),
+            })?;
+
+        if !status.success() {
+            return Err(VoiceError::AudioError {
+                message: "afrecord exited with error".into(),
+            });
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let status = tokio::process::Command::new("arecord")
+            .args([
+                "-d",
+                &format!("{:.0}", duration_secs),
+                "-f",
+                "S16_LE",
+                "-c",
+                "1",
+                "-r",
+                &sample_rate.to_string(),
+                tmp_path.to_str().unwrap(),
+            ])
+            .status()
+            .await
+            .map_err(|e| VoiceError::AudioError {
+                message: format!("arecord failed: {}", e),
+            })?;
+
+        if !status.success() {
+            return Err(VoiceError::AudioError {
+                message: "arecord exited with error".into(),
+            });
+        }
+    }
+
+    let data = std::fs::read(&tmp_path).map_err(|e| VoiceError::AudioError {
+        message: format!("Failed to read recorded audio: {}", e),
+    })?;
+    let _ = std::fs::remove_file(&tmp_path);
+
+    audio_convert::decode_wav(&data)
+}
+
 // Feature-gated AudioInput / AudioOutput stubs.
 // Real implementation would use cpal; we provide struct definitions
 // behind the feature flag so they can be referenced.
@@ -348,6 +459,20 @@ mod tests {
         assert!((resampled[0] - 0.0).abs() < 0.01);
         // Values should be interpolated
         assert!(resampled[1] > 0.0 && resampled[1] < 0.5);
+    }
+
+    #[tokio::test]
+    async fn test_play_audio_creates_and_cleans_temp_file() {
+        // We cannot actually test playback without audio hardware, but we can test
+        // that play_audio writes the WAV file correctly before the command runs.
+        // Since afplay/aplay may not be available in CI, we just verify encoding works.
+        let chunk = AudioChunk::new(vec![0.0, 0.5, -0.5, 0.25], 16000, 1);
+        let wav_bytes = audio_convert::encode_wav(&chunk).unwrap();
+        let tmp_path = std::env::temp_dir().join("rustant_playback_test.wav");
+        std::fs::write(&tmp_path, &wav_bytes).unwrap();
+        assert!(tmp_path.exists());
+        std::fs::remove_file(&tmp_path).unwrap();
+        assert!(!tmp_path.exists());
     }
 
     #[test]

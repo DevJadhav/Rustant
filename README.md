@@ -414,6 +414,18 @@ rustant ui [--port 18790]                  # Launch Tauri dashboard
 /doctor                                   # Run diagnostic checks (LLM, tools, config, sessions)
 /setup                                    # Re-run provider setup wizard
 /workflows                                # List available workflow templates
+/verbose (/v)                             # Toggle verbose output (tool details, usage, decisions)
+
+# CLI-Parity Commands (equivalent to `rustant <subcommand>`)
+/channel (/ch) list|setup|test <name>     # Manage messaging channels
+/workflow (/wf) list|show|run|status|cancel  # Manage and run workflows
+/voice speak <text> [-v voice]            # Text-to-speech synthesis
+/browser test|launch|connect|status       # Browser automation control
+/auth status|login|logout <provider>      # OAuth authentication management
+/canvas push <type> <content>|clear|snapshot  # Canvas operations
+/skill list|info|validate <path>          # Skill management (SKILL.md files)
+/plugin list|info <name>                  # Plugin management
+/update check|install                     # Check for and install updates
 ```
 
 ## Configuration

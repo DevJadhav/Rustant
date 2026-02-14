@@ -3,8 +3,9 @@
 //! Provides both single-task and interactive REPL modes.
 
 pub(crate) mod channel_setup;
-mod commands;
+pub mod commands;
 mod repl;
+mod repl_input;
 pub(crate) mod setup;
 pub(crate) mod slash;
 mod tui;
@@ -60,7 +61,7 @@ struct Cli {
 }
 
 #[derive(clap::Subcommand, Debug)]
-enum Commands {
+pub enum Commands {
     /// Manage configuration
     Config {
         #[command(subcommand)]
@@ -140,7 +141,7 @@ enum Commands {
 }
 
 #[derive(clap::Subcommand, Debug)]
-enum CanvasAction {
+pub enum CanvasAction {
     /// Push content to the canvas
     Push {
         /// Content type (html, markdown, code, chart, table, form, image, diagram)
@@ -155,7 +156,7 @@ enum CanvasAction {
 }
 
 #[derive(clap::Subcommand, Debug)]
-enum SkillAction {
+pub enum SkillAction {
     /// List loaded skills
     List {
         /// Directory to scan for skill files
@@ -180,7 +181,7 @@ enum SkillAction {
 }
 
 #[derive(clap::Subcommand, Debug)]
-enum PluginAction {
+pub enum PluginAction {
     /// List loaded plugins
     List {
         /// Directory to scan for plugin files
@@ -195,7 +196,7 @@ enum PluginAction {
 }
 
 #[derive(clap::Subcommand, Debug)]
-enum UpdateAction {
+pub enum UpdateAction {
     /// Check for available updates
     Check,
     /// Download and install the latest version
@@ -203,7 +204,7 @@ enum UpdateAction {
 }
 
 #[derive(clap::Subcommand, Debug)]
-enum WorkflowAction {
+pub enum WorkflowAction {
     /// List available workflow definitions
     List,
     /// Show details of a workflow
@@ -239,7 +240,7 @@ enum WorkflowAction {
 }
 
 #[derive(clap::Subcommand, Debug)]
-enum CronAction {
+pub enum CronAction {
     /// List all scheduled cron jobs
     List,
     /// Add a new cron job
@@ -281,7 +282,7 @@ enum CronAction {
 }
 
 #[derive(clap::Subcommand, Debug)]
-enum VoiceAction {
+pub enum VoiceAction {
     /// Synthesize text to speech and display audio stats
     Speak {
         /// Text to synthesize
@@ -298,7 +299,7 @@ enum VoiceAction {
 }
 
 #[derive(clap::Subcommand, Debug)]
-enum BrowserAction {
+pub enum BrowserAction {
     /// Test browser automation by navigating to a URL
     Test {
         /// URL to navigate to
@@ -325,7 +326,7 @@ enum BrowserAction {
 }
 
 #[derive(clap::Subcommand, Debug)]
-enum ConfigAction {
+pub enum ConfigAction {
     /// Create default configuration file
     Init,
     /// Show current configuration
@@ -333,7 +334,7 @@ enum ConfigAction {
 }
 
 #[derive(clap::Subcommand, Debug)]
-enum ChannelAction {
+pub enum ChannelAction {
     /// List all configured channels and their status
     List,
     /// Interactive channel setup wizard
@@ -354,7 +355,7 @@ enum ChannelAction {
 }
 
 #[derive(clap::Subcommand, Debug)]
-enum SlackCommand {
+pub enum SlackCommand {
     /// Send a message to a Slack channel
     Send {
         /// Channel name or ID (e.g., general, C04M40V9B61)
@@ -421,7 +422,7 @@ enum SlackCommand {
 }
 
 #[derive(clap::Subcommand, Debug)]
-enum AuthAction {
+pub enum AuthAction {
     /// Show current authentication status for all providers
     Status,
     /// Login to an LLM provider or channel via OAuth browser flow
@@ -455,10 +456,13 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     // Set up tracing: human-readable stderr + JSON file logging
+    // Default to "warn" for clean output (hides INFO tool execution noise).
+    // Use -v for debug, -vv for trace, -q for errors only.
     let filter = match cli.verbose {
         0 if cli.quiet => "error",
-        0 => "info",
-        1 => "debug",
+        0 => "warn",
+        1 => "info",
+        2 => "debug",
         _ => "trace",
     };
 
@@ -564,8 +568,19 @@ async fn main() -> anyhow::Result<()> {
         "Config loaded — approval mode"
     );
 
-    // Start TUI, REPL, or execute single task
-    if let Some(task) = cli.task {
+    // Start voice mode, TUI, REPL, or execute single task
+    if cli.voice {
+        #[cfg(feature = "voice")]
+        {
+            commands::run_voice_mode(config, workspace).await
+        }
+        #[cfg(not(feature = "voice"))]
+        {
+            anyhow::bail!(
+                "Voice mode requires the 'voice' feature. Recompile with: cargo build --features voice"
+            );
+        }
+    } else if let Some(task) = cli.task {
         repl::run_single_task(&task, config, workspace).await
     } else if cli.no_tui || !config.ui.use_tui {
         repl::run_interactive(config, workspace).await

@@ -294,7 +294,7 @@ async fn handle_resume(session: Option<&str>, workspace: &Path) -> anyhow::Resul
         }
     };
 
-    let callback = std::sync::Arc::new(crate::repl::CliCallback);
+    let callback = std::sync::Arc::new(crate::repl::CliCallback::new(false));
     let mut agent = rustant_core::Agent::new(provider, config, callback);
     *agent.memory_mut() = memory;
 
@@ -384,7 +384,7 @@ fn handle_sessions(limit: usize, workspace: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handle_channel(action: ChannelAction, workspace: &Path) -> anyhow::Result<()> {
+pub async fn handle_channel(action: ChannelAction, workspace: &Path) -> anyhow::Result<()> {
     let config = rustant_core::config::load_config(Some(workspace), None)
         .map_err(|e| anyhow::anyhow!("Failed to load config: {}", e))?;
 
@@ -452,7 +452,7 @@ async fn handle_channel(action: ChannelAction, workspace: &Path) -> anyhow::Resu
     }
 }
 
-async fn handle_auth(action: AuthAction, workspace: &Path) -> anyhow::Result<()> {
+pub async fn handle_auth(action: AuthAction, workspace: &Path) -> anyhow::Result<()> {
     use rustant_core::credentials::KeyringCredentialStore;
     use rustant_core::oauth;
 
@@ -674,7 +674,7 @@ async fn handle_auth(action: AuthAction, workspace: &Path) -> anyhow::Result<()>
     }
 }
 
-async fn handle_workflow(action: WorkflowAction, _workspace: &Path) -> anyhow::Result<()> {
+pub async fn handle_workflow(action: WorkflowAction, _workspace: &Path) -> anyhow::Result<()> {
     match action {
         WorkflowAction::List => {
             let names = rustant_core::list_builtin_names();
@@ -1150,7 +1150,7 @@ async fn handle_slack(action: SlackCommand) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handle_voice(action: VoiceAction) -> anyhow::Result<()> {
+pub async fn handle_voice(action: VoiceAction) -> anyhow::Result<()> {
     let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| {
         anyhow::anyhow!(
             "OPENAI_API_KEY environment variable not set.\n\
@@ -1176,12 +1176,12 @@ async fn handle_voice(action: VoiceAction) -> anyhow::Result<()> {
             println!("  Samples:     {}", result.audio.samples.len());
             println!("  Characters:  {}", result.characters_used);
 
-            // Save WAV to temp file for playback
-            let wav_bytes = rustant_core::voice::audio_convert::encode_wav(&result.audio)
-                .map_err(|e| anyhow::anyhow!("WAV encoding failed: {}", e))?;
-            let out_path = std::env::temp_dir().join("rustant_tts_output.wav");
-            std::fs::write(&out_path, &wav_bytes)?;
-            println!("  WAV saved:   {}", out_path.display());
+            // Play audio directly through speakers
+            println!("  Playing audio...");
+            rustant_core::voice::audio_io::play_audio(&result.audio)
+                .await
+                .map_err(|e| anyhow::anyhow!("Audio playback failed: {}", e))?;
+            println!("  Playback complete.");
 
             Ok(())
         }
@@ -1227,7 +1227,7 @@ async fn handle_voice(action: VoiceAction) -> anyhow::Result<()> {
 }
 
 #[allow(unused_variables)]
-async fn handle_browser(action: BrowserAction, workspace: &Path) -> anyhow::Result<()> {
+pub async fn handle_browser(action: BrowserAction, workspace: &Path) -> anyhow::Result<()> {
     match action {
         BrowserAction::Test { url } => {
             #[cfg(feature = "browser")]
@@ -1626,7 +1626,7 @@ async fn handle_ui(port: u16) -> anyhow::Result<()> {
     }
 }
 
-async fn handle_canvas(action: CanvasAction) -> anyhow::Result<()> {
+pub async fn handle_canvas(action: CanvasAction) -> anyhow::Result<()> {
     use rustant_core::canvas::{CanvasManager, CanvasTarget, ContentType};
 
     // Create a local canvas manager for CLI operations
@@ -1711,7 +1711,7 @@ async fn handle_canvas(action: CanvasAction) -> anyhow::Result<()> {
     }
 }
 
-async fn handle_skill(action: SkillAction) -> anyhow::Result<()> {
+pub async fn handle_skill(action: SkillAction) -> anyhow::Result<()> {
     use rustant_core::skills::{parse_skill_md, validate_skill, SkillLoader};
 
     match action {
@@ -1833,7 +1833,7 @@ async fn handle_skill(action: SkillAction) -> anyhow::Result<()> {
     }
 }
 
-async fn handle_plugin(action: PluginAction) -> anyhow::Result<()> {
+pub async fn handle_plugin(action: PluginAction) -> anyhow::Result<()> {
     use rustant_plugins::NativePluginLoader;
 
     match action {
@@ -1869,7 +1869,7 @@ async fn handle_plugin(action: PluginAction) -> anyhow::Result<()> {
     }
 }
 
-async fn handle_update(action: UpdateAction) -> anyhow::Result<()> {
+pub async fn handle_update(action: UpdateAction) -> anyhow::Result<()> {
     use rustant_core::updater::{UpdateChecker, UpdateConfig, Updater, CURRENT_VERSION};
 
     match action {
@@ -1930,6 +1930,213 @@ async fn handle_update(action: UpdateAction) -> anyhow::Result<()> {
                 }
             }
             Ok(())
+        }
+    }
+}
+
+/// Connect to configured external MCP servers and log results.
+///
+/// For each server with `auto_connect: true`, spawns the process, performs
+/// the MCP initialize handshake, and lists available tools. Logs warnings
+/// for servers that fail to connect.
+pub async fn connect_mcp_servers(
+    configs: &[rustant_core::ExternalMcpServerConfig],
+) -> Vec<(String, Vec<String>)> {
+    let mut connected = Vec::new();
+
+    for config in configs {
+        if !config.auto_connect {
+            continue;
+        }
+
+        tracing::info!(name = %config.name, command = %config.command, "Connecting to MCP server");
+
+        match rustant_mcp::transport::ProcessTransport::spawn(
+            &config.command,
+            &config.args,
+            &config.env,
+        )
+        .await
+        {
+            Ok((mut transport, _child)) => {
+                // Send initialize request
+                let init_req = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "rustant", "version": "1.0"}
+                    }
+                });
+
+                use rustant_mcp::transport::Transport;
+
+                if let Err(e) = transport
+                    .write_message(&serde_json::to_string(&init_req).unwrap())
+                    .await
+                {
+                    tracing::warn!(name = %config.name, error = %e, "MCP init write failed");
+                    continue;
+                }
+
+                match transport.read_message().await {
+                    Ok(Some(response)) => {
+                        tracing::info!(
+                            name = %config.name,
+                            "MCP server connected: {}",
+                            &response[..response.len().min(200)]
+                        );
+
+                        // Send initialized notification
+                        let notif = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "method": "notifications/initialized"
+                        });
+                        let _ = transport
+                            .write_message(&serde_json::to_string(&notif).unwrap())
+                            .await;
+
+                        // List tools
+                        let list_req = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": 2,
+                            "method": "tools/list",
+                            "params": {}
+                        });
+                        let _ = transport
+                            .write_message(&serde_json::to_string(&list_req).unwrap())
+                            .await;
+
+                        if let Ok(Some(tools_resp)) = transport.read_message().await {
+                            if let Ok(parsed) =
+                                serde_json::from_str::<serde_json::Value>(&tools_resp)
+                            {
+                                let tools = parsed["result"]["tools"]
+                                    .as_array()
+                                    .map(|arr| {
+                                        arr.iter()
+                                            .filter_map(|t| {
+                                                t["name"].as_str().map(|s| s.to_string())
+                                            })
+                                            .collect::<Vec<_>>()
+                                    })
+                                    .unwrap_or_default();
+
+                                tracing::info!(
+                                    name = %config.name,
+                                    tools_count = tools.len(),
+                                    "MCP server tools discovered"
+                                );
+                                connected.push((config.name.clone(), tools));
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        tracing::warn!(name = %config.name, "MCP server closed before init response");
+                    }
+                    Err(e) => {
+                        tracing::warn!(name = %config.name, error = %e, "MCP init read failed");
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(name = %config.name, error = %e, "Failed to start MCP server");
+            }
+        }
+    }
+
+    connected
+}
+
+/// Run the voice command loop with "hey rustant" wake word detection.
+///
+/// Continuously listens for the wake word, transcribes the command, processes it
+/// through the agent, and speaks the response back.
+#[cfg(feature = "voice")]
+pub async fn run_voice_mode(
+    config: rustant_core::AgentConfig,
+    workspace: std::path::PathBuf,
+) -> anyhow::Result<()> {
+    use rustant_core::voice::{OpenAiSttProvider, OpenAiTtsProvider, SttWakeDetector};
+    use std::sync::Arc;
+
+    let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| {
+        anyhow::anyhow!(
+            "OPENAI_API_KEY required for voice mode.\n\
+             Set it with: export OPENAI_API_KEY=sk-..."
+        )
+    })?;
+
+    println!("Voice mode active. Say \"hey rustant\" to give a command.");
+    println!("Press Ctrl+C to exit.\n");
+
+    let voice_config = config.voice.clone().unwrap_or_default();
+    let stt: Arc<dyn rustant_core::voice::SttProvider> = Arc::new(OpenAiSttProvider::new(&api_key));
+    let tts: Arc<dyn rustant_core::voice::TtsProvider> = Arc::new(OpenAiTtsProvider::new(&api_key));
+    let wake_detector: Box<dyn rustant_core::voice::WakeWordDetector> =
+        Box::new(SttWakeDetector::new(
+            Box::new(OpenAiSttProvider::new(&api_key)),
+            voice_config.wake_words.clone(),
+            voice_config.wake_sensitivity,
+        ));
+
+    let pipeline = rustant_core::voice::VoicePipeline::new(stt, tts, wake_detector, voice_config)?;
+
+    // Set up agent with a simple print callback
+    let provider = rustant_core::create_provider(&config.llm)?;
+    let callback = Arc::new(crate::repl::CliCallback::new(false));
+    let mut agent = rustant_core::Agent::new(provider, config.clone(), callback);
+
+    // Register tools
+    let mut registry = rustant_tools::registry::ToolRegistry::new();
+    rustant_tools::register_builtin_tools(&mut registry, workspace.clone());
+    let registry_arc = Arc::new(registry);
+    for def in registry_arc.list_definitions() {
+        let name = def.name.clone();
+        let ws = workspace.clone();
+        let reg = registry_arc.clone();
+        agent.register_tool(def, rustant_core::types::RiskLevel::Read, move |args| {
+            let n = name.clone();
+            let w = ws.clone();
+            let r = reg.clone();
+            Box::pin(async move {
+                r.invoke(&n, args, &w).await.map_err(|e| {
+                    rustant_core::error::ToolError::ExecutionFailed {
+                        tool: n,
+                        message: e.to_string(),
+                    }
+                })
+            })
+        });
+    }
+
+    loop {
+        match pipeline.listen_for_command().await {
+            Ok(Some(command)) => {
+                println!("  Heard: \"{}\"", command);
+                match agent.process_task(&command).await {
+                    Ok(result) => {
+                        // Speak the response
+                        if !result.response.is_empty() {
+                            if let Err(e) = pipeline.speak(&result.response).await {
+                                eprintln!("  TTS error: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("  Agent error: {}", e);
+                    }
+                }
+            }
+            Ok(None) => {
+                // No wake word detected, continue listening
+            }
+            Err(e) => {
+                eprintln!("Voice error: {}", e);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
         }
     }
 }

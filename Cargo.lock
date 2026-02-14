@@ -5575,6 +5575,7 @@ dependencies = [
  "ratatui",
  "reqwest",
  "rustant-core",
+ "rustant-mcp",
  "rustant-plugins",
  "rustant-tools",
  "serde",

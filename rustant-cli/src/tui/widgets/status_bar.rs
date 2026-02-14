@@ -1,7 +1,7 @@
 //! Status bar widget showing keybinding hints and current mode.
 
 use crate::tui::theme::Theme;
-use ratatui::layout::Rect;
+use ratatui::layout::{Alignment, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
@@ -45,8 +45,36 @@ impl std::fmt::Display for InputMode {
     }
 }
 
+/// Metrics data for the status bar.
+#[derive(Debug, Clone, Default)]
+pub struct StatusBarData {
+    /// Total tokens consumed so far.
+    pub tokens_used: usize,
+    /// Context window size in tokens.
+    pub context_window: usize,
+    /// Cumulative cost in USD.
+    pub cost_usd: f64,
+}
+
+/// Format a token count as a compact string (e.g., "12.4k", "1.2M").
+fn format_tokens_compact(tokens: usize) -> String {
+    if tokens >= 1_000_000 {
+        format!("{:.1}M", tokens as f64 / 1_000_000.0)
+    } else if tokens >= 1_000 {
+        format!("{:.1}k", tokens as f64 / 1_000.0)
+    } else {
+        format!("{}", tokens)
+    }
+}
+
 /// Render the status bar.
-pub fn render_status_bar(frame: &mut Frame, area: Rect, mode: InputMode, theme: &Theme) {
+pub fn render_status_bar(
+    frame: &mut Frame,
+    area: Rect,
+    mode: InputMode,
+    theme: &Theme,
+    data: &StatusBarData,
+) {
     let hints = match mode {
         InputMode::Normal | InputMode::VimInsert => {
             "[Enter] Send │ [/] Commands │ [@] Files │ [Esc] Cancel │ [Ctrl+C] Quit"
@@ -57,7 +85,25 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect, mode: InputMode, theme: 
         InputMode::Approval => "[y] Approve │ [n] Deny │ [d] Diff │ [?] Help",
     };
 
-    let spans = vec![
+    // Build the metrics string for the right side
+    let metrics = if data.context_window > 0 {
+        format!(
+            "{}/{} | ${:.4} ",
+            format_tokens_compact(data.tokens_used),
+            format_tokens_compact(data.context_window),
+            data.cost_usd,
+        )
+    } else if data.tokens_used > 0 {
+        format!(
+            "{} | ${:.4} ",
+            format_tokens_compact(data.tokens_used),
+            data.cost_usd,
+        )
+    } else {
+        String::new()
+    };
+
+    let left_spans = vec![
         Span::styled(
             format!(" {} ", mode.label()),
             theme
@@ -70,8 +116,19 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect, mode: InputMode, theme: 
         Span::styled(hints, theme.status_bar_style()),
     ];
 
-    let bar = Paragraph::new(Line::from(spans)).style(theme.status_bar_style());
-    frame.render_widget(bar, area);
+    let left_bar = Paragraph::new(Line::from(left_spans)).style(theme.status_bar_style());
+    frame.render_widget(left_bar, area);
+
+    // Render metrics right-aligned on top of the same area
+    if !metrics.is_empty() {
+        let right_bar = Paragraph::new(Line::from(Span::styled(
+            metrics,
+            theme.status_bar_style().add_modifier(Modifier::DIM),
+        )))
+        .alignment(Alignment::Right)
+        .style(theme.status_bar_style());
+        frame.render_widget(right_bar, area);
+    }
 }
 
 #[cfg(test)]
@@ -103,13 +160,56 @@ mod tests {
     }
 
     #[test]
+    fn test_status_bar_data_default() {
+        let data = StatusBarData::default();
+        assert_eq!(data.tokens_used, 0);
+        assert_eq!(data.context_window, 0);
+        assert!((data.cost_usd - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
     fn test_render_status_bar_does_not_panic() {
         let backend = ratatui::backend::TestBackend::new(80, 1);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         let theme = Theme::dark();
+        let data = StatusBarData::default();
         terminal
             .draw(|frame| {
-                render_status_bar(frame, frame.area(), InputMode::Normal, &theme);
+                render_status_bar(frame, frame.area(), InputMode::Normal, &theme, &data);
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_render_status_bar_with_metrics() {
+        let backend = ratatui::backend::TestBackend::new(120, 1);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let theme = Theme::dark();
+        let data = StatusBarData {
+            tokens_used: 12400,
+            context_window: 128000,
+            cost_usd: 0.0342,
+        };
+        terminal
+            .draw(|frame| {
+                render_status_bar(frame, frame.area(), InputMode::Normal, &theme, &data);
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_render_status_bar_high_cost() {
+        let backend = ratatui::backend::TestBackend::new(120, 1);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let theme = Theme::dark();
+        let data = StatusBarData {
+            tokens_used: 1_500_000,
+            context_window: 2_000_000,
+            cost_usd: 12.5678,
+        };
+        terminal
+            .draw(|frame| {
+                render_status_bar(frame, frame.area(), InputMode::Normal, &theme, &data);
             })
             .unwrap();
     }
@@ -119,10 +219,21 @@ mod tests {
         let backend = ratatui::backend::TestBackend::new(80, 1);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         let theme = Theme::dark();
+        let data = StatusBarData::default();
         terminal
             .draw(|frame| {
-                render_status_bar(frame, frame.area(), InputMode::VimNormal, &theme);
+                render_status_bar(frame, frame.area(), InputMode::VimNormal, &theme, &data);
             })
             .unwrap();
+    }
+
+    #[test]
+    fn test_format_tokens_compact() {
+        assert_eq!(format_tokens_compact(0), "0");
+        assert_eq!(format_tokens_compact(500), "500");
+        assert_eq!(format_tokens_compact(1000), "1.0k");
+        assert_eq!(format_tokens_compact(12400), "12.4k");
+        assert_eq!(format_tokens_compact(128000), "128.0k");
+        assert_eq!(format_tokens_compact(1_500_000), "1.5M");
     }
 }

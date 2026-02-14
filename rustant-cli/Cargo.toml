@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 rustant-core = { workspace = true }
 rustant-tools = { workspace = true }
+rustant-mcp = { path = "../rustant-mcp" }
 rustant-plugins = { path = "../rustant-plugins" }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
@@ -49,6 +50,7 @@ tower-http = { workspace = true }
 [features]
 default = []
 browser = ["rustant-core/browser"]
+voice = ["rustant-core/voice"]
 
 [dev-dependencies]
 tokio-test = "0.4"

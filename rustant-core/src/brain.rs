@@ -353,6 +353,17 @@ impl MockLlmProvider {
         }
     }
 
+    /// Create a MockLlmProvider that always returns the given text.
+    ///
+    /// Queues multiple copies of the response so it can handle multiple calls.
+    pub fn with_response(text: &str) -> Self {
+        let provider = Self::new();
+        for _ in 0..20 {
+            provider.queue_response(Self::text_response(text));
+        }
+        provider
+    }
+
     /// Queue a response to be returned by the next `complete` call.
     pub fn queue_response(&self, response: CompletionResponse) {
         self.responses.lock().unwrap().push(response);
@@ -521,6 +532,13 @@ macOS Native: macos_calendar, macos_reminders, macos_notes, macos_clipboard, mac
 macOS Automation: macos_gui_scripting, macos_accessibility, macos_screen_analyze, macos_safari
 iMessage: imessage_contacts, imessage_send, imessage_read
 Voice: macos_say
+
+Workflows (structured multi-step templates — run via shell_exec "rustant workflow run <name>"):
+  code_review, refactor, test_generation, documentation, dependency_update,
+  security_scan, deployment, incident_response, morning_briefing, pr_review,
+  dependency_audit, changelog, meeting_recorder, daily_briefing_full,
+  end_of_day_summary, app_automation, email_triage
+When a user asks for one of these tasks by name or description, execute the workflow or accomplish it step by step.
 
 Security rules:
 - Never execute commands that could damage the system or leak credentials

@@ -15,6 +15,7 @@ use rustant_tools::register_builtin_tools;
 use rustant_tools::registry::ToolRegistry;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 /// Connect to or launch a browser and register all 24 browser tools with the agent.
@@ -295,7 +296,20 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
 }
 
 /// A CLI callback that prints to stdout and reads approval from stdin.
-pub(crate) struct CliCallback;
+///
+/// When `verbose` is false (default), tool execution details, status changes,
+/// usage updates, and decision explanations are hidden for cleaner output.
+pub(crate) struct CliCallback {
+    pub verbose: Arc<AtomicBool>,
+}
+
+impl CliCallback {
+    pub fn new(verbose: bool) -> Self {
+        Self {
+            verbose: Arc::new(AtomicBool::new(verbose)),
+        }
+    }
+}
 
 #[async_trait::async_trait]
 impl AgentCallback for CliCallback {
@@ -354,6 +368,9 @@ impl AgentCallback for CliCallback {
     }
 
     async fn on_tool_start(&self, tool_name: &str, args: &serde_json::Value) {
+        if !self.verbose.load(Ordering::Relaxed) {
+            return;
+        }
         let detail = extract_tool_detail(tool_name, args);
         if let Some(ref detail) = detail {
             println!("\x1b[36m  [{}: {}] executing...\x1b[0m", tool_name, detail);
@@ -363,6 +380,9 @@ impl AgentCallback for CliCallback {
     }
 
     async fn on_tool_result(&self, tool_name: &str, output: &ToolOutput, duration_ms: u64) {
+        if !self.verbose.load(Ordering::Relaxed) {
+            return;
+        }
         let preview = if output.content.chars().count() > 200 {
             format!("{}...", truncate_str(&output.content, 200))
         } else {
@@ -375,6 +395,9 @@ impl AgentCallback for CliCallback {
     }
 
     async fn on_status_change(&self, status: AgentStatus) {
+        if !self.verbose.load(Ordering::Relaxed) {
+            return;
+        }
         match status {
             AgentStatus::Thinking => print!("\x1b[90m  thinking...\x1b[0m"),
             AgentStatus::Executing => {}
@@ -385,6 +408,9 @@ impl AgentCallback for CliCallback {
     }
 
     async fn on_usage_update(&self, usage: &TokenUsage, cost: &CostEstimate) {
+        if !self.verbose.load(Ordering::Relaxed) {
+            return;
+        }
         let input = usage.input_tokens;
         let output = usage.output_tokens;
         let total_cost = cost.total();
@@ -396,6 +422,9 @@ impl AgentCallback for CliCallback {
     }
 
     async fn on_decision_explanation(&self, explanation: &DecisionExplanation) {
+        if !self.verbose.load(Ordering::Relaxed) {
+            return;
+        }
         let tool = match &explanation.decision_type {
             rustant_core::explanation::DecisionType::ToolSelection { selected_tool } => {
                 selected_tool.as_str()
@@ -415,6 +444,9 @@ impl AgentCallback for CliCallback {
     }
 
     async fn on_cost_prediction(&self, estimated_tokens: usize, estimated_cost: f64) {
+        if !self.verbose.load(Ordering::Relaxed) {
+            return;
+        }
         println!(
             "\x1b[33m  [Cost estimate: ~{} tokens, ~${:.4}]\x1b[0m",
             estimated_tokens, estimated_cost
@@ -622,7 +654,8 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
             }
         }
     };
-    let callback = Arc::new(CliCallback);
+    let callback = Arc::new(CliCallback::new(config.ui.verbose));
+    let verbose_flag = Arc::clone(&callback.verbose);
     // Clone config before moving into Agent (needed for browser setup)
     let config_ref = config.clone();
     let mut agent = Agent::new(provider, config, callback);
@@ -687,15 +720,14 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
         eprintln!("\nShutting down gracefully...");
     });
 
-    let stdin = io::stdin();
+    let cmd_registry = crate::slash::CommandRegistry::with_defaults();
+    let mut repl_input = crate::repl_input::ReplInput::new(&workspace);
     loop {
-        print!("\x1b[1;34m> \x1b[0m");
-        io::stdout().flush()?;
-
-        let mut input = String::new();
-        if stdin.lock().read_line(&mut input).is_err() || input.is_empty() {
-            break;
-        }
+        let input = match repl_input.read_line("\x1b[1;34m> \x1b[0m", &cmd_registry) {
+            Ok(Some(line)) => line,
+            Ok(None) => break, // Ctrl-D EOF
+            Err(_) => break,
+        };
 
         let input = input.trim();
         if input.is_empty() {
@@ -716,7 +748,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                         print!("Save session before exiting? [y/n/name] > ");
                         let _ = io::stdout().flush();
                         let mut save_input = String::new();
-                        if stdin.lock().read_line(&mut save_input).is_ok() {
+                        if io::stdin().lock().read_line(&mut save_input).is_ok() {
                             let save_input = save_input.trim();
                             if !save_input.is_empty() && save_input != "n" && save_input != "no" {
                                 let session_name = if save_input == "y" || save_input == "yes" {
@@ -745,23 +777,24 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     break;
                 }
                 "/help" | "/?" => {
-                    let registry = crate::slash::CommandRegistry::with_defaults();
                     if !arg1.is_empty() {
                         // Topic-specific help
-                        match registry.help_for(arg1) {
+                        match cmd_registry.help_for(arg1) {
                             Some(help) => println!("\n{}", help),
                             None => {
                                 println!(
                                     "No help found for '{}'. Try /help for all commands.",
                                     arg1
                                 );
-                                if let Some(suggestion) = registry.suggest(&format!("/{}", arg1)) {
+                                if let Some(suggestion) =
+                                    cmd_registry.suggest(&format!("/{}", arg1))
+                                {
                                     println!("Did you mean: {} ?", suggestion);
                                 }
                             }
                         }
                     } else {
-                        println!("{}", registry.help_text());
+                        println!("{}", cmd_registry.help_text());
                         // Contextual suggestions based on agent state
                         print_contextual_hints(&agent);
                     }
@@ -893,6 +926,17 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     handle_intelligence_command(arg1);
                     continue;
                 }
+                "/council" => {
+                    let question = if arg1.is_empty() {
+                        String::new()
+                    } else if arg2.is_empty() {
+                        arg1.to_string()
+                    } else {
+                        format!("{} {}", arg1, arg2)
+                    };
+                    handle_council_command(&question, &config_ref);
+                    continue;
+                }
                 "/schedule" | "/sched" | "/cron" => {
                     handle_schedule_command(arg1, arg2, &mut agent, &workspace);
                     continue;
@@ -901,10 +945,287 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     handle_why_command(arg1, &agent);
                     continue;
                 }
+                "/channel" | "/ch" => {
+                    let action = match arg1 {
+                        "list" | "" => crate::ChannelAction::List,
+                        "setup" => crate::ChannelAction::Setup {
+                            channel: if arg2.is_empty() {
+                                None
+                            } else {
+                                Some(arg2.to_string())
+                            },
+                        },
+                        "test" => {
+                            if arg2.is_empty() {
+                                println!("Usage: /channel test <name>");
+                                continue;
+                            }
+                            crate::ChannelAction::Test {
+                                name: arg2.to_string(),
+                            }
+                        }
+                        _ => {
+                            println!("Usage: /channel list|setup [name]|test <name>");
+                            continue;
+                        }
+                    };
+                    if let Err(e) = crate::commands::handle_channel(action, &workspace).await {
+                        println!("\x1b[31mError: {}\x1b[0m", e);
+                    }
+                    continue;
+                }
+                "/workflow" | "/wf" => {
+                    let action = match arg1 {
+                        "list" | "" => crate::WorkflowAction::List,
+                        "show" => {
+                            if arg2.is_empty() {
+                                println!("Usage: /workflow show <name>");
+                                continue;
+                            }
+                            crate::WorkflowAction::Show {
+                                name: arg2.to_string(),
+                            }
+                        }
+                        "run" => {
+                            if arg2.is_empty() {
+                                println!("Usage: /workflow run <name> [key=value ...]");
+                                continue;
+                            }
+                            let parts: Vec<&str> = arg2.splitn(2, ' ').collect();
+                            let name = parts[0].to_string();
+                            let input = if parts.len() > 1 {
+                                parts[1].split_whitespace().map(|s| s.to_string()).collect()
+                            } else {
+                                Vec::new()
+                            };
+                            crate::WorkflowAction::Run { name, input }
+                        }
+                        "runs" => crate::WorkflowAction::Runs,
+                        "status" => {
+                            if arg2.is_empty() {
+                                println!("Usage: /workflow status <run_id>");
+                                continue;
+                            }
+                            crate::WorkflowAction::Status {
+                                run_id: arg2.to_string(),
+                            }
+                        }
+                        "cancel" => {
+                            if arg2.is_empty() {
+                                println!("Usage: /workflow cancel <run_id>");
+                                continue;
+                            }
+                            crate::WorkflowAction::Cancel {
+                                run_id: arg2.to_string(),
+                            }
+                        }
+                        _ => {
+                            println!("Usage: /workflow list|show|run <name> [key=val]|runs|status|cancel <id>");
+                            continue;
+                        }
+                    };
+                    if let Err(e) = crate::commands::handle_workflow(action, &workspace).await {
+                        println!("\x1b[31mError: {}\x1b[0m", e);
+                    }
+                    continue;
+                }
+                "/voice" => {
+                    let action = match arg1 {
+                        "speak" => {
+                            if arg2.is_empty() {
+                                println!("Usage: /voice speak <text> [-v voice]");
+                                continue;
+                            }
+                            // Parse optional -v flag from arg2
+                            let (text, voice) = if let Some(idx) = arg2.find(" -v ") {
+                                (arg2[..idx].to_string(), arg2[idx + 4..].trim().to_string())
+                            } else {
+                                (arg2.to_string(), "alloy".to_string())
+                            };
+                            crate::VoiceAction::Speak { text, voice }
+                        }
+                        _ => {
+                            println!("Usage: /voice speak <text> [-v voice]");
+                            continue;
+                        }
+                    };
+                    if let Err(e) = crate::commands::handle_voice(action).await {
+                        println!("\x1b[31mError: {}\x1b[0m", e);
+                    }
+                    continue;
+                }
+                "/browser" => {
+                    let action = match arg1 {
+                        "test" => crate::BrowserAction::Test {
+                            url: if arg2.is_empty() {
+                                "https://example.com".to_string()
+                            } else {
+                                arg2.to_string()
+                            },
+                        },
+                        "launch" => {
+                            let port = arg2.parse::<u16>().unwrap_or(9222);
+                            crate::BrowserAction::Launch {
+                                port,
+                                headless: false,
+                            }
+                        }
+                        "connect" => {
+                            let port = arg2.parse::<u16>().unwrap_or(9222);
+                            crate::BrowserAction::Connect { port }
+                        }
+                        "status" | "" => crate::BrowserAction::Status,
+                        _ => {
+                            println!("Usage: /browser test|launch|connect|status");
+                            continue;
+                        }
+                    };
+                    if let Err(e) = crate::commands::handle_browser(action, &workspace).await {
+                        println!("\x1b[31mError: {}\x1b[0m", e);
+                    }
+                    continue;
+                }
+                "/auth" => {
+                    let action = match arg1 {
+                        "status" | "" => crate::AuthAction::Status,
+                        "login" => {
+                            if arg2.is_empty() {
+                                println!("Usage: /auth login <provider>");
+                                continue;
+                            }
+                            crate::AuthAction::Login {
+                                provider: arg2.to_string(),
+                                redirect_uri: None,
+                            }
+                        }
+                        "logout" => {
+                            if arg2.is_empty() {
+                                println!("Usage: /auth logout <provider>");
+                                continue;
+                            }
+                            crate::AuthAction::Logout {
+                                provider: arg2.to_string(),
+                            }
+                        }
+                        _ => {
+                            println!("Usage: /auth status|login|logout <provider>");
+                            continue;
+                        }
+                    };
+                    if let Err(e) = crate::commands::handle_auth(action, &workspace).await {
+                        println!("\x1b[31mError: {}\x1b[0m", e);
+                    }
+                    continue;
+                }
+                "/canvas" => {
+                    let action = match arg1 {
+                        "clear" => crate::CanvasAction::Clear,
+                        "snapshot" | "" => crate::CanvasAction::Snapshot,
+                        "push" => {
+                            if arg2.is_empty() {
+                                println!("Usage: /canvas push <type> <content>");
+                                continue;
+                            }
+                            let parts: Vec<&str> = arg2.splitn(2, ' ').collect();
+                            if parts.len() < 2 {
+                                println!("Usage: /canvas push <type> <content>");
+                                continue;
+                            }
+                            crate::CanvasAction::Push {
+                                content_type: parts[0].to_string(),
+                                content: parts[1].to_string(),
+                            }
+                        }
+                        _ => {
+                            println!("Usage: /canvas push <type> <content>|clear|snapshot");
+                            continue;
+                        }
+                    };
+                    if let Err(e) = crate::commands::handle_canvas(action).await {
+                        println!("\x1b[31mError: {}\x1b[0m", e);
+                    }
+                    continue;
+                }
+                "/skill" => {
+                    let action = match arg1 {
+                        "list" | "" => crate::SkillAction::List { dir: None },
+                        "info" => {
+                            if arg2.is_empty() {
+                                println!("Usage: /skill info <path>");
+                                continue;
+                            }
+                            crate::SkillAction::Info {
+                                path: arg2.to_string(),
+                            }
+                        }
+                        "validate" => {
+                            if arg2.is_empty() {
+                                println!("Usage: /skill validate <path>");
+                                continue;
+                            }
+                            crate::SkillAction::Validate {
+                                path: arg2.to_string(),
+                            }
+                        }
+                        _ => {
+                            println!("Usage: /skill list|info|validate <path>");
+                            continue;
+                        }
+                    };
+                    if let Err(e) = crate::commands::handle_skill(action).await {
+                        println!("\x1b[31mError: {}\x1b[0m", e);
+                    }
+                    continue;
+                }
+                "/plugin" => {
+                    let action = match arg1 {
+                        "list" | "" => crate::PluginAction::List { dir: None },
+                        "info" => {
+                            if arg2.is_empty() {
+                                println!("Usage: /plugin info <name>");
+                                continue;
+                            }
+                            crate::PluginAction::Info {
+                                name: arg2.to_string(),
+                            }
+                        }
+                        _ => {
+                            println!("Usage: /plugin list|info <name>");
+                            continue;
+                        }
+                    };
+                    if let Err(e) = crate::commands::handle_plugin(action).await {
+                        println!("\x1b[31mError: {}\x1b[0m", e);
+                    }
+                    continue;
+                }
+                "/update" => {
+                    let action = match arg1 {
+                        "check" | "" => crate::UpdateAction::Check,
+                        "install" => crate::UpdateAction::Install,
+                        _ => {
+                            println!("Usage: /update check|install");
+                            continue;
+                        }
+                    };
+                    if let Err(e) = crate::commands::handle_update(action).await {
+                        println!("\x1b[31mError: {}\x1b[0m", e);
+                    }
+                    continue;
+                }
+                "/verbose" | "/v" => {
+                    let prev = verbose_flag.load(Ordering::Relaxed);
+                    verbose_flag.store(!prev, Ordering::Relaxed);
+                    if !prev {
+                        println!("\x1b[32m  Verbose mode ON\x1b[0m — tool details, status, and usage will be shown.");
+                    } else {
+                        println!("\x1b[33m  Verbose mode OFF\x1b[0m — clean output (only responses and approvals).");
+                    }
+                    continue;
+                }
                 _ => {
-                    let registry = crate::slash::CommandRegistry::with_defaults();
                     // Check if this is a TUI-only command
-                    if let Some(info) = registry.lookup(cmd) {
+                    if let Some(info) = cmd_registry.lookup(cmd) {
                         if info.tui_only {
                             println!(
                                 "The {} command is only available in TUI mode. Launch with: rustant (without --no-tui)",
@@ -914,7 +1235,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                         }
                     }
                     // Use registry for unknown command suggestions
-                    if let Some(suggestion) = registry.suggest(cmd) {
+                    if let Some(suggestion) = cmd_registry.suggest(cmd) {
                         println!("Unknown command: {}. Did you mean {}?", cmd, suggestion);
                     } else {
                         println!(
@@ -1001,7 +1322,7 @@ pub async fn run_single_task(
             }
         }
     };
-    let callback = Arc::new(CliCallback);
+    let callback = Arc::new(CliCallback::new(config.ui.verbose));
     // Clone config before moving into Agent (needed for browser setup)
     let config_ref = config.clone();
     let mut agent = Agent::new(provider, config, callback);
@@ -2823,6 +3144,202 @@ fn handle_intelligence_command(sub: &str) {
             println!("Usage: /intelligence         — Show intelligence status");
             println!("       /intelligence on      — Enable intelligence");
             println!("       /intelligence off     — Disable intelligence");
+        }
+    }
+}
+
+/// Handle `/council` command for multi-model deliberation.
+fn handle_council_command(input: &str, config: &AgentConfig) {
+    match input {
+        "" => {
+            println!("Usage: /council <question>  — Run council deliberation");
+            println!("       /council status      — Show council configuration");
+            println!("       /council detect      — Auto-detect available providers");
+        }
+        "status" => {
+            println!("\x1b[1mLLM Council Status\x1b[0m");
+            println!("──────────────────");
+            match &config.council {
+                Some(council) => {
+                    println!(
+                        "  Enabled:         {}",
+                        if council.enabled {
+                            "\x1b[32myes\x1b[0m"
+                        } else {
+                            "\x1b[33mno\x1b[0m"
+                        }
+                    );
+                    println!("  Strategy:        {}", council.voting_strategy);
+                    println!("  Peer review:     {}", council.enable_peer_review);
+                    println!("  Max tokens:      {}", council.max_member_tokens);
+                    println!("  Auto-detect:     {}", council.auto_detect);
+                    println!();
+                    if council.members.is_empty() {
+                        println!("  Members:         (none configured)");
+                        println!();
+                        println!(
+                            "  Configure members in .rustant/config.toml under [[council.members]]"
+                        );
+                        println!("  or run /council detect to auto-discover available providers.");
+                    } else {
+                        println!("  Members ({}):", council.members.len());
+                        for (i, m) in council.members.iter().enumerate() {
+                            println!(
+                                "    {}. {} / {} (weight: {:.1})",
+                                i + 1,
+                                m.provider,
+                                m.model,
+                                m.weight
+                            );
+                        }
+                    }
+                }
+                None => {
+                    println!("  Council:         \x1b[33mnot configured\x1b[0m");
+                    println!();
+                    println!("  Add [council] section to .rustant/config.toml");
+                    println!("  or run /council detect to auto-discover providers.");
+                }
+            }
+        }
+        "detect" => {
+            println!("\x1b[1mDetecting available LLM providers...\x1b[0m");
+            let rt = tokio::runtime::Handle::current();
+            let providers = rt.block_on(rustant_core::detect_available_providers());
+
+            if providers.is_empty() {
+                println!("\x1b[33m  No providers detected.\x1b[0m");
+                println!();
+                println!("  Set API key environment variables:");
+                println!("    OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY");
+                println!("  Or start Ollama: ollama serve");
+            } else {
+                println!("  Found {} provider(s):", providers.len());
+                for p in &providers {
+                    let local = if p.is_local { " (local)" } else { "" };
+                    println!("    - {} / {}{}", p.provider_type, p.model, local);
+                }
+
+                if providers.len() >= 2 {
+                    println!();
+                    println!(
+                        "  \x1b[32m✓\x1b[0m Enough providers for a council ({} found).",
+                        providers.len()
+                    );
+                    println!("  Add to config.toml:");
+                    println!();
+                    println!("  [council]");
+                    println!("  enabled = true");
+                    for p in &providers {
+                        println!();
+                        println!("  [[council.members]]");
+                        println!("  provider = \"{}\"", p.provider_type);
+                        println!("  model = \"{}\"", p.model);
+                        if !p.api_key_env.is_empty() {
+                            println!("  api_key_env = \"{}\"", p.api_key_env);
+                        }
+                        if let Some(ref url) = p.base_url {
+                            println!("  base_url = \"{}\"", url);
+                        }
+                    }
+                } else {
+                    println!();
+                    println!("  \x1b[33m⚠\x1b[0m Need at least 2 providers for council.");
+                }
+            }
+        }
+        question => {
+            // Run deliberation.
+            let council_cfg = match &config.council {
+                Some(c) if c.enabled && c.members.len() >= 2 => c.clone(),
+                Some(c) if !c.enabled => {
+                    println!("\x1b[33m⚠\x1b[0m Council is disabled. Set enabled = true in config.");
+                    return;
+                }
+                Some(c) if c.members.len() < 2 => {
+                    println!(
+                        "\x1b[33m⚠\x1b[0m Council needs >= 2 members, got {}. Run /council detect.",
+                        c.members.len()
+                    );
+                    return;
+                }
+                _ => {
+                    println!("\x1b[33m⚠\x1b[0m Council not configured. Run /council detect first.");
+                    return;
+                }
+            };
+
+            println!("\x1b[1mCouncil Deliberation\x1b[0m");
+            println!("Question: {}", question);
+            println!();
+
+            let members = rustant_core::create_council_members(&council_cfg);
+            if members.len() < 2 {
+                println!("\x1b[31m✗\x1b[0m Failed to initialize enough council members.");
+                println!("  Check API keys and provider configuration.");
+                return;
+            }
+
+            let council = match rustant_core::PlanningCouncil::new(members, council_cfg) {
+                Ok(c) => c,
+                Err(e) => {
+                    println!("\x1b[31m✗\x1b[0m Failed to create council: {}", e);
+                    return;
+                }
+            };
+
+            let rt = tokio::runtime::Handle::current();
+            match rt.block_on(council.deliberate(question)) {
+                Ok(result) => {
+                    // Display member responses.
+                    println!("\x1b[1mMember Responses:\x1b[0m");
+                    for (i, resp) in result.member_responses.iter().enumerate() {
+                        let label = (b'A' + i as u8) as char;
+                        println!(
+                            "\n  \x1b[36m[{}] {} ({}, {}ms, ${:.4})\x1b[0m",
+                            label, resp.model_name, resp.provider, resp.latency_ms, resp.cost
+                        );
+                        for line in resp.response_text.lines().take(10) {
+                            println!("    {}", line);
+                        }
+                        if resp.response_text.lines().count() > 10 {
+                            println!(
+                                "    ... ({} more lines)",
+                                resp.response_text.lines().count() - 10
+                            );
+                        }
+                    }
+
+                    // Display peer reviews if any.
+                    if !result.peer_reviews.is_empty() {
+                        println!("\n\x1b[1mPeer Reviews:\x1b[0m");
+                        for review in &result.peer_reviews {
+                            let reviewed_label = (b'A' + review.reviewed_index as u8) as char;
+                            println!(
+                                "  {} reviewing [{}]: {}/10 — {}",
+                                review.reviewer_model,
+                                reviewed_label,
+                                review.score,
+                                review.reasoning
+                            );
+                        }
+                    }
+
+                    // Display synthesis.
+                    println!("\n\x1b[1;32mSynthesized Answer:\x1b[0m");
+                    println!("{}", result.synthesis);
+                    println!(
+                        "\n\x1b[90m(Total: {} responses, {} reviews, {}ms, ${:.4})\x1b[0m",
+                        result.member_responses.len(),
+                        result.peer_reviews.len(),
+                        result.total_latency_ms,
+                        result.total_cost
+                    );
+                }
+                Err(e) => {
+                    println!("\x1b[31m✗\x1b[0m Council deliberation failed: {}", e);
+                }
+            }
         }
     }
 }

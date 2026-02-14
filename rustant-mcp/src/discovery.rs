@@ -129,6 +129,27 @@ impl McpServerManager {
     }
 }
 
+/// Default configuration for Chrome DevTools MCP server.
+///
+/// Users can add this to their config.toml to enable Chrome DevTools automation:
+/// ```toml
+/// [[mcp_servers]]
+/// name = "chrome-devtools"
+/// command = "npx"
+/// args = ["chrome-devtools-mcp@latest"]
+/// auto_connect = true
+/// ```
+pub fn default_chrome_devtools_config() -> McpServerConfig {
+    McpServerConfig {
+        name: "chrome-devtools".to_string(),
+        command: "npx".to_string(),
+        args: vec!["-y".to_string(), "chrome-devtools-mcp@latest".to_string()],
+        working_dir: None,
+        env: HashMap::new(),
+        auto_connect: false, // User must opt-in
+    }
+}
+
 impl Default for McpServerManager {
     fn default() -> Self {
         Self::new()
@@ -240,5 +261,30 @@ mod tests {
         assert!(mgr.is_empty());
         assert_eq!(mgr.len(), 0);
         assert!(mgr.get_server("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_default_chrome_devtools_config() {
+        let config = super::default_chrome_devtools_config();
+        assert_eq!(config.name, "chrome-devtools");
+        assert_eq!(config.command, "npx");
+        assert_eq!(config.args, vec!["-y", "chrome-devtools-mcp@latest"]);
+        assert!(!config.auto_connect); // User must opt-in
+        assert!(config.env.is_empty());
+        assert!(config.working_dir.is_none());
+    }
+
+    #[test]
+    fn test_mcp_server_config_json_deserialization() {
+        let json_str = r#"{
+            "name": "chrome-devtools",
+            "command": "npx",
+            "args": ["chrome-devtools-mcp@latest"],
+            "auto_connect": true
+        }"#;
+        let config: McpServerConfig = serde_json::from_str(json_str).unwrap();
+        assert_eq!(config.name, "chrome-devtools");
+        assert_eq!(config.command, "npx");
+        assert!(config.auto_connect);
     }
 }

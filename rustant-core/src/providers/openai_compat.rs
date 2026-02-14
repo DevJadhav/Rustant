@@ -156,14 +156,22 @@ impl OpenAiCompatibleProvider {
             .as_ref()
             .map(|m| m.context_window)
             .unwrap_or(config.context_window);
-        let cost_input = meta
-            .as_ref()
-            .map(|m| m.input_cost_per_million / 1_000_000.0)
-            .unwrap_or(config.input_cost_per_million / 1_000_000.0);
-        let cost_output = meta
-            .as_ref()
-            .map(|m| m.output_cost_per_million / 1_000_000.0)
-            .unwrap_or(config.output_cost_per_million / 1_000_000.0);
+        // Use centralized model pricing first, then local meta, then config
+        let (cost_input, cost_output) = crate::providers::models::model_pricing(&config.model)
+            .map(|(i, o)| (i / 1_000_000.0, o / 1_000_000.0))
+            .unwrap_or_else(|| {
+                meta.as_ref()
+                    .map(|m| {
+                        (
+                            m.input_cost_per_million / 1_000_000.0,
+                            m.output_cost_per_million / 1_000_000.0,
+                        )
+                    })
+                    .unwrap_or((
+                        config.input_cost_per_million / 1_000_000.0,
+                        config.output_cost_per_million / 1_000_000.0,
+                    ))
+            });
         let supports_tools = meta.as_ref().map(|m| m.supports_tools).unwrap_or(true);
 
         Ok(Self {

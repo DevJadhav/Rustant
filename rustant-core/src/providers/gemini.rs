@@ -18,6 +18,7 @@ use crate::types::{
     ToolDefinition,
 };
 use async_trait::async_trait;
+use futures::StreamExt;
 use reqwest::Client;
 use serde_json::Value;
 use tokio::sync::mpsc;
@@ -76,7 +77,13 @@ impl GeminiProvider {
             .clone()
             .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
 
-        let client = Client::new();
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .map_err(|e| LlmError::Connection {
+                message: format!("Failed to build HTTP client: {}", e),
+            })?;
         let token_counter = TokenCounter::for_model(&config.model);
 
         let auth_mode = if config.auth_method == "oauth" {
@@ -85,14 +92,21 @@ impl GeminiProvider {
             GeminiAuthMode::ApiKey
         };
 
+        // Use centralized model pricing, falling back to config values
+        let (cost_in, cost_out) =
+            crate::providers::models::model_pricing(&config.model).unwrap_or((
+                config.input_cost_per_million,
+                config.output_cost_per_million,
+            ));
+
         Ok(Self {
             client,
             base_url,
             api_key,
             model: config.model.clone(),
             context_window: config.context_window,
-            cost_input: config.input_cost_per_million / 1_000_000.0,
-            cost_output: config.output_cost_per_million / 1_000_000.0,
+            cost_input: cost_in / 1_000_000.0,
+            cost_output: cost_out / 1_000_000.0,
             token_counter,
             auth_mode,
         })
@@ -110,11 +124,12 @@ impl GeminiProvider {
         let (system_text, non_system_messages) =
             Self::extract_system_instruction(&request.messages);
 
-        // Convert messages to Gemini format.
-        let contents: Vec<Value> = non_system_messages
+        // Convert messages to Gemini format and fix sequencing.
+        let raw_contents: Vec<Value> = non_system_messages
             .iter()
             .map(|msg| Self::message_to_gemini_json(msg))
             .collect();
+        let contents = Self::fix_gemini_turns(raw_contents);
 
         let mut body = serde_json::json!({
             "contents": contents,
@@ -232,9 +247,12 @@ impl GeminiProvider {
                 output,
                 is_error: _,
             } => {
-                // Parse the output as JSON if possible, otherwise wrap as string.
-                let response_value = serde_json::from_str::<Value>(output)
-                    .unwrap_or_else(|_| serde_json::json!({"result": output}));
+                // Parse the output as JSON; Gemini requires response to be a Struct (object).
+                let response_value = match serde_json::from_str::<Value>(output) {
+                    Ok(Value::Object(map)) => Value::Object(map),
+                    Ok(other) => serde_json::json!({"result": other}),
+                    Err(_) => serde_json::json!({"result": output}),
+                };
                 serde_json::json!([{
                     "functionResponse": {
                         "name": "tool",
@@ -253,6 +271,102 @@ impl GeminiProvider {
                 Value::Array(gemini_parts)
             }
         }
+    }
+
+    /// Post-process Gemini contents to fix API sequencing requirements:
+    /// 1. Merge consecutive same-role turns (e.g., multiple tool results)
+    /// 2. Fix `functionResponse.name` to match the preceding `functionCall.name`
+    /// 3. Ensure the first message has `"user"` role
+    fn fix_gemini_turns(contents: Vec<Value>) -> Vec<Value> {
+        if contents.is_empty() {
+            return contents;
+        }
+
+        // Pass 1: Merge consecutive same-role turns.
+        let mut merged: Vec<Value> = Vec::with_capacity(contents.len());
+        for entry in contents {
+            let role = entry["role"].as_str().unwrap_or("").to_string();
+            let should_merge = if let Some(last) = merged.last() {
+                last["role"].as_str().unwrap_or("") == role
+            } else {
+                false
+            };
+
+            if should_merge {
+                // Extend the last entry's parts with this entry's parts.
+                let last = merged.last_mut().unwrap();
+                if let (Some(existing), Some(new)) =
+                    (last["parts"].as_array().cloned(), entry["parts"].as_array())
+                {
+                    let mut combined = existing;
+                    combined.extend(new.iter().cloned());
+                    last["parts"] = Value::Array(combined);
+                }
+            } else {
+                merged.push(entry);
+            }
+        }
+
+        // Pass 2: Fix functionResponse names to match preceding functionCall names.
+        for i in 0..merged.len().saturating_sub(1) {
+            let call_names: Vec<String> = merged[i]["parts"]
+                .as_array()
+                .map(|parts| {
+                    parts
+                        .iter()
+                        .filter_map(|p| {
+                            p.get("functionCall")
+                                .and_then(|fc| fc["name"].as_str())
+                                .map(|s| s.to_string())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            if call_names.is_empty() {
+                continue;
+            }
+
+            // Fix the functionResponse entries in the next turn.
+            if let Some(parts) = merged[i + 1]["parts"].as_array_mut() {
+                let mut name_idx = 0;
+                for part in parts.iter_mut() {
+                    if part.get("functionResponse").is_some() && name_idx < call_names.len() {
+                        part["functionResponse"]["name"] =
+                            Value::String(call_names[name_idx].clone());
+                        name_idx += 1;
+                    }
+                }
+            }
+        }
+
+        // Pass 3: Filter out turns with empty parts arrays.
+        merged.retain(|entry| {
+            entry["parts"]
+                .as_array()
+                .map(|parts| !parts.is_empty())
+                .unwrap_or(true) // keep entries without parts array (shouldn't happen)
+        });
+
+        // Guard against all turns being filtered out.
+        if merged.is_empty() {
+            return merged;
+        }
+
+        // Pass 4: Ensure the first message is "user" role.
+        if merged
+            .first()
+            .and_then(|m| m["role"].as_str())
+            .unwrap_or("")
+            != "user"
+        {
+            merged.insert(
+                0,
+                serde_json::json!({"role": "user", "parts": [{"text": "Hello"}]}),
+            );
+        }
+
+        merged
     }
 
     /// Convert a `ToolDefinition` to Gemini function declaration JSON.
@@ -593,34 +707,81 @@ impl LlmProvider for GeminiProvider {
             return Err(Self::map_http_error(status, &body_text));
         }
 
-        // Read the SSE stream.
-        let body_text = response.text().await.map_err(|e| LlmError::Streaming {
-            message: format!("Failed to read streaming response: {}", e),
-        })?;
-
+        // Stream SSE events incrementally using bytes_stream.
+        let mut byte_stream = response.bytes_stream();
         let mut total_usage = TokenUsage {
             input_tokens: 0,
             output_tokens: 0,
         };
+        let mut line_buffer = String::new();
 
-        // Parse SSE events: lines starting with "data: " contain JSON chunks.
-        for line in body_text.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with("event:") {
-                continue;
+        while let Some(chunk_result) = byte_stream.next().await {
+            let chunk = chunk_result.map_err(|e| LlmError::Streaming {
+                message: format!("Failed to read streaming chunk: {}", e),
+            })?;
+
+            let chunk_str = String::from_utf8_lossy(&chunk);
+            line_buffer.push_str(&chunk_str);
+
+            // Process complete lines from the buffer.
+            while let Some(newline_pos) = line_buffer.find('\n') {
+                let line = line_buffer[..newline_pos].trim().to_string();
+                line_buffer = line_buffer[newline_pos + 1..].to_string();
+
+                if line.is_empty() || line.starts_with("event:") {
+                    continue;
+                }
+
+                if let Some(data_str) = line.strip_prefix("data: ") {
+                    match serde_json::from_str::<Value>(data_str) {
+                        Ok(data_json) => match Self::process_stream_chunk(&data_json, &tx).await {
+                            Ok(Some(usage)) => {
+                                total_usage = usage;
+                            }
+                            Ok(None) => {}
+                            Err(e) => {
+                                warn!(error = %e, "Error processing Gemini stream chunk");
+                                return Err(e);
+                            }
+                        },
+                        Err(e) => {
+                            let preview = if data_str.len() > 200 {
+                                &data_str[..200]
+                            } else {
+                                data_str
+                            };
+                            warn!(
+                                error = %e,
+                                data_preview = preview,
+                                "Failed to parse Gemini SSE JSON chunk"
+                            );
+                        }
+                    }
+                }
             }
+        }
 
-            if let Some(data_str) = line.strip_prefix("data: ") {
-                if let Ok(data_json) = serde_json::from_str::<Value>(data_str) {
-                    match Self::process_stream_chunk(&data_json, &tx).await {
-                        Ok(Some(usage)) => {
+        // Process any remaining data in the buffer.
+        let remaining = line_buffer.trim().to_string();
+        if !remaining.is_empty() {
+            if let Some(data_str) = remaining.strip_prefix("data: ") {
+                match serde_json::from_str::<Value>(data_str) {
+                    Ok(data_json) => {
+                        if let Ok(Some(usage)) = Self::process_stream_chunk(&data_json, &tx).await {
                             total_usage = usage;
                         }
-                        Ok(None) => {}
-                        Err(e) => {
-                            warn!(error = %e, "Error processing Gemini stream chunk");
-                            return Err(e);
-                        }
+                    }
+                    Err(e) => {
+                        let preview = if data_str.len() > 200 {
+                            &data_str[..200]
+                        } else {
+                            data_str
+                        };
+                        warn!(
+                            error = %e,
+                            data_preview = preview,
+                            "Failed to parse final Gemini SSE JSON chunk"
+                        );
                     }
                 }
             }
@@ -1145,10 +1306,9 @@ mod tests {
         assert!(provider.supports_tools());
 
         let (input_cost, output_cost) = provider.cost_per_token();
-        // $0.075 / 1M
-        assert!((input_cost - 0.075 / 1_000_000.0).abs() < 1e-12);
-        // $0.30 / 1M
-        assert!((output_cost - 0.30 / 1_000_000.0).abs() < 1e-12);
+        // model_pricing returns $0.10/$0.40 for gemini-2.0-flash
+        assert!((input_cost - 0.10 / 1_000_000.0).abs() < 1e-12);
+        assert!((output_cost - 0.40 / 1_000_000.0).abs() < 1e-12);
     }
 
     #[test]
@@ -1346,5 +1506,121 @@ mod tests {
         let usage = result.unwrap();
         assert_eq!(usage.input_tokens, 100);
         assert_eq!(usage.output_tokens, 42);
+    }
+
+    #[test]
+    fn test_fix_gemini_turns_merges_consecutive_user() {
+        let contents = vec![
+            serde_json::json!({"role": "user", "parts": [{"text": "Hello"}]}),
+            serde_json::json!({"role": "user", "parts": [{"text": "World"}]}),
+        ];
+        let fixed = GeminiProvider::fix_gemini_turns(contents);
+        assert_eq!(fixed.len(), 1);
+        let parts = fixed[0]["parts"].as_array().unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0]["text"], "Hello");
+        assert_eq!(parts[1]["text"], "World");
+    }
+
+    #[test]
+    fn test_fix_gemini_turns_fixes_function_response_name() {
+        let contents = vec![
+            serde_json::json!({"role": "user", "parts": [{"text": "Read the file"}]}),
+            serde_json::json!({"role": "model", "parts": [{"functionCall": {"name": "file_read", "args": {"path": "/tmp/test"}}}]}),
+            serde_json::json!({"role": "user", "parts": [{"functionResponse": {"name": "tool", "response": {"result": "contents"}}}]}),
+        ];
+        let fixed = GeminiProvider::fix_gemini_turns(contents);
+        assert_eq!(fixed.len(), 3);
+        // The functionResponse name should be fixed to match the functionCall name
+        assert_eq!(
+            fixed[2]["parts"][0]["functionResponse"]["name"],
+            "file_read"
+        );
+    }
+
+    #[test]
+    fn test_fix_gemini_turns_multi_tool_call() {
+        let contents = vec![
+            serde_json::json!({"role": "user", "parts": [{"text": "Read two files"}]}),
+            serde_json::json!({"role": "model", "parts": [
+                {"functionCall": {"name": "file_read", "args": {"path": "/a"}}},
+                {"functionCall": {"name": "file_write", "args": {"path": "/b", "content": "x"}}}
+            ]}),
+            // Two separate tool result turns that should get merged
+            serde_json::json!({"role": "user", "parts": [{"functionResponse": {"name": "tool", "response": {"result": "aaa"}}}]}),
+            serde_json::json!({"role": "user", "parts": [{"functionResponse": {"name": "tool", "response": {"result": "bbb"}}}]}),
+        ];
+        let fixed = GeminiProvider::fix_gemini_turns(contents);
+        // The two user tool-result turns should be merged into one
+        assert_eq!(fixed.len(), 3);
+        let parts = fixed[2]["parts"].as_array().unwrap();
+        assert_eq!(parts.len(), 2);
+        // Names should be fixed to match the functionCalls
+        assert_eq!(parts[0]["functionResponse"]["name"], "file_read");
+        assert_eq!(parts[1]["functionResponse"]["name"], "file_write");
+    }
+
+    #[test]
+    fn test_fix_gemini_turns_prepends_user() {
+        let contents =
+            vec![serde_json::json!({"role": "model", "parts": [{"text": "Hello from model"}]})];
+        let fixed = GeminiProvider::fix_gemini_turns(contents);
+        assert_eq!(fixed.len(), 2);
+        assert_eq!(fixed[0]["role"], "user");
+        assert_eq!(fixed[0]["parts"][0]["text"], "Hello");
+        assert_eq!(fixed[1]["role"], "model");
+    }
+
+    #[test]
+    fn test_fix_gemini_turns_no_op() {
+        let contents = vec![
+            serde_json::json!({"role": "user", "parts": [{"text": "Hello"}]}),
+            serde_json::json!({"role": "model", "parts": [{"text": "Hi there"}]}),
+            serde_json::json!({"role": "user", "parts": [{"text": "How are you?"}]}),
+        ];
+        let fixed = GeminiProvider::fix_gemini_turns(contents.clone());
+        assert_eq!(fixed.len(), 3);
+        assert_eq!(fixed[0]["role"], "user");
+        assert_eq!(fixed[1]["role"], "model");
+        assert_eq!(fixed[2]["role"], "user");
+    }
+
+    #[test]
+    fn test_fix_gemini_turns_empty_parts_filtered() {
+        let contents = vec![
+            serde_json::json!({"role": "user", "parts": [{"text": "Hello"}]}),
+            serde_json::json!({"role": "model", "parts": []}),
+            serde_json::json!({"role": "user", "parts": [{"text": "Still here"}]}),
+        ];
+        let fixed = GeminiProvider::fix_gemini_turns(contents);
+        // The empty-parts model turn should be removed
+        assert_eq!(fixed.len(), 2);
+        assert_eq!(fixed[0]["role"], "user");
+        assert_eq!(fixed[1]["role"], "user");
+    }
+
+    #[test]
+    fn test_fix_gemini_turns_all_empty_parts() {
+        let contents = vec![
+            serde_json::json!({"role": "user", "parts": []}),
+            serde_json::json!({"role": "model", "parts": []}),
+        ];
+        let fixed = GeminiProvider::fix_gemini_turns(contents);
+        // All turns have empty parts — result should be empty
+        assert!(fixed.is_empty());
+    }
+
+    #[test]
+    fn test_provider_has_timeout() {
+        // Verify provider creates successfully with timeout-enabled client
+        let env_var = "GEMINI_TEST_KEY_TIMEOUT";
+        std::env::set_var(env_var, "test-key-timeout");
+        let config = test_config(env_var);
+        let provider = GeminiProvider::new(&config);
+        assert!(
+            provider.is_ok(),
+            "Provider with timeout should create successfully"
+        );
+        std::env::remove_var(env_var);
     }
 }

@@ -20,7 +20,7 @@ pub mod wake;
 pub mod pipeline;
 
 // Re-export core types (always available)
-pub use audio_io::audio_convert;
+pub use audio_io::{audio_convert, play_audio, record_audio_chunk};
 pub use stt::{MockSttProvider, OpenAiSttProvider, SttProvider};
 pub use tts::{MockTtsProvider, OpenAiTtsProvider, TtsProvider};
 pub use types::{

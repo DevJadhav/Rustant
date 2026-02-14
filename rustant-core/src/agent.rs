@@ -138,6 +138,11 @@ pub trait AgentCallback: Send + Sync {
         String::new()
     }
 
+    /// Called at the start of each ReAct loop iteration with the current iteration
+    /// number and the configured maximum. Used by the TUI sidebar to show live progress.
+    /// Default is a no-op for backward compatibility.
+    async fn on_iteration_start(&self, _iteration: usize, _max_iterations: usize) {}
+
     /// Called before an LLM call with estimated token count and cost.
     /// Only called when estimated cost exceeds $0.05 to avoid noise.
     /// Default is a no-op for backward compatibility.
@@ -361,6 +366,11 @@ impl Agent {
                 iteration = self.state.iteration,
                 "Agent loop iteration"
             );
+
+            // Notify about iteration progress for live UI updates
+            self.callback
+                .on_iteration_start(self.state.iteration, self.state.max_iterations)
+                .await;
 
             // --- THINK ---
             self.state.status = AgentStatus::Thinking;
@@ -1602,9 +1612,67 @@ impl Agent {
     /// a specific macOS or dedicated tool. This prevents the LLM from
     /// choosing generic tools (shell_exec, document_read) for tasks that
     /// have purpose-built tools.
+    /// Match a task to a known workflow template and return a routing hint.
+    /// This is platform-independent (workflows work on all platforms).
+    fn workflow_routing_hint(lower: &str) -> Option<String> {
+        let workflow = if lower.contains("security scan")
+            || lower.contains("security audit")
+            || lower.contains("vulnerability")
+        {
+            "security_scan"
+        } else if lower.contains("code review") {
+            "code_review"
+        } else if lower.contains("refactor") && !lower.contains("file") {
+            "refactor"
+        } else if lower.contains("generate test")
+            || lower.contains("write test")
+            || lower.contains("test generation")
+        {
+            "test_generation"
+        } else if lower.contains("generate doc") || lower.contains("write docs") {
+            "documentation"
+        } else if lower.contains("update dependenc") || lower.contains("dependency update") {
+            "dependency_update"
+        } else if lower.contains("deploy") {
+            "deployment"
+        } else if lower.contains("incident response") {
+            "incident_response"
+        } else if lower.contains("morning briefing") || lower.contains("daily briefing") {
+            "morning_briefing"
+        } else if lower.contains("pr review") || lower.contains("pull request review") {
+            "pr_review"
+        } else if lower.contains("dependency audit") || lower.contains("audit dependenc") {
+            "dependency_audit"
+        } else if lower.contains("changelog") || lower.contains("release notes") {
+            "changelog"
+        } else if lower.contains("end of day") || lower.contains("eod summary") {
+            "end_of_day_summary"
+        } else if lower.contains("email triage") || lower.contains("triage email") {
+            "email_triage"
+        } else if lower.contains("meeting record") {
+            "meeting_recorder"
+        } else if lower.contains("app automation") || lower.contains("automate app") {
+            "app_automation"
+        } else {
+            return None;
+        };
+
+        Some(format!(
+            "WORKFLOW ROUTING: For this task, run the '{}' workflow. \
+             Use shell_exec to run: `rustant workflow run {}` — or accomplish \
+             the task directly step by step using available tools.",
+            workflow, workflow
+        ))
+    }
+
     #[cfg(target_os = "macos")]
     fn tool_routing_hint(task: &str) -> Option<String> {
         let lower = task.to_lowercase();
+
+        // Workflow routing (platform-independent, checked first)
+        if let Some(hint) = Self::workflow_routing_hint(&lower) {
+            return Some(hint);
+        }
 
         let tool_hint = if lower.contains("clipboard")
             || lower.contains("paste")
@@ -1685,10 +1753,11 @@ impl Agent {
         Some(format!("TOOL ROUTING: {}", tool_hint))
     }
 
-    /// Non-macOS fallback — no macOS-specific tool routing.
+    /// Non-macOS fallback — only workflow routing (no macOS-specific tool routing).
     #[cfg(not(target_os = "macos"))]
-    fn tool_routing_hint(_task: &str) -> Option<String> {
-        None
+    fn tool_routing_hint(task: &str) -> Option<String> {
+        let lower = task.to_lowercase();
+        Self::workflow_routing_hint(&lower)
     }
 
     /// Auto-correct a tool call when the LLM is stuck calling the wrong tool.
@@ -2057,6 +2126,38 @@ impl Agent {
             })
             .collect();
         top.join(", ")
+    }
+
+    /// Run a council deliberation if configured and the task is appropriate.
+    ///
+    /// Returns `Some(CouncilResult)` if council was used, `None` if skipped.
+    /// Falls back gracefully if council fails.
+    pub async fn think_with_council(
+        &self,
+        task: &str,
+        council: &crate::council::PlanningCouncil,
+    ) -> Option<crate::council::CouncilResult> {
+        if !crate::council::should_use_council(task) {
+            debug!(task, "Skipping council — task is not a planning task");
+            return None;
+        }
+
+        info!(task, "Using council deliberation for planning task");
+        match council.deliberate(task).await {
+            Ok(result) => {
+                info!(
+                    responses = result.member_responses.len(),
+                    reviews = result.peer_reviews.len(),
+                    cost = format!("${:.4}", result.total_cost),
+                    "Council deliberation succeeded"
+                );
+                Some(result)
+            }
+            Err(e) => {
+                warn!(error = %e, "Council deliberation failed, falling back to single model");
+                None
+            }
+        }
     }
 
     /// Compact the conversation context by summarizing older messages.

@@ -405,6 +405,8 @@ mod tests {
             name: "GPT-4o".to_string(),
             context_window: Some(128_000),
             is_chat_model: true,
+            input_cost_per_million: None,
+            output_cost_per_million: None,
         };
         let provider = ProviderChoice {
             name: "openai".to_string(),
@@ -433,6 +435,8 @@ mod tests {
             name: "Claude Sonnet 4".to_string(),
             context_window: Some(200_000),
             is_chat_model: true,
+            input_cost_per_million: None,
+            output_cost_per_million: None,
         };
         let provider = ProviderChoice {
             name: "anthropic".to_string(),
@@ -468,6 +472,8 @@ mod tests {
             name: "GPT-4o".to_string(),
             context_window: Some(128_000),
             is_chat_model: true,
+            input_cost_per_million: None,
+            output_cost_per_million: None,
         };
 
         // Store credential
@@ -497,6 +503,8 @@ mod tests {
             name: "Llama 3".to_string(),
             context_window: None,
             is_chat_model: true,
+            input_cost_per_million: None,
+            output_cost_per_million: None,
         };
         let provider = ProviderChoice {
             name: "custom".to_string(),

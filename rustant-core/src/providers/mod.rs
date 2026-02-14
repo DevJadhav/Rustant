@@ -216,6 +216,42 @@ pub async fn create_provider_with_auth(
     )))
 }
 
+/// Create LLM providers for council members.
+///
+/// Iterates over the council member configs, creates a provider for each,
+/// and logs warnings for any that fail to initialize.
+pub fn create_council_members(
+    config: &crate::config::CouncilConfig,
+) -> Vec<(Arc<dyn LlmProvider>, crate::config::CouncilMemberConfig)> {
+    let mut members = Vec::new();
+
+    for member_cfg in &config.members {
+        let llm_config = crate::config::LlmConfig {
+            provider: member_cfg.provider.clone(),
+            model: member_cfg.model.clone(),
+            api_key_env: member_cfg.api_key_env.clone(),
+            base_url: member_cfg.base_url.clone(),
+            ..Default::default()
+        };
+
+        match create_single_provider(&llm_config) {
+            Ok(provider) => {
+                members.push((provider, member_cfg.clone()));
+            }
+            Err(e) => {
+                tracing::warn!(
+                    provider = %member_cfg.provider,
+                    model = %member_cfg.model,
+                    error = %e,
+                    "Skipping council member that failed to initialize"
+                );
+            }
+        }
+    }
+
+    members
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

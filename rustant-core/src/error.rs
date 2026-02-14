@@ -353,6 +353,9 @@ pub enum VoiceError {
 
     #[error("Voice provider authentication failed: {provider}")]
     AuthFailed { provider: String },
+
+    #[error("Audio I/O error: {message}")]
+    AudioError { message: String },
 }
 
 /// Trait providing actionable recovery guidance for errors.

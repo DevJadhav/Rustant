@@ -339,6 +339,30 @@ impl CommandRegistry {
             detailed_help: Some("Show all keyboard shortcuts grouped by context.\n\nIn TUI mode, press F1 for a floating overlay.\n\nGlobal:    Ctrl+C/D quit, Ctrl+L scroll to bottom\nOverlays:  Ctrl+E explanation panel, Ctrl+T task board\nApproval:  y=approve, n=deny, a=approve all, d=diff, ?=help\nVim mode:  i/a=insert, Esc=normal, /=search, q=quit"),
         });
 
+        // UI commands
+        self.register(CommandInfo {
+            name: "/verbose",
+            aliases: &["/v"],
+            description: "Toggle verbose output (show/hide tool execution details)",
+            usage: "/verbose",
+            category: CommandCategory::Ui,
+            tui_only: false,
+            detailed_help: Some(
+                "Toggle verbose mode on or off.\n\n\
+                 When verbose is OFF (default):\n  \
+                 - Tool execution messages are hidden\n  \
+                 - Status changes are hidden\n  \
+                 - Token usage updates are hidden\n  \
+                 - Decision explanations are hidden\n  \
+                 - Only assistant responses, approvals, and budget warnings are shown\n\n\
+                 When verbose is ON:\n  \
+                 - All tool execution details are shown\n  \
+                 - Token usage is updated in real-time\n  \
+                 - Decision explanations are displayed\n\n\
+                 The final task summary line (iterations, tokens, cost) is always shown.",
+            ),
+        });
+
         // TUI-only commands
         self.register(CommandInfo {
             name: "/theme",
@@ -522,6 +546,145 @@ impl CommandRegistry {
             ),
         });
 
+        // ── CLI Subcommand Parity ──
+        self.register(CommandInfo {
+            name: "/channel",
+            aliases: &["/ch"],
+            description: "Manage messaging channels",
+            usage: "/channel list|setup [name]|test <name>",
+            category: CommandCategory::System,
+            tui_only: false,
+            detailed_help: Some(
+                "Manage messaging channel integrations.\n\n\
+                 Usage:\n  /channel list          — List all configured channels\n  \
+                 /channel setup [name]  — Interactive channel setup wizard\n  \
+                 /channel test <name>   — Test a channel connection\n\n\
+                 Equivalent to: rustant channel <subcommand>",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/workflow",
+            aliases: &["/wf"],
+            description: "Manage workflows (list, show, run)",
+            usage: "/workflow list|show|run <name> [key=val]",
+            category: CommandCategory::System,
+            tui_only: false,
+            detailed_help: Some(
+                "Manage and run workflow templates.\n\n\
+                 Usage:\n  /workflow list              — List available workflows\n  \
+                 /workflow show <name>       — Show workflow details\n  \
+                 /workflow run <name> [k=v]  — Run a workflow with optional inputs\n  \
+                 /workflow runs              — List active runs\n  \
+                 /workflow status <id>       — Show run status\n  \
+                 /workflow cancel <id>       — Cancel a running workflow\n\n\
+                 Equivalent to: rustant workflow <subcommand>",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/voice",
+            aliases: &[],
+            description: "Synthesize text to speech",
+            usage: "/voice speak <text> [-v voice]",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "Synthesize text to speech via OpenAI TTS.\n\n\
+                 Usage:\n  /voice speak <text>         — Speak text with default voice\n  \
+                 /voice speak <text> -v nova  — Use a specific voice\n\n\
+                 Requires OPENAI_API_KEY. Equivalent to: rustant voice speak <text>",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/browser",
+            aliases: &[],
+            description: "Browser automation operations",
+            usage: "/browser test|launch|connect|status",
+            category: CommandCategory::System,
+            tui_only: false,
+            detailed_help: Some(
+                "Control browser automation.\n\n\
+                 Usage:\n  /browser test [url]     — Test by navigating to a URL\n  \
+                 /browser launch [port]  — Launch Chrome with remote debugging\n  \
+                 /browser connect [port] — Connect to existing Chrome instance\n  \
+                 /browser status         — Show connection status\n\n\
+                 Equivalent to: rustant browser <subcommand>",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/auth",
+            aliases: &[],
+            description: "Manage OAuth authentication",
+            usage: "/auth status|login|logout <provider>",
+            category: CommandCategory::System,
+            tui_only: false,
+            detailed_help: Some(
+                "Manage OAuth authentication for LLM providers and channels.\n\n\
+                 Usage:\n  /auth status            — Show auth status for all providers\n  \
+                 /auth login <provider>  — Start OAuth login flow\n  \
+                 /auth logout <provider> — Remove stored tokens\n\n\
+                 Equivalent to: rustant auth <subcommand>",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/canvas",
+            aliases: &[],
+            description: "Canvas operations (push, clear, snapshot)",
+            usage: "/canvas push <type> <content>|clear|snapshot",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "Push content to or manage the canvas.\n\n\
+                 Usage:\n  /canvas push <type> <content> — Push content to canvas\n  \
+                 /canvas clear                  — Clear the canvas\n  \
+                 /canvas snapshot               — Show canvas snapshot\n\n\
+                 Types: html, markdown, code, chart, table, form, image, diagram\n\
+                 Equivalent to: rustant canvas <subcommand>",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/skill",
+            aliases: &[],
+            description: "Manage skills (SKILL.md files)",
+            usage: "/skill list|info|validate <path>",
+            category: CommandCategory::System,
+            tui_only: false,
+            detailed_help: Some(
+                "Manage SKILL.md skill definitions.\n\n\
+                 Usage:\n  /skill list              — List loaded skills\n  \
+                 /skill info <path>       — Show skill details\n  \
+                 /skill validate <path>   — Validate a skill file\n\n\
+                 Equivalent to: rustant skill <subcommand>",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/plugin",
+            aliases: &[],
+            description: "Manage plugins",
+            usage: "/plugin list|info <name>",
+            category: CommandCategory::System,
+            tui_only: false,
+            detailed_help: Some(
+                "Manage native plugins.\n\n\
+                 Usage:\n  /plugin list        — List discovered plugins\n  \
+                 /plugin info <name> — Show plugin info\n\n\
+                 Equivalent to: rustant plugin <subcommand>",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/update",
+            aliases: &[],
+            description: "Check for or install updates",
+            usage: "/update check|install",
+            category: CommandCategory::System,
+            tui_only: false,
+            detailed_help: Some(
+                "Check for and install Rustant updates.\n\n\
+                 Usage:\n  /update check    — Check for available updates\n  \
+                 /update install  — Download and install the latest version\n\n\
+                 Equivalent to: rustant update <subcommand>",
+            ),
+        });
+
         // ── Scheduler ──
         self.register(CommandInfo {
             name: "/schedule",
@@ -541,6 +704,26 @@ impl CommandRegistry {
                  0 0 17 * * * *           — 5 PM daily\n  \
                  0 30 9 * * SAT *         — 9:30 AM Saturdays\n\n\
                  Configure in .rustant/config.toml under [scheduler].",
+            ),
+        });
+
+        // ── LLM Council ──
+        self.register(CommandInfo {
+            name: "/council",
+            aliases: &[],
+            description: "Multi-model LLM council deliberation",
+            usage: "/council [question|status|detect]",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "Run multi-model deliberation for planning tasks.\n\n\
+                 Usage:\n  /council <question>    — Run council deliberation\n  \
+                 /council status        — Show council config and members\n  \
+                 /council detect        — Auto-detect available providers\n\n\
+                 Requires 2+ LLM providers (API keys or Ollama models).\n\
+                 Configure in .rustant/config.toml under [council].\n\n\
+                 Note: Questions are sent to ALL configured providers.\n\
+                 Be mindful of data privacy when using multiple cloud providers.",
             ),
         });
     }
@@ -738,10 +921,10 @@ mod tests {
     #[test]
     fn test_register_defaults_populates() {
         let registry = CommandRegistry::with_defaults();
-        // We have 32 commands registered (25 core + 7 TUI-only)
+        // We have 41 commands registered (25 core + 7 TUI-only + 9 CLI parity)
         assert!(
-            registry.len() >= 32,
-            "Expected at least 32 commands, got {}",
+            registry.len() >= 42,
+            "Expected at least 42 commands, got {}",
             registry.len()
         );
     }

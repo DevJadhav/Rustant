@@ -16,7 +16,7 @@ use crate::tui::widgets::markdown::SyntaxHighlighter;
 use crate::tui::widgets::progress_bar::{render_progress_bar, ProgressState};
 use crate::tui::widgets::replay_panel::{render_replay_panel, ReplayPanel};
 use crate::tui::widgets::sidebar::{render_sidebar, FileEntry, FileStatus, SidebarData};
-use crate::tui::widgets::status_bar::{render_status_bar, InputMode};
+use crate::tui::widgets::status_bar::{render_status_bar, InputMode, StatusBarData};
 use crate::tui::widgets::task_board::{render_task_board, TaskBoard};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::layout::{Constraint, Layout};
@@ -85,6 +85,9 @@ pub struct App {
     // Multi-Agent Task Board
     pub task_board: TaskBoard,
     pub keys_overlay: KeysOverlay,
+
+    // Status bar metrics
+    pub status_bar_data: StatusBarData,
 
     // App state
     pub should_quit: bool,
@@ -161,6 +164,10 @@ impl App {
             progress_rx,
             task_board: TaskBoard::new(),
             keys_overlay: KeysOverlay::new(),
+            status_bar_data: StatusBarData {
+                context_window: config.llm.context_window,
+                ..Default::default()
+            },
             should_quit: false,
             is_processing: false,
             vim_mode,
@@ -324,7 +331,13 @@ impl App {
         self.input.render(frame, input_area);
 
         // Status bar
-        render_status_bar(frame, status_area, self.mode, &self.theme);
+        render_status_bar(
+            frame,
+            status_area,
+            self.mode,
+            &self.theme,
+            &self.status_bar_data,
+        );
 
         // Popups (rendered last, on top)
         if self.autocomplete.is_active() {
@@ -2162,6 +2175,8 @@ impl App {
                         self.header.is_streaming = false;
                         self.header.tokens_used = self.agent.brain().total_usage().total();
                         self.header.cost_usd = self.agent.brain().total_cost().total();
+                        self.status_bar_data.tokens_used = self.agent.brain().total_usage().total();
+                        self.status_bar_data.cost_usd = self.agent.brain().total_cost().total();
                     }
                     AgentStatus::Thinking => {
                         self.header.is_streaming = true;
@@ -2172,6 +2187,15 @@ impl App {
             TuiEvent::UsageUpdate { usage, cost } => {
                 self.header.tokens_used = usage.total();
                 self.header.cost_usd = cost.total();
+                self.status_bar_data.tokens_used = usage.total();
+                self.status_bar_data.cost_usd = cost.total();
+            }
+            TuiEvent::IterationUpdate {
+                iteration,
+                max_iterations,
+            } => {
+                self.sidebar.iteration = iteration;
+                self.sidebar.max_iterations = max_iterations;
             }
             TuiEvent::DecisionExplanation(explanation) => {
                 // Display a compact decision trace in the conversation
@@ -2543,6 +2567,8 @@ impl App {
         self.header.is_streaming = false;
         self.header.tokens_used = self.agent.brain().total_usage().total();
         self.header.cost_usd = self.agent.brain().total_cost().total();
+        self.status_bar_data.tokens_used = self.agent.brain().total_usage().total();
+        self.status_bar_data.cost_usd = self.agent.brain().total_cost().total();
         self.sidebar.iteration = 0;
         Ok(result)
     }

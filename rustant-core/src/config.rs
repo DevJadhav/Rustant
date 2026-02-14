@@ -76,6 +76,12 @@ pub struct AgentConfig {
     /// Optional meeting recording and transcription configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub meeting: Option<MeetingConfig>,
+    /// Optional LLM Council configuration (multi-model deliberation).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub council: Option<CouncilConfig>,
+    /// External MCP server configurations (e.g., Chrome DevTools MCP).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_servers: Vec<ExternalMcpServerConfig>,
 }
 
 /// Meeting recording and transcription configuration.
@@ -112,6 +118,36 @@ impl Default for MeetingConfig {
             auto_summarize: true,
         }
     }
+}
+
+/// Configuration for an external MCP server (e.g., Chrome DevTools MCP).
+///
+/// Example TOML:
+/// ```toml
+/// [[mcp_servers]]
+/// name = "chrome-devtools"
+/// command = "npx"
+/// args = ["chrome-devtools-mcp@latest"]
+/// auto_connect = true
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExternalMcpServerConfig {
+    /// Server name (used as identifier).
+    pub name: String,
+    /// Command to start the server.
+    pub command: String,
+    /// Arguments to pass to the command.
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Working directory for the server process.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<PathBuf>,
+    /// Environment variables to set.
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    /// Whether to auto-connect on startup.
+    #[serde(default = "default_true")]
+    pub auto_connect: bool,
 }
 
 /// Configuration for the workflow engine.
@@ -925,6 +961,9 @@ pub struct UiConfig {
     pub show_cost: bool,
     /// Whether to use the TUI (false = simple REPL).
     pub use_tui: bool,
+    /// Whether verbose output is enabled (shows tool execution details).
+    #[serde(default)]
+    pub verbose: bool,
 }
 
 impl Default for UiConfig {
@@ -933,7 +972,8 @@ impl Default for UiConfig {
             theme: "dark".to_string(),
             vim_mode: false,
             show_cost: true,
-            use_tui: false, // Start with REPL in Phase 0
+            use_tui: true,
+            verbose: false,
         }
     }
 }
@@ -1004,6 +1044,113 @@ impl Default for KnowledgeConfig {
             max_rules: 20,
             min_entries_for_distillation: 3,
             knowledge_path: None,
+        }
+    }
+}
+
+// --- LLM Council Configuration ---
+
+/// Voting strategy for the LLM council.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VotingStrategy {
+    /// Chairman model synthesizes all member responses into a final answer (default).
+    #[default]
+    ChairmanSynthesis,
+    /// Pick the response with the highest peer review score.
+    HighestScore,
+    /// Extract and combine consensus elements from all responses.
+    MajorityConsensus,
+}
+
+impl std::fmt::Display for VotingStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VotingStrategy::ChairmanSynthesis => write!(f, "chairman_synthesis"),
+            VotingStrategy::HighestScore => write!(f, "highest_score"),
+            VotingStrategy::MajorityConsensus => write!(f, "majority_consensus"),
+        }
+    }
+}
+
+/// Configuration for a single LLM council member.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CouncilMemberConfig {
+    /// Provider name: "openai", "anthropic", "gemini", "ollama".
+    pub provider: String,
+    /// Model identifier (e.g., "gpt-4o", "claude-sonnet-4-20250514").
+    pub model: String,
+    /// Environment variable name containing the API key (empty for Ollama localhost).
+    #[serde(default)]
+    pub api_key_env: String,
+    /// Optional base URL override (e.g., "http://127.0.0.1:11434/v1" for Ollama).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// Voting weight for this member (default 1.0).
+    #[serde(default = "default_weight")]
+    pub weight: f64,
+}
+
+fn default_weight() -> f64 {
+    1.0
+}
+
+impl Default for CouncilMemberConfig {
+    fn default() -> Self {
+        Self {
+            provider: "openai".to_string(),
+            model: "gpt-4o".to_string(),
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            base_url: None,
+            weight: 1.0,
+        }
+    }
+}
+
+/// Configuration for the LLM Council (multi-model deliberation).
+///
+/// Inspired by [karpathy/llm-council](https://github.com/karpathy/llm-council).
+/// When enabled and configured with 2+ members, planning tasks are sent to multiple
+/// models for deliberation, optional peer review, and chairman synthesis.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CouncilConfig {
+    /// Whether the council feature is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Council members (at least 2, recommended 3+).
+    #[serde(default)]
+    pub members: Vec<CouncilMemberConfig>,
+    /// Voting/synthesis strategy.
+    #[serde(default)]
+    pub voting_strategy: VotingStrategy,
+    /// Whether to enable peer review stage (each model reviews others' responses).
+    #[serde(default = "default_true")]
+    pub enable_peer_review: bool,
+    /// Explicit chairman model name. If None, auto-selects the model with largest context window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chairman_model: Option<String>,
+    /// Maximum tokens per member response (cost control).
+    #[serde(default = "default_max_member_tokens")]
+    pub max_member_tokens: usize,
+    /// Whether to auto-detect available providers from env vars and Ollama.
+    #[serde(default = "default_true")]
+    pub auto_detect: bool,
+}
+
+fn default_max_member_tokens() -> usize {
+    2048
+}
+
+impl Default for CouncilConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            members: Vec::new(),
+            voting_strategy: VotingStrategy::default(),
+            enable_peer_review: true,
+            chairman_model: None,
+            max_member_tokens: 2048,
+            auto_detect: true,
         }
     }
 }
@@ -1813,5 +1960,92 @@ allowed_hosts = []
         assert!(!super::is_valid_time_format("abc"));
         assert!(!super::is_valid_time_format("1:30"));
         assert!(!super::is_valid_time_format(""));
+    }
+
+    // --- Council Config Tests ---
+
+    #[test]
+    fn test_council_config_defaults() {
+        let config = CouncilConfig::default();
+        assert!(!config.enabled);
+        assert!(config.members.is_empty());
+        assert_eq!(config.voting_strategy, VotingStrategy::ChairmanSynthesis);
+        assert!(config.enable_peer_review);
+        assert!(config.chairman_model.is_none());
+        assert_eq!(config.max_member_tokens, 2048);
+        assert!(config.auto_detect);
+    }
+
+    #[test]
+    fn test_council_config_serialization_roundtrip() {
+        let config = CouncilConfig {
+            enabled: true,
+            members: vec![
+                CouncilMemberConfig {
+                    provider: "openai".to_string(),
+                    model: "gpt-4o".to_string(),
+                    api_key_env: "OPENAI_API_KEY".to_string(),
+                    base_url: None,
+                    weight: 1.0,
+                },
+                CouncilMemberConfig {
+                    provider: "anthropic".to_string(),
+                    model: "claude-sonnet-4-20250514".to_string(),
+                    api_key_env: "ANTHROPIC_API_KEY".to_string(),
+                    base_url: None,
+                    weight: 1.5,
+                },
+            ],
+            voting_strategy: VotingStrategy::HighestScore,
+            enable_peer_review: false,
+            chairman_model: Some("gpt-4o".to_string()),
+            max_member_tokens: 4096,
+            auto_detect: false,
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: CouncilConfig = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.enabled);
+        assert_eq!(deserialized.members.len(), 2);
+        assert_eq!(deserialized.voting_strategy, VotingStrategy::HighestScore);
+        assert!(!deserialized.enable_peer_review);
+        assert_eq!(deserialized.chairman_model, Some("gpt-4o".to_string()));
+        assert_eq!(deserialized.max_member_tokens, 4096);
+    }
+
+    #[test]
+    fn test_voting_strategy_serde() {
+        assert_eq!(
+            serde_json::from_str::<VotingStrategy>("\"chairman_synthesis\"").unwrap(),
+            VotingStrategy::ChairmanSynthesis
+        );
+        assert_eq!(
+            serde_json::from_str::<VotingStrategy>("\"highest_score\"").unwrap(),
+            VotingStrategy::HighestScore
+        );
+        assert_eq!(
+            serde_json::from_str::<VotingStrategy>("\"majority_consensus\"").unwrap(),
+            VotingStrategy::MajorityConsensus
+        );
+        // Round-trip
+        let json = serde_json::to_string(&VotingStrategy::MajorityConsensus).unwrap();
+        assert_eq!(json, "\"majority_consensus\"");
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_agent_config_with_council() {
+        // Backward compat: council is None by default
+        let config = AgentConfig::default();
+        assert!(config.council.is_none());
+
+        // With council set
+        let mut config = AgentConfig::default();
+        config.council = Some(CouncilConfig::default());
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: AgentConfig = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.council.is_some());
+        let council = deserialized.council.unwrap();
+        assert!(!council.enabled);
+        assert!(council.members.is_empty());
     }
 }

@@ -20,6 +20,12 @@ pub struct ModelInfo {
     pub context_window: Option<usize>,
     /// Whether this model supports chat/completion requests.
     pub is_chat_model: bool,
+    /// Input cost per million tokens, if known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_cost_per_million: Option<f64>,
+    /// Output cost per million tokens, if known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_cost_per_million: Option<f64>,
 }
 
 /// Parse an OpenAI `/models` API response into a list of `ModelInfo`.
@@ -37,11 +43,14 @@ pub fn parse_openai_models_response(body: &Value) -> Result<Vec<ModelInfo>, LlmE
         .iter()
         .filter_map(|m| {
             let id = m.get("id")?.as_str()?.to_string();
+            let pricing = model_pricing(&id);
             Some(ModelInfo {
                 name: id.clone(),
                 id,
                 context_window: None,
                 is_chat_model: true,
+                input_cost_per_million: pricing.map(|(i, _)| i),
+                output_cost_per_million: pricing.map(|(_, o)| o),
             })
         })
         .collect();
@@ -72,32 +81,26 @@ pub fn filter_chat_models(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
 ///
 /// Used only when the API call to list models fails.
 pub fn anthropic_known_models() -> Vec<ModelInfo> {
-    vec![
-        ModelInfo {
-            id: "claude-opus-4-20250514".to_string(),
-            name: "Claude Opus 4".to_string(),
-            context_window: Some(200_000),
-            is_chat_model: true,
-        },
-        ModelInfo {
-            id: "claude-sonnet-4-20250514".to_string(),
-            name: "Claude Sonnet 4".to_string(),
-            context_window: Some(200_000),
-            is_chat_model: true,
-        },
-        ModelInfo {
-            id: "claude-3-5-sonnet-20241022".to_string(),
-            name: "Claude 3.5 Sonnet".to_string(),
-            context_window: Some(200_000),
-            is_chat_model: true,
-        },
-        ModelInfo {
-            id: "claude-3-5-haiku-20241022".to_string(),
-            name: "Claude 3.5 Haiku".to_string(),
-            context_window: Some(200_000),
-            is_chat_model: true,
-        },
-    ]
+    let models_data = [
+        ("claude-opus-4-20250514", "Claude Opus 4", 200_000),
+        ("claude-sonnet-4-20250514", "Claude Sonnet 4", 200_000),
+        ("claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet", 200_000),
+        ("claude-3-5-haiku-20241022", "Claude 3.5 Haiku", 200_000),
+    ];
+    models_data
+        .iter()
+        .map(|(id, name, ctx)| {
+            let pricing = model_pricing(id);
+            ModelInfo {
+                id: id.to_string(),
+                name: name.to_string(),
+                context_window: Some(*ctx),
+                is_chat_model: true,
+                input_cost_per_million: pricing.map(|(i, _)| i),
+                output_cost_per_million: pricing.map(|(_, o)| o),
+            }
+        })
+        .collect()
 }
 
 /// Fetch available models from the Anthropic API.
@@ -170,11 +173,14 @@ pub fn parse_anthropic_models_response(body: &Value) -> Result<Vec<ModelInfo>, L
             // The API doesn't expose context_window, so use known defaults
             let context_window = Some(200_000);
 
+            let pricing = model_pricing(&id);
             Some(ModelInfo {
                 name: display_name,
                 id,
                 context_window,
                 is_chat_model: true,
+                input_cost_per_million: pricing.map(|(i, _)| i),
+                output_cost_per_million: pricing.map(|(_, o)| o),
             })
         })
         .collect();
@@ -187,44 +193,28 @@ pub fn parse_anthropic_models_response(body: &Value) -> Result<Vec<ModelInfo>, L
 ///
 /// Used only when the API call to list models fails.
 pub fn gemini_known_models() -> Vec<ModelInfo> {
-    vec![
-        ModelInfo {
-            id: "gemini-2.5-pro".to_string(),
-            name: "Gemini 2.5 Pro".to_string(),
-            context_window: Some(1_048_576),
-            is_chat_model: true,
-        },
-        ModelInfo {
-            id: "gemini-2.5-flash".to_string(),
-            name: "Gemini 2.5 Flash".to_string(),
-            context_window: Some(1_048_576),
-            is_chat_model: true,
-        },
-        ModelInfo {
-            id: "gemini-2.0-flash".to_string(),
-            name: "Gemini 2.0 Flash".to_string(),
-            context_window: Some(1_048_576),
-            is_chat_model: true,
-        },
-        ModelInfo {
-            id: "gemini-2.0-flash-lite".to_string(),
-            name: "Gemini 2.0 Flash Lite".to_string(),
-            context_window: Some(1_048_576),
-            is_chat_model: true,
-        },
-        ModelInfo {
-            id: "gemini-1.5-pro".to_string(),
-            name: "Gemini 1.5 Pro".to_string(),
-            context_window: Some(2_097_152),
-            is_chat_model: true,
-        },
-        ModelInfo {
-            id: "gemini-1.5-flash".to_string(),
-            name: "Gemini 1.5 Flash".to_string(),
-            context_window: Some(1_048_576),
-            is_chat_model: true,
-        },
-    ]
+    let models_data = [
+        ("gemini-2.5-pro", "Gemini 2.5 Pro", 1_048_576),
+        ("gemini-2.5-flash", "Gemini 2.5 Flash", 1_048_576),
+        ("gemini-2.0-flash", "Gemini 2.0 Flash", 1_048_576),
+        ("gemini-2.0-flash-lite", "Gemini 2.0 Flash Lite", 1_048_576),
+        ("gemini-1.5-pro", "Gemini 1.5 Pro", 2_097_152),
+        ("gemini-1.5-flash", "Gemini 1.5 Flash", 1_048_576),
+    ];
+    models_data
+        .iter()
+        .map(|(id, name, ctx)| {
+            let pricing = model_pricing(id);
+            ModelInfo {
+                id: id.to_string(),
+                name: name.to_string(),
+                context_window: Some(*ctx),
+                is_chat_model: true,
+                input_cost_per_million: pricing.map(|(i, _)| i),
+                output_cost_per_million: pricing.map(|(_, o)| o),
+            }
+        })
+        .collect()
 }
 
 /// Fetch available models from the Google Gemini API.
@@ -330,11 +320,14 @@ pub fn parse_gemini_models_response(body: &Value) -> Result<Vec<ModelInfo>, LlmE
                 return None;
             }
 
+            let pricing = model_pricing(id);
             Some(ModelInfo {
                 id: id.to_string(),
                 name: display_name,
                 context_window: input_limit,
                 is_chat_model: true,
+                input_cost_per_million: pricing.map(|(i, _)| i),
+                output_cost_per_million: pricing.map(|(_, o)| o),
             })
         })
         .collect();
@@ -430,6 +423,96 @@ pub async fn list_models(
         },
         _ => fetch_openai_models(api_key, base_url).await,
     }
+}
+
+/// Look up per-model pricing across all providers.
+///
+/// Returns `(input_cost_per_million, output_cost_per_million)` for known models.
+/// Returns `None` for unknown models (callers should fall back to config values).
+pub fn model_pricing(model: &str) -> Option<(f64, f64)> {
+    // Normalize: strip date suffixes for Anthropic (e.g. "claude-sonnet-4-20250514" → "claude-sonnet-4")
+    let normalized = model.to_lowercase();
+
+    // OpenAI models
+    if normalized.starts_with("gpt-4o-mini") {
+        return Some((0.15, 0.60));
+    }
+    if normalized.starts_with("gpt-4o") {
+        return Some((2.50, 10.0));
+    }
+    if normalized.starts_with("gpt-4-turbo") {
+        return Some((10.0, 30.0));
+    }
+    if normalized.starts_with("gpt-3.5-turbo") {
+        return Some((0.50, 1.50));
+    }
+    if normalized.starts_with("o1-mini") {
+        return Some((3.0, 12.0));
+    }
+    if normalized.starts_with("o3-mini") {
+        return Some((1.10, 4.40));
+    }
+    if normalized.starts_with("o1") {
+        return Some((15.0, 60.0));
+    }
+
+    // Anthropic models
+    if normalized.contains("claude-opus-4") || normalized.contains("claude-3-opus") {
+        return Some((15.0, 75.0));
+    }
+    if normalized.contains("claude-sonnet-4")
+        || normalized.contains("claude-3-5-sonnet")
+        || normalized.contains("claude-3.5-sonnet")
+    {
+        return Some((3.0, 15.0));
+    }
+    if normalized.contains("claude-3-5-haiku") || normalized.contains("claude-3.5-haiku") {
+        return Some((0.80, 4.0));
+    }
+    if normalized.contains("claude-3-haiku") {
+        return Some((0.25, 1.25));
+    }
+
+    // Gemini models
+    if normalized.starts_with("gemini-2.5-pro") {
+        return Some((1.25, 10.0));
+    }
+    if normalized.starts_with("gemini-2.5-flash") {
+        return Some((0.15, 0.60));
+    }
+    if normalized.starts_with("gemini-2.0-flash") {
+        return Some((0.10, 0.40));
+    }
+    if normalized.starts_with("gemini-1.5-pro") {
+        return Some((1.25, 5.0));
+    }
+    if normalized.starts_with("gemini-1.5-flash") {
+        return Some((0.075, 0.30));
+    }
+
+    // Local/Ollama models (zero cost)
+    let local_prefixes = [
+        "qwen",
+        "llama",
+        "mistral",
+        "mixtral",
+        "deepseek",
+        "phi-",
+        "codellama",
+        "gemma",
+        "vicuna",
+        "orca",
+        "neural-chat",
+        "starling",
+        "yi-",
+    ];
+    for prefix in &local_prefixes {
+        if normalized.starts_with(prefix) {
+            return Some((0.0, 0.0));
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -608,6 +691,8 @@ mod tests {
             name: "GPT-4o".to_string(),
             context_window: Some(128_000),
             is_chat_model: true,
+            input_cost_per_million: None,
+            output_cost_per_million: None,
         };
         assert_eq!(model.id, "gpt-4o");
         assert_eq!(model.name, "GPT-4o");
@@ -617,53 +702,70 @@ mod tests {
 
     #[test]
     fn test_filter_chat_models() {
-        let models = vec![
-            ModelInfo {
-                id: "gpt-4o".into(),
-                name: "GPT-4o".into(),
-                context_window: None,
-                is_chat_model: true,
-            },
-            ModelInfo {
-                id: "text-embedding-3-small".into(),
-                name: "Embedding".into(),
-                context_window: None,
-                is_chat_model: true,
-            },
-            ModelInfo {
-                id: "whisper-1".into(),
-                name: "Whisper".into(),
-                context_window: None,
-                is_chat_model: true,
-            },
-            ModelInfo {
-                id: "dall-e-3".into(),
-                name: "DALL-E 3".into(),
-                context_window: None,
-                is_chat_model: true,
-            },
-            ModelInfo {
-                id: "tts-1".into(),
-                name: "TTS".into(),
-                context_window: None,
-                is_chat_model: true,
-            },
-            ModelInfo {
-                id: "gpt-4o-mini".into(),
-                name: "GPT-4o Mini".into(),
-                context_window: None,
-                is_chat_model: true,
-            },
-            ModelInfo {
-                id: "text-moderation-latest".into(),
-                name: "Moderation".into(),
-                context_window: None,
-                is_chat_model: true,
-            },
+        let ids = [
+            ("gpt-4o", "GPT-4o"),
+            ("text-embedding-3-small", "Embedding"),
+            ("whisper-1", "Whisper"),
+            ("dall-e-3", "DALL-E 3"),
+            ("tts-1", "TTS"),
+            ("gpt-4o-mini", "GPT-4o Mini"),
+            ("text-moderation-latest", "Moderation"),
         ];
+        let models: Vec<ModelInfo> = ids
+            .iter()
+            .map(|(id, name)| ModelInfo {
+                id: (*id).into(),
+                name: (*name).into(),
+                context_window: None,
+                is_chat_model: true,
+                input_cost_per_million: None,
+                output_cost_per_million: None,
+            })
+            .collect();
         let filtered = filter_chat_models(models);
         assert_eq!(filtered.len(), 2);
         assert!(filtered.iter().any(|m| m.id == "gpt-4o"));
         assert!(filtered.iter().any(|m| m.id == "gpt-4o-mini"));
+    }
+
+    #[test]
+    fn test_model_pricing_openai() {
+        let (i, o) = model_pricing("gpt-4o").unwrap();
+        assert!((i - 2.50).abs() < f64::EPSILON);
+        assert!((o - 10.0).abs() < f64::EPSILON);
+
+        let (i, o) = model_pricing("gpt-4o-mini").unwrap();
+        assert!((i - 0.15).abs() < f64::EPSILON);
+        assert!((o - 0.60).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_model_pricing_anthropic() {
+        let (i, o) = model_pricing("claude-opus-4-20250514").unwrap();
+        assert!((i - 15.0).abs() < f64::EPSILON);
+        assert!((o - 75.0).abs() < f64::EPSILON);
+
+        let (i, o) = model_pricing("claude-sonnet-4-20250514").unwrap();
+        assert!((i - 3.0).abs() < f64::EPSILON);
+        assert!((o - 15.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_model_pricing_gemini() {
+        let (i, o) = model_pricing("gemini-2.5-pro").unwrap();
+        assert!((i - 1.25).abs() < f64::EPSILON);
+        assert!((o - 10.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_model_pricing_local() {
+        let (i, o) = model_pricing("llama3.1:8b").unwrap();
+        assert!((i - 0.0).abs() < f64::EPSILON);
+        assert!((o - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_model_pricing_unknown() {
+        assert!(model_pricing("some-unknown-model").is_none());
     }
 }

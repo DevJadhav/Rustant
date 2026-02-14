@@ -72,14 +72,21 @@ impl AnthropicProvider {
         let client = Client::new();
         let token_counter = TokenCounter::for_model(&config.model);
 
+        // Use centralized model pricing, falling back to config values
+        let (cost_in, cost_out) =
+            crate::providers::models::model_pricing(&config.model).unwrap_or((
+                config.input_cost_per_million,
+                config.output_cost_per_million,
+            ));
+
         Ok(Self {
             client,
             base_url,
             api_key,
             model: config.model.clone(),
             context_window: config.context_window,
-            cost_input: config.input_cost_per_million / 1_000_000.0,
-            cost_output: config.output_cost_per_million / 1_000_000.0,
+            cost_input: cost_in / 1_000_000.0,
+            cost_output: cost_out / 1_000_000.0,
             token_counter,
         })
     }

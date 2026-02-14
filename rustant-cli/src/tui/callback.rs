@@ -60,6 +60,11 @@ pub enum TuiEvent {
         question: String,
         reply: oneshot::Sender<String>,
     },
+    /// Iteration progress update during agent's ReAct loop.
+    IterationUpdate {
+        iteration: usize,
+        max_iterations: usize,
+    },
     /// Context window health notification (warnings, compression events).
     ContextHealth(rustant_core::ContextHealthEvent),
     /// A channel digest has been generated.
@@ -130,6 +135,13 @@ impl AgentCallback for TuiCallback {
             name: tool_name.to_string(),
             output: output.clone(),
             duration_ms,
+        });
+    }
+
+    async fn on_iteration_start(&self, iteration: usize, max_iterations: usize) {
+        let _ = self.tx.send(TuiEvent::IterationUpdate {
+            iteration,
+            max_iterations,
         });
     }
 
@@ -242,6 +254,22 @@ mod tests {
         match rx.recv().await.unwrap() {
             TuiEvent::StatusChange(s) => assert_eq!(s, AgentStatus::Thinking),
             other => panic!("Expected StatusChange, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_callback_sends_iteration_update() {
+        let (callback, mut rx) = TuiCallback::new();
+        callback.on_iteration_start(3, 50).await;
+        match rx.recv().await.unwrap() {
+            TuiEvent::IterationUpdate {
+                iteration,
+                max_iterations,
+            } => {
+                assert_eq!(iteration, 3);
+                assert_eq!(max_iterations, 50);
+            }
+            other => panic!("Expected IterationUpdate, got {:?}", other),
         }
     }
 

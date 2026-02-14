@@ -21,4 +21,8 @@ target
 #.idea/
 
 # Rustant config may contain credentials — never commit
-.rustant/config.toml
+.rustant
+
+plan.md
+CLAUDE.md
+verification.md

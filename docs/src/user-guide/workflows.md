@@ -21,9 +21,41 @@ A workflow consists of:
 
 ## Running Workflows
 
+From the CLI:
 ```bash
 rustant workflow run <name> --input key1=value1 --input key2=value2
 ```
+
+From the REPL (inside an interactive session):
+```
+/workflow run <name> key1=value1 key2=value2
+```
+
+All workflow CLI subcommands are also available as REPL slash commands:
+```
+/workflow list                       # List available workflows
+/workflow show <name>                # Show workflow details
+/workflow run <name> [key=val ...]   # Run a workflow
+/workflow runs                       # List active runs
+/workflow status <run_id>            # Check run status
+/workflow cancel <run_id>            # Cancel a running workflow
+```
+
+## Automatic Workflow Routing
+
+The agent can automatically detect when your task matches a built-in workflow. For example, saying "do a security scan of this repo" will trigger the agent to suggest running the `security_scan` workflow.
+
+Supported pattern matches include:
+- "security scan" / "security audit" / "vulnerability" → `security_scan`
+- "code review" → `code_review`
+- "refactor" → `refactor`
+- "generate tests" / "write tests" → `test_generation`
+- "generate docs" / "write docs" → `documentation`
+- "update dependencies" → `dependency_update`
+- "deploy" → `deployment`
+- "pr review" / "pull request review" → `pr_review`
+- "changelog" / "release notes" → `changelog`
+- "email triage" → `email_triage`
 
 ## Managing Runs
 

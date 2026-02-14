@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **LLM Council** — Multi-model deliberation feature inspired by [karpathy/llm-council](https://github.com/karpathy/llm-council). Three-stage protocol: (1) parallel query to all council members, (2) optional anonymous peer review, (3) chairman synthesis. Supports 3+ cloud providers (OpenAI, Anthropic, Gemini) or 3+ Ollama models. Auto-detection of available providers via env vars and Ollama API. New `/council` slash command with `status`, `detect`, and direct question subcommands. Configured via `[council]` in config.toml with `VotingStrategy` (chairman_synthesis, highest_score, majority_consensus), per-member weights, and cost controls
+- **TUI status bar metrics** — Bottom status bar now shows live token count and cost (`12.4k/128k | $0.0342`) alongside input mode hints
+- **TUI sidebar iteration tracking** — Sidebar iteration counter (`Iteration: 1/50`) updates in real-time during agent execution via new `on_iteration_start` callback
+- **Voice direct audio playback** — `/voice speak "text"` plays audio through speakers via macOS `afplay` or Linux `aplay` instead of saving to a temp file
+- **Voice wake word mode** — `rustant --voice` activates "hey rustant" wake word listening: records mic, detects wake word via STT, transcribes commands, processes through agent, speaks response via TTS
+- **Chrome DevTools MCP integration** — External MCP server support via `[[mcp_servers]]` config; `ProcessTransport` spawns and communicates with child processes over NDJSON stdin/stdout; Chrome DevTools MCP (`npx -y chrome-devtools-mcp@latest`) provides 26 browser automation tools (click, navigate, evaluate_script, performance traces, network inspection, screenshots)
+- **External MCP server config** — `ExternalMcpServerConfig` struct in `AgentConfig` for configuring external MCP servers with command, args, env, working directory, and auto-connect toggle
+
+### Fixed
+
+- **Gemini provider hang** — Added 120s HTTP timeout and 10s connect timeout to the Gemini HTTP client (was zero timeout causing indefinite hangs). Replaced buffered SSE streaming (`response.text().await`) with true incremental streaming via `response.bytes_stream()` + line-by-line parsing, so tokens appear immediately instead of after the entire response completes. Added `warn!()` logging for malformed SSE JSON chunks (previously silently swallowed). Defensive `fix_gemini_turns()` now filters out turns with empty `parts` arrays to prevent Gemini API 400 errors
+
+### Changed
+
 - **Safety transparency dashboard** — `ExplanationPanel` TUI widget (Ctrl+E) showing decision reasoning chains, considered alternatives, confidence scores, and context factors with a navigable timeline
 - **Streaming progress pipeline** — `ProgressBar` TUI widget with spinner animation, tool name, elapsed time, completion gauge, and scrollable shell output
 - **Multi-agent task board** — `TaskBoard` TUI widget (Ctrl+T) showing spawned agent status, roles, current tool, elapsed time, tool call counts, and token usage with detail panel
@@ -35,6 +49,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`/diff`** — Show file changes since last checkpoint
 - **`/review`** — Review all session file changes across checkpoints
 - **Categorized `/help`** — Replaced hardcoded help text with registry-generated categorized output including aliases
+- **Gemini API sequencing fix** — `fix_gemini_turns()` post-processing merges consecutive same-role turns, fixes `functionResponse.name` to match `functionCall.name`, and ensures user-first message ordering (fixes HTTP 400 errors with multi-tool calls)
+- **CLI-REPL command parity** — 9 CLI subcommands now available as REPL slash commands: `/channel` (`/ch`), `/workflow` (`/wf`), `/voice`, `/browser`, `/auth`, `/canvas`, `/skill`, `/plugin`, `/update`
+- **Workflow routing** — `workflow_routing_hint()` in agent automatically detects task patterns matching built-in workflows (security_scan, code_review, test_generation, etc.) and guides the LLM to run or accomplish them. Platform-independent, works on all OSes
+- **Workflow catalog in system prompt** — Agent now knows about all 17 built-in workflow templates and can route tasks to them
+- **`/verbose` toggle** — `/verbose` (alias `/v`) toggles verbose output in REPL, controlling visibility of tool execution details, status changes, and decision explanations
+- **TUI as default** — `use_tui: true` is now the default; use `--no-tui` for simple REPL
+- **Interactive REPL input** — `repl_input.rs` provides line editing, history, and tab completion
+- **Centralized model pricing** — `model_pricing()` in `models.rs` covers OpenAI, Anthropic, Gemini, and Ollama models
 
 ## [1.0.0] - 2026-02-02
 
