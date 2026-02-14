@@ -26,6 +26,7 @@ pub mod multi;
 pub mod nodes;
 pub mod oauth;
 pub mod pairing;
+pub mod plan;
 pub mod project_detect;
 pub mod providers;
 pub mod replay;
@@ -75,6 +76,9 @@ pub use config::{
 pub use council::{
     detect_available_providers, should_use_council, CouncilMemberResponse, CouncilResult,
     DetectedProvider, PeerReview, PlanningCouncil,
+};
+pub use plan::{
+    ExecutionPlan, PlanAlternative, PlanConfig, PlanDecision, PlanStatus, PlanStep, StepStatus,
 };
 
 pub use credentials::{

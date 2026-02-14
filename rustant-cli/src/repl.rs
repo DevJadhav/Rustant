@@ -527,6 +527,107 @@ impl AgentCallback for CliCallback {
         }
         let _ = io::stdout().flush();
     }
+
+    async fn on_plan_generating(&self, goal: &str) {
+        println!("\n\x1b[34m[Planning]\x1b[0m Generating plan for: {}", goal);
+        let _ = io::stdout().flush();
+    }
+
+    async fn on_plan_review(
+        &self,
+        plan: &rustant_core::plan::ExecutionPlan,
+    ) -> rustant_core::plan::PlanDecision {
+        use rustant_core::plan::PlanDecision;
+
+        println!();
+        display_plan(plan);
+        println!();
+        println!(
+            "Plan ready ({} steps). \x1b[1m[a]\x1b[0mpprove / \x1b[1m[e]\x1b[0mdit <n> <desc> / \x1b[1m[r]\x1b[0memove <n> / \x1b[1m[+]\x1b[0m <n> <desc> / \x1b[1m[?]\x1b[0m question / \x1b[1m[x]\x1b[0m cancel",
+            plan.steps.len()
+        );
+        print!("> ");
+        let _ = io::stdout().flush();
+
+        let stdin = io::stdin();
+        let mut input = String::new();
+        if stdin.lock().read_line(&mut input).is_err() {
+            return PlanDecision::Approve;
+        }
+        let input = input.trim();
+
+        if input.is_empty() || input.starts_with('a') {
+            PlanDecision::Approve
+        } else if input.starts_with('x') || input.starts_with('c') {
+            PlanDecision::Reject
+        } else if input.starts_with('e') {
+            // e <n> <new description>
+            let parts: Vec<&str> = input.splitn(3, ' ').collect();
+            if parts.len() >= 3 {
+                if let Ok(idx) = parts[1].parse::<usize>() {
+                    let idx = idx.saturating_sub(1); // 1-based to 0-based
+                    return PlanDecision::EditStep(idx, parts[2].to_string());
+                }
+            }
+            println!("\x1b[31mUsage: e <step_number> <new description>\x1b[0m");
+            PlanDecision::Approve // re-review
+        } else if input.starts_with('r') {
+            // r <n>
+            let parts: Vec<&str> = input.splitn(2, ' ').collect();
+            if parts.len() >= 2 {
+                if let Ok(idx) = parts[1].parse::<usize>() {
+                    return PlanDecision::RemoveStep(idx.saturating_sub(1));
+                }
+            }
+            println!("\x1b[31mUsage: r <step_number>\x1b[0m");
+            PlanDecision::Approve
+        } else if input.starts_with('+') {
+            // + <n> <description>
+            let parts: Vec<&str> = input.splitn(3, ' ').collect();
+            if parts.len() >= 3 {
+                if let Ok(idx) = parts[1].parse::<usize>() {
+                    return PlanDecision::AddStep(idx.saturating_sub(1), parts[2].to_string());
+                }
+            }
+            println!("\x1b[31mUsage: + <position> <description>\x1b[0m");
+            PlanDecision::Approve
+        } else if let Some(rest) = input.strip_prefix('?') {
+            let question = rest.trim().to_string();
+            if question.is_empty() {
+                println!("\x1b[31mUsage: ? <your question about the plan>\x1b[0m");
+                PlanDecision::Approve
+            } else {
+                PlanDecision::AskQuestion(question)
+            }
+        } else {
+            PlanDecision::Approve
+        }
+    }
+
+    async fn on_plan_step_start(&self, step_index: usize, step: &rustant_core::plan::PlanStep) {
+        let tool_info = step
+            .tool
+            .as_deref()
+            .map(|t| format!(" [{}]", t))
+            .unwrap_or_default();
+        println!(
+            "\x1b[34m  [Step {}]\x1b[0m {}{}...",
+            step_index + 1,
+            step.description,
+            tool_info
+        );
+        let _ = io::stdout().flush();
+    }
+
+    async fn on_plan_step_complete(&self, step_index: usize, step: &rustant_core::plan::PlanStep) {
+        let (icon, color) = match step.status {
+            rustant_core::plan::StepStatus::Completed => ("✓", "\x1b[32m"),
+            rustant_core::plan::StepStatus::Failed => ("✗", "\x1b[31m"),
+            _ => ("●", "\x1b[90m"),
+        };
+        println!("  {}{} Step {}\x1b[0m", color, icon, step_index + 1);
+        let _ = io::stdout().flush();
+    }
 }
 
 /// Print contextual hints after /help based on current agent state.
@@ -935,6 +1036,39 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                         format!("{} {}", arg1, arg2)
                     };
                     handle_council_command(&question, &config_ref);
+                    continue;
+                }
+                "/plan" => {
+                    match arg1 {
+                        "on" => {
+                            agent.set_plan_mode(true);
+                            println!("\x1b[32mPlan mode enabled.\x1b[0m Tasks will generate a plan for review before execution.");
+                        }
+                        "off" => {
+                            agent.set_plan_mode(false);
+                            println!(
+                                "\x1b[33mPlan mode disabled.\x1b[0m Tasks will execute directly."
+                            );
+                        }
+                        "show" => {
+                            if let Some(plan) = agent.current_plan() {
+                                display_plan(plan);
+                            } else {
+                                println!("\x1b[90mNo active plan.\x1b[0m");
+                            }
+                        }
+                        "" => {
+                            let status = if agent.plan_mode() { "ON" } else { "OFF" };
+                            println!("Plan mode: \x1b[1m{}\x1b[0m", status);
+                            if let Some(plan) = agent.current_plan() {
+                                println!();
+                                display_plan(plan);
+                            }
+                        }
+                        _ => {
+                            println!("Unknown subcommand '{}'. Usage: /plan [on|off|show]", arg1);
+                        }
+                    }
                     continue;
                 }
                 "/schedule" | "/sched" | "/cron" => {
@@ -3149,6 +3283,72 @@ fn handle_intelligence_command(sub: &str) {
 }
 
 /// Handle `/council` command for multi-model deliberation.
+/// Display a formatted execution plan to stdout.
+fn display_plan(plan: &rustant_core::plan::ExecutionPlan) {
+    use rustant_core::plan::StepStatus;
+
+    println!("\x1b[1mPlan: {}\x1b[0m", plan.goal);
+    println!("\x1b[90mSummary:\x1b[0m {}", plan.summary);
+    println!(
+        "\x1b[90mStatus:\x1b[0m {}  \x1b[90mSteps:\x1b[0m {}",
+        plan.status,
+        plan.steps.len()
+    );
+    if let Some(cost) = plan.estimated_cost {
+        println!("\x1b[90mEstimated cost:\x1b[0m ${:.4}", cost);
+    }
+    println!();
+
+    for step in &plan.steps {
+        let (icon, color) = match step.status {
+            StepStatus::Pending => ("○", "\x1b[90m"),
+            StepStatus::InProgress => ("●", "\x1b[34m"),
+            StepStatus::Completed => ("✓", "\x1b[32m"),
+            StepStatus::Failed => ("✗", "\x1b[31m"),
+            StepStatus::Skipped => ("⊘", "\x1b[90m"),
+        };
+
+        let tool_info = step
+            .tool
+            .as_deref()
+            .map(|t| format!(" \x1b[36m[{}]\x1b[0m", t))
+            .unwrap_or_default();
+
+        let risk_badge = step
+            .risk_level
+            .as_ref()
+            .map(|r| format!(" \x1b[33m({})\x1b[0m", r))
+            .unwrap_or_default();
+
+        let approval = if step.requires_approval {
+            " \x1b[33m⚠ approval\x1b[0m"
+        } else {
+            ""
+        };
+
+        println!(
+            "  {}{} {}.\x1b[0m {}{}{}{}",
+            color,
+            icon,
+            step.index + 1,
+            step.description,
+            tool_info,
+            risk_badge,
+            approval
+        );
+    }
+
+    if !plan.alternatives.is_empty() {
+        println!("\n\x1b[90mAlternatives considered:\x1b[0m");
+        for alt in &plan.alternatives {
+            println!(
+                "  - {} \x1b[90m({})\x1b[0m",
+                alt.name, alt.reason_not_chosen
+            );
+        }
+    }
+}
+
 fn handle_council_command(input: &str, config: &AgentConfig) {
     match input {
         "" => {

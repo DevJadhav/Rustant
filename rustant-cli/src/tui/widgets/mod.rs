@@ -9,6 +9,7 @@ pub mod header;
 pub mod input_area;
 pub mod keys_overlay;
 pub mod markdown;
+pub mod plan_panel;
 pub mod progress_bar;
 pub mod replay_panel;
 pub mod sidebar;

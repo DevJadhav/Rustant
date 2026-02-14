@@ -13,6 +13,7 @@ use crate::tui::widgets::header::{render_header, HeaderData};
 use crate::tui::widgets::input_area::{InputAction, InputWidget};
 use crate::tui::widgets::keys_overlay::{render_keys_overlay, KeysOverlay};
 use crate::tui::widgets::markdown::SyntaxHighlighter;
+use crate::tui::widgets::plan_panel::{render_plan_panel, PlanPanel};
 use crate::tui::widgets::progress_bar::{render_progress_bar, ProgressState};
 use crate::tui::widgets::replay_panel::{render_replay_panel, ReplayPanel};
 use crate::tui::widgets::sidebar::{render_sidebar, FileEntry, FileStatus, SidebarData};
@@ -85,6 +86,9 @@ pub struct App {
     // Multi-Agent Task Board
     pub task_board: TaskBoard,
     pub keys_overlay: KeysOverlay,
+
+    // Plan mode panel
+    pub plan_panel: PlanPanel,
 
     // Status bar metrics
     pub status_bar_data: StatusBarData,
@@ -164,6 +168,7 @@ impl App {
             progress_rx,
             task_board: TaskBoard::new(),
             keys_overlay: KeysOverlay::new(),
+            plan_panel: PlanPanel::new(),
             status_bar_data: StatusBarData {
                 context_window: config.llm.context_window,
                 ..Default::default()
@@ -371,6 +376,11 @@ impl App {
         if self.keys_overlay.is_visible() {
             render_keys_overlay(frame, frame.area(), &self.keys_overlay, &self.theme);
         }
+
+        // Plan panel overlay (Ctrl+P)
+        if self.plan_panel.visible {
+            render_plan_panel(frame, &self.plan_panel);
+        }
     }
 
     /// Handle a terminal event (keyboard, mouse, resize).
@@ -466,6 +476,12 @@ impl App {
             return;
         }
 
+        // Ctrl+P: Toggle plan panel
+        if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.plan_panel.toggle();
+            return;
+        }
+
         // Ctrl+S: Show trust dashboard
         if key.code == KeyCode::Char('s') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.handle_command("/trust");
@@ -487,6 +503,48 @@ impl App {
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     self.keys_overlay.scroll_down();
+                    return;
+                }
+                _ => {} // Other keys pass through
+            }
+        }
+
+        // Plan panel navigation when visible
+        if self.plan_panel.visible {
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.plan_panel.select_prev();
+                    return;
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.plan_panel.select_next();
+                    return;
+                }
+                KeyCode::Enter => {
+                    if self.plan_panel.is_reviewing() {
+                        self.plan_panel
+                            .send_decision(rustant_core::plan::PlanDecision::Approve);
+                    }
+                    return;
+                }
+                KeyCode::Char('d') => {
+                    if self.plan_panel.is_reviewing() {
+                        let idx = self.plan_panel.selected_step;
+                        self.plan_panel
+                            .send_decision(rustant_core::plan::PlanDecision::RemoveStep(idx));
+                    }
+                    return;
+                }
+                KeyCode::Char('x') => {
+                    if self.plan_panel.is_reviewing() {
+                        self.plan_panel
+                            .send_decision(rustant_core::plan::PlanDecision::Reject);
+                    }
+                    self.plan_panel.visible = false;
+                    return;
+                }
+                KeyCode::Esc => {
+                    self.plan_panel.visible = false;
                     return;
                 }
                 _ => {} // Other keys pass through
@@ -1985,6 +2043,44 @@ impl App {
                     }
                 }
             }
+            cmd if cmd.starts_with("/plan") => {
+                let sub = cmd.strip_prefix("/plan").unwrap_or("").trim();
+                match sub {
+                    "on" => {
+                        self.agent.set_plan_mode(true);
+                        self.push_system_msg("Plan mode enabled. Tasks will generate a plan for review before execution.");
+                    }
+                    "off" => {
+                        self.agent.set_plan_mode(false);
+                        self.push_system_msg("Plan mode disabled. Tasks will execute directly.");
+                    }
+                    "show" => {
+                        if self.agent.current_plan().is_some() {
+                            self.plan_panel.plan = self.agent.current_plan().cloned();
+                            self.plan_panel.visible = true;
+                        } else {
+                            self.push_system_msg(
+                                "No active plan. Enable plan mode with /plan on and run a task.",
+                            );
+                        }
+                    }
+                    "" => {
+                        let status = if self.agent.plan_mode() { "ON" } else { "OFF" };
+                        let plan_info = if self.agent.current_plan().is_some() {
+                            " (active plan available — /plan show)"
+                        } else {
+                            ""
+                        };
+                        self.push_system_msg(&format!(
+                            "Plan mode: {}{}. Toggle with /plan on|off. Show plan: /plan show. Overlay: Ctrl+P.",
+                            status, plan_info
+                        ));
+                    }
+                    _ => {
+                        self.push_system_msg("Usage: /plan [on|off|show]");
+                    }
+                }
+            }
             other => {
                 // Use registry for unknown command suggestions
                 let registry = crate::slash::CommandRegistry::with_defaults();
@@ -2352,6 +2448,43 @@ impl App {
                     text,
                     tool_name: None,
                     is_error: is_critical,
+                    timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                });
+            }
+            TuiEvent::PlanGenerating { goal } => {
+                self.conversation.push_message(DisplayMessage {
+                    role: Role::System,
+                    text: format!("[Planning] Generating plan for: {}", goal),
+                    tool_name: None,
+                    is_error: false,
+                    timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                });
+            }
+            TuiEvent::PlanReview { plan, reply } => {
+                self.plan_panel.set_plan_for_review(plan, reply);
+            }
+            TuiEvent::PlanStepStart { index, description } => {
+                self.plan_panel.mark_step_in_progress(index);
+                self.conversation.push_message(DisplayMessage {
+                    role: Role::System,
+                    text: format!("[Step {}] {}...", index + 1, description),
+                    tool_name: None,
+                    is_error: false,
+                    timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                });
+            }
+            TuiEvent::PlanStepComplete {
+                index,
+                description,
+                success,
+            } => {
+                self.plan_panel.update_step(index, success);
+                let icon = if success { "✓" } else { "✗" };
+                self.conversation.push_message(DisplayMessage {
+                    role: Role::System,
+                    text: format!("{} Step {} — {}", icon, index + 1, description),
+                    tool_name: None,
+                    is_error: !success,
                     timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
                 });
             }

@@ -726,6 +726,35 @@ impl CommandRegistry {
                  Be mindful of data privacy when using multiple cloud providers.",
             ),
         });
+
+        // ── Plan Mode ──
+        self.register(CommandInfo {
+            name: "/plan",
+            aliases: &[],
+            description: "Toggle plan mode or manage plans",
+            usage: "/plan [on|off|show]",
+            category: CommandCategory::Agent,
+            tui_only: false,
+            detailed_help: Some(
+                "Enable plan mode to generate a step-by-step plan before execution.\n\n\
+                 When plan mode is on, every task you enter will:\n\
+                 1. Generate a structured multi-step plan\n\
+                 2. Show the plan for your review\n\
+                 3. Let you approve, edit, or reject before execution\n\
+                 4. Execute step by step with progress tracking\n\n\
+                 Usage:\n  /plan on    — Enable plan mode\n  \
+                 /plan off   — Disable plan mode (default)\n  \
+                 /plan show  — Show current plan\n  \
+                 /plan       — Show plan mode status\n\n\
+                 During review:\n  [a]pprove — Execute the plan\n  \
+                 [e] <n> <desc> — Edit step description\n  \
+                 [r] <n> — Remove a step\n  \
+                 [+] <n> <desc> — Add a step\n  \
+                 [?] <question> — Ask about the plan\n  \
+                 [x] — Cancel the plan\n\n\
+                 Configure in .rustant/config.toml under [plan].",
+            ),
+        });
     }
 
     /// Look up a command by name or alias.

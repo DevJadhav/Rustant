@@ -79,6 +79,9 @@ pub struct AgentConfig {
     /// Optional LLM Council configuration (multi-model deliberation).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub council: Option<CouncilConfig>,
+    /// Optional plan mode configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<crate::plan::PlanConfig>,
     /// External MCP server configurations (e.g., Chrome DevTools MCP).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_servers: Vec<ExternalMcpServerConfig>,

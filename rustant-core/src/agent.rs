@@ -172,6 +172,30 @@ pub trait AgentCallback: Send + Sync {
     /// message that requires follow-up.
     /// Default is a no-op for backward compatibility.
     async fn on_reminder(&self, _reminder: &serde_json::Value) {}
+
+    // --- Plan mode callbacks ---
+
+    /// Called when plan generation starts.
+    /// Default is a no-op for backward compatibility.
+    async fn on_plan_generating(&self, _goal: &str) {}
+
+    /// Called when a plan is ready for user review.
+    /// Returns the user's decision on the plan.
+    /// Default auto-approves for backward compatibility.
+    async fn on_plan_review(
+        &self,
+        _plan: &crate::plan::ExecutionPlan,
+    ) -> crate::plan::PlanDecision {
+        crate::plan::PlanDecision::Approve
+    }
+
+    /// Called when a plan step starts executing.
+    /// Default is a no-op for backward compatibility.
+    async fn on_plan_step_start(&self, _step_index: usize, _step: &crate::plan::PlanStep) {}
+
+    /// Called when a plan step finishes (success or failure).
+    /// Default is a no-op for backward compatibility.
+    async fn on_plan_step_complete(&self, _step_index: usize, _step: &crate::plan::PlanStep) {}
 }
 
 /// A tool executor function type. The agent holds tool executors and their definitions.
@@ -221,6 +245,10 @@ pub struct Agent {
     consecutive_failures: (String, usize),
     /// Recent decision explanations for transparency (capped at 50).
     recent_explanations: Vec<DecisionExplanation>,
+    /// Whether plan mode is active (generate plan before executing).
+    plan_mode: bool,
+    /// The current plan being generated, reviewed, or executed.
+    current_plan: Option<crate::plan::ExecutionPlan>,
 }
 
 impl Agent {
@@ -261,6 +289,7 @@ impl Agent {
             .map(|sc| sc.max_background_jobs)
             .unwrap_or(10);
         let job_manager = JobManager::new(max_bg_jobs);
+        let plan_mode_enabled = config.plan.as_ref().map(|p| p.enabled).unwrap_or(false);
 
         Self {
             brain,
@@ -280,6 +309,8 @@ impl Agent {
             job_manager,
             consecutive_failures: (String::new(), 0),
             recent_explanations: Vec::new(),
+            plan_mode: plan_mode_enabled,
+            current_plan: None,
         }
     }
 
@@ -314,6 +345,11 @@ impl Agent {
 
     /// Process a user task through the agent loop.
     pub async fn process_task(&mut self, task: &str) -> Result<TaskResult, RustantError> {
+        // Plan mode: generate and review plan before executing
+        if self.plan_mode {
+            return self.process_task_with_plan(task).await;
+        }
+
         let task_id = Uuid::new_v4();
         info!(task_id = %task_id, task = task, "Starting task processing");
 
@@ -2158,6 +2194,307 @@ impl Agent {
                 None
             }
         }
+    }
+
+    // --- Plan Mode ---
+
+    /// Toggle plan mode on or off.
+    pub fn set_plan_mode(&mut self, enabled: bool) {
+        self.plan_mode = enabled;
+    }
+
+    /// Query whether plan mode is active.
+    pub fn plan_mode(&self) -> bool {
+        self.plan_mode
+    }
+
+    /// Access the current plan, if any.
+    pub fn current_plan(&self) -> Option<&crate::plan::ExecutionPlan> {
+        self.current_plan.as_ref()
+    }
+
+    /// Generate a structured execution plan for a task via the LLM.
+    async fn generate_plan(
+        &mut self,
+        task: &str,
+    ) -> Result<crate::plan::ExecutionPlan, RustantError> {
+        use crate::plan::{PlanStatus, PLAN_GENERATION_PROMPT};
+
+        // Build a prompt with available tools and the task
+        let tool_list: Vec<String> = self
+            .tool_definitions()
+            .iter()
+            .map(|t| format!("- {} — {}", t.name, t.description))
+            .collect();
+        let tools_str = tool_list.join("\n");
+
+        let plan_prompt = format!(
+            "{}\n\nAvailable tools:\n{}\n\nTask: {}",
+            PLAN_GENERATION_PROMPT, tools_str, task
+        );
+
+        // Use a temporary conversation for plan generation (don't pollute memory)
+        let messages = vec![Message::system(&plan_prompt), Message::user(task)];
+
+        let response = self
+            .brain
+            .think_with_retry(&messages, None, 3)
+            .await
+            .map_err(RustantError::Llm)?;
+
+        // Record usage
+        self.budget.record_usage(
+            &response.usage,
+            &CostEstimate {
+                input_cost: 0.0,
+                output_cost: 0.0,
+            },
+        );
+
+        let text = response.message.content.as_text().unwrap_or("").to_string();
+        let mut plan = crate::plan::parse_plan_json(&text, task);
+
+        // Enforce max_steps from config
+        let max_steps = self.config.plan.as_ref().map(|p| p.max_steps).unwrap_or(20);
+        if plan.steps.len() > max_steps {
+            plan.steps.truncate(max_steps);
+        }
+
+        plan.status = PlanStatus::PendingReview;
+        Ok(plan)
+    }
+
+    /// Execute an approved plan step by step.
+    async fn execute_plan(
+        &mut self,
+        plan: &mut crate::plan::ExecutionPlan,
+    ) -> Result<TaskResult, RustantError> {
+        use crate::plan::{PlanStatus, StepStatus};
+
+        plan.status = PlanStatus::Executing;
+        let task_id = Uuid::new_v4();
+
+        while let Some(step_idx) = plan.next_pending_step() {
+            plan.current_step = Some(step_idx);
+            let step = &plan.steps[step_idx];
+            let step_desc = step.description.clone();
+            let step_tool = step.tool.clone();
+            let step_args = step.tool_args.clone();
+
+            // Notify step start
+            self.callback
+                .on_plan_step_start(step_idx, &plan.steps[step_idx])
+                .await;
+            plan.steps[step_idx].status = StepStatus::InProgress;
+
+            let result = if let Some(tool_name) = &step_tool {
+                // If we have a tool and args, execute directly
+                let args = step_args.unwrap_or(serde_json::json!({}));
+
+                self.callback.on_tool_start(tool_name, &args).await;
+                let start = std::time::Instant::now();
+                let exec_result = self.execute_tool("plan", tool_name, &args).await;
+                let duration_ms = start.elapsed().as_millis() as u64;
+
+                match exec_result {
+                    Ok(output) => {
+                        self.callback
+                            .on_tool_result(tool_name, &output, duration_ms)
+                            .await;
+                        Ok(output.content)
+                    }
+                    Err(e) => Err(format!("{}", e)),
+                }
+            } else {
+                // No specific tool — let the LLM handle this step
+                // by running one Think iteration with the step as context
+                let step_prompt = format!(
+                    "Execute plan step {}: {}\n\nPrevious step results are in context.",
+                    step_idx + 1,
+                    step_desc
+                );
+                self.memory.add_message(Message::user(&step_prompt));
+
+                let conversation = self.memory.context_messages();
+                let tools = Some(self.tool_definitions());
+                let response = if self.config.llm.use_streaming {
+                    self.think_streaming(&conversation, tools).await
+                } else {
+                    self.brain.think_with_retry(&conversation, tools, 3).await
+                };
+
+                match response {
+                    Ok(resp) => {
+                        let text = resp
+                            .message
+                            .content
+                            .as_text()
+                            .unwrap_or("(no output)")
+                            .to_string();
+                        self.callback.on_assistant_message(&text).await;
+                        self.memory.add_message(resp.message);
+                        Ok(text)
+                    }
+                    Err(e) => Err(format!("{}", e)),
+                }
+            };
+
+            match result {
+                Ok(output) => {
+                    plan.complete_step(step_idx, &output);
+                }
+                Err(error) => {
+                    plan.fail_step(step_idx, &error);
+                    // Notify step failure
+                    self.callback
+                        .on_plan_step_complete(step_idx, &plan.steps[step_idx])
+                        .await;
+                    // Stop execution on first failure
+                    plan.status = PlanStatus::Failed;
+                    break;
+                }
+            }
+
+            // Notify step completion
+            self.callback
+                .on_plan_step_complete(step_idx, &plan.steps[step_idx])
+                .await;
+        }
+
+        // Update overall status
+        if plan.status != PlanStatus::Failed {
+            let all_done = plan
+                .steps
+                .iter()
+                .all(|s| s.status == StepStatus::Completed || s.status == StepStatus::Skipped);
+            plan.status = if all_done {
+                PlanStatus::Completed
+            } else {
+                PlanStatus::Failed
+            };
+        }
+
+        let success = plan.status == PlanStatus::Completed;
+        let response = plan.progress_summary();
+
+        Ok(TaskResult {
+            task_id,
+            success,
+            response,
+            iterations: plan.steps.len(),
+            total_usage: *self.brain.total_usage(),
+            total_cost: *self.brain.total_cost(),
+        })
+    }
+
+    /// Process a task in plan mode: generate → review → execute.
+    async fn process_task_with_plan(&mut self, task: &str) -> Result<TaskResult, RustantError> {
+        use crate::plan::{PlanDecision, PlanStatus};
+
+        // 1. Generate the plan
+        self.state.status = AgentStatus::Planning;
+        self.callback.on_status_change(AgentStatus::Planning).await;
+        self.callback.on_plan_generating(task).await;
+
+        let mut plan = self.generate_plan(task).await?;
+
+        // 2. Handle any clarifications
+        for question in &plan.clarifications.clone() {
+            let answer = self.callback.on_clarification_request(question).await;
+            if !answer.is_empty() {
+                // Add clarification answer to context for potential re-generation
+                self.memory
+                    .add_message(Message::user(format!("Q: {} A: {}", question, answer)));
+            }
+        }
+
+        // 3. Review loop
+        loop {
+            let decision = self.callback.on_plan_review(&plan).await;
+            match decision {
+                PlanDecision::Approve => break,
+                PlanDecision::Reject => {
+                    plan.status = PlanStatus::Cancelled;
+                    self.current_plan = Some(plan);
+                    self.state.complete();
+                    self.callback.on_status_change(AgentStatus::Complete).await;
+                    let task_id = self.state.task_id.unwrap_or_else(Uuid::new_v4);
+                    return Ok(TaskResult {
+                        task_id,
+                        success: false,
+                        response: "Plan rejected by user.".to_string(),
+                        iterations: 0,
+                        total_usage: *self.brain.total_usage(),
+                        total_cost: *self.brain.total_cost(),
+                    });
+                }
+                PlanDecision::EditStep(idx, new_desc) => {
+                    if let Some(step) = plan.steps.get_mut(idx) {
+                        step.description = new_desc;
+                        plan.updated_at = chrono::Utc::now();
+                    }
+                }
+                PlanDecision::RemoveStep(idx) => {
+                    if idx < plan.steps.len() {
+                        plan.steps.remove(idx);
+                        // Re-index remaining steps
+                        for (i, step) in plan.steps.iter_mut().enumerate() {
+                            step.index = i;
+                        }
+                        plan.updated_at = chrono::Utc::now();
+                    }
+                }
+                PlanDecision::AddStep(idx, desc) => {
+                    let new_step = crate::plan::PlanStep {
+                        index: idx,
+                        description: desc,
+                        ..Default::default()
+                    };
+                    if idx <= plan.steps.len() {
+                        plan.steps.insert(idx, new_step);
+                    } else {
+                        plan.steps.push(new_step);
+                    }
+                    // Re-index
+                    for (i, step) in plan.steps.iter_mut().enumerate() {
+                        step.index = i;
+                    }
+                    plan.updated_at = chrono::Utc::now();
+                }
+                PlanDecision::ReorderSteps(new_order) => {
+                    let old_steps = plan.steps.clone();
+                    plan.steps.clear();
+                    for (i, &old_idx) in new_order.iter().enumerate() {
+                        if let Some(mut step) = old_steps.get(old_idx).cloned() {
+                            step.index = i;
+                            plan.steps.push(step);
+                        }
+                    }
+                    plan.updated_at = chrono::Utc::now();
+                }
+                PlanDecision::AskQuestion(question) => {
+                    // Send question to LLM and display the answer
+                    let messages = vec![
+                        Message::system("Answer this question about the plan you generated."),
+                        Message::user(&question),
+                    ];
+                    if let Ok(resp) = self.brain.think_with_retry(&messages, None, 1).await {
+                        if let Some(answer) = resp.message.content.as_text() {
+                            self.callback.on_assistant_message(answer).await;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Execute the approved plan
+        self.current_plan = Some(plan.clone());
+        let result = self.execute_plan(&mut plan).await?;
+        self.current_plan = Some(plan);
+        self.state.complete();
+        self.callback.on_status_change(AgentStatus::Complete).await;
+
+        Ok(result)
     }
 
     /// Compact the conversation context by summarizing older messages.

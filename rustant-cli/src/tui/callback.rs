@@ -77,6 +77,21 @@ pub enum TuiEvent {
     },
     /// A scheduled follow-up reminder has been triggered.
     Reminder(serde_json::Value),
+    /// Plan generation has started.
+    PlanGenerating { goal: String },
+    /// A plan is ready for user review.
+    PlanReview {
+        plan: rustant_core::plan::ExecutionPlan,
+        reply: oneshot::Sender<rustant_core::plan::PlanDecision>,
+    },
+    /// A plan step started executing.
+    PlanStepStart { index: usize, description: String },
+    /// A plan step completed.
+    PlanStepComplete {
+        index: usize,
+        description: String,
+        success: bool,
+    },
 }
 
 /// Implements AgentCallback by forwarding events through an mpsc channel.
@@ -204,6 +219,45 @@ impl AgentCallback for TuiCallback {
 
     async fn on_reminder(&self, reminder: &serde_json::Value) {
         let _ = self.tx.send(TuiEvent::Reminder(reminder.clone()));
+    }
+
+    async fn on_plan_generating(&self, goal: &str) {
+        let _ = self.tx.send(TuiEvent::PlanGenerating {
+            goal: goal.to_string(),
+        });
+    }
+
+    async fn on_plan_review(
+        &self,
+        plan: &rustant_core::plan::ExecutionPlan,
+    ) -> rustant_core::plan::PlanDecision {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let sent = self.tx.send(TuiEvent::PlanReview {
+            plan: plan.clone(),
+            reply: reply_tx,
+        });
+        if sent.is_err() {
+            return rustant_core::plan::PlanDecision::Approve;
+        }
+        reply_rx
+            .await
+            .unwrap_or(rustant_core::plan::PlanDecision::Approve)
+    }
+
+    async fn on_plan_step_start(&self, step_index: usize, step: &rustant_core::plan::PlanStep) {
+        let _ = self.tx.send(TuiEvent::PlanStepStart {
+            index: step_index,
+            description: step.description.clone(),
+        });
+    }
+
+    async fn on_plan_step_complete(&self, step_index: usize, step: &rustant_core::plan::PlanStep) {
+        let success = step.status == rustant_core::plan::StepStatus::Completed;
+        let _ = self.tx.send(TuiEvent::PlanStepComplete {
+            index: step_index,
+            description: step.description.clone(),
+            success,
+        });
     }
 }
 

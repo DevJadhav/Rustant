@@ -277,6 +277,7 @@ pub enum ProgressUpdate {
 #[serde(rename_all = "snake_case")]
 pub enum AgentStatus {
     Idle,
+    Planning,
     Thinking,
     Deciding,
     Executing,
@@ -290,6 +291,7 @@ impl std::fmt::Display for AgentStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AgentStatus::Idle => write!(f, "idle"),
+            AgentStatus::Planning => write!(f, "planning"),
             AgentStatus::Thinking => write!(f, "thinking"),
             AgentStatus::Deciding => write!(f, "deciding"),
             AgentStatus::Executing => write!(f, "executing"),
@@ -648,6 +650,7 @@ mod tests {
     #[test]
     fn test_agent_status_display() {
         assert_eq!(AgentStatus::Idle.to_string(), "idle");
+        assert_eq!(AgentStatus::Planning.to_string(), "planning");
         assert_eq!(AgentStatus::Thinking.to_string(), "thinking");
         assert_eq!(
             AgentStatus::WaitingForApproval.to_string(),
