@@ -1638,6 +1638,52 @@ impl Agent {
                     priority: MessagePriority::Normal,
                 }
             }
+            // Slack tool → ChannelReply for send/reply, Other for reads.
+            "slack" => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("send_message");
+                match action {
+                    "send_message" | "reply_thread" => {
+                        let recipient = arguments["channel"]
+                            .as_str()
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let preview = arguments["message"]
+                            .as_str()
+                            .map(|s| {
+                                if s.len() > 100 {
+                                    format!("{}...", &s[..97])
+                                } else {
+                                    s.to_string()
+                                }
+                            })
+                            .unwrap_or_default();
+                        ActionDetails::ChannelReply {
+                            channel: "Slack".to_string(),
+                            recipient,
+                            preview,
+                            priority: MessagePriority::Normal,
+                        }
+                    }
+                    "add_reaction" => ActionDetails::ChannelReply {
+                        channel: "Slack".to_string(),
+                        recipient: arguments["channel"]
+                            .as_str()
+                            .unwrap_or("unknown")
+                            .to_string(),
+                        preview: format!(
+                            ":{}:",
+                            arguments["emoji"].as_str().unwrap_or("?")
+                        ),
+                        priority: MessagePriority::Normal,
+                    },
+                    _ => ActionDetails::Other {
+                        info: format!("slack:{}", action),
+                    },
+                }
+            }
             // ArXiv research → NetworkRequest for search/fetch, FileWrite for save.
             "arxiv_research" => {
                 let action = arguments
@@ -2035,6 +2081,13 @@ impl Agent {
             "For this task, call the 'web_fetch' tool with {\"url\": \"https://...\"} to retrieve page content. Do NOT use macos_safari or shell_exec — use the dedicated web_fetch tool."
         } else if lower.contains("safari") || lower.contains("browser") && lower.contains("tab") {
             "For this task, call the 'macos_safari' tool with the appropriate action. Note: for simple web searches use 'web_search' instead, and for fetching page content use 'web_fetch' instead."
+        } else if lower.contains("slack")
+            || lower.contains("send slack")
+            || lower.contains("slack message")
+            || lower.contains("slack channel")
+            || lower.contains("post to slack")
+        {
+            "For this task, call the 'slack' tool with the appropriate action (send_message, read_messages, list_channels, reply_thread, list_users, add_reaction). Do NOT use macos_gui_scripting or macos_app_control to interact with Slack."
         } else if lower.contains("imessage")
             || lower.contains("text message")
             || lower.contains("send message")
@@ -2178,6 +2231,16 @@ impl Agent {
                 || lower.contains("website"))
         {
             return Some("TOOL ROUTING: For this task, call the 'web_fetch' tool with {\"url\": \"https://...\"} to retrieve page content. Do NOT use shell_exec — use the dedicated web_fetch tool.".to_string());
+        }
+
+        // Slack routing (cross-platform)
+        if lower.contains("slack")
+            || lower.contains("send slack")
+            || lower.contains("slack message")
+            || lower.contains("slack channel")
+            || lower.contains("post to slack")
+        {
+            return Some("TOOL ROUTING: For this task, call the 'slack' tool with the appropriate action (send_message, read_messages, list_channels, reply_thread, list_users, add_reaction). Do NOT use shell_exec to interact with Slack.".to_string());
         }
 
         // Cross-platform tool routing
@@ -2329,7 +2392,17 @@ impl Agent {
             || lower.contains("look up")
             || lower.contains("google");
 
+        // Check if the task is Slack-related → redirect to slack tool
+        let is_slack_task = lower.contains("slack");
+
         match failed_tool {
+            // Redirect GUI scripting / app control / shell to slack for Slack tasks
+            "macos_gui_scripting" | "macos_app_control" | "shell_exec" if is_slack_task => {
+                Some((
+                    "slack".to_string(),
+                    serde_json::json!({"action": "send_message"}),
+                ))
+            }
             // Redirect Safari/shell/curl to arxiv_research for paper tasks
             "macos_safari" | "shell_exec" | "web_fetch" | "web_search" if is_paper_task => {
                 // Extract query from the task description
@@ -2402,13 +2475,23 @@ impl Agent {
         }
     }
 
-    /// Non-macOS fallback — no auto-correction available.
+    /// Non-macOS fallback — Slack auto-correction only.
     #[cfg(not(target_os = "macos"))]
     fn auto_correct_tool_call(
-        _failed_tool: &str,
+        failed_tool: &str,
         _args: &serde_json::Value,
-        _state: &AgentState,
+        state: &AgentState,
     ) -> Option<(String, serde_json::Value)> {
+        let task = state.current_goal.as_deref().unwrap_or("");
+        let lower = task.to_lowercase();
+
+        if lower.contains("slack") && matches!(failed_tool, "shell_exec" | "web_fetch") {
+            return Some((
+                "slack".to_string(),
+                serde_json::json!({"action": "send_message"}),
+            ));
+        }
+
         None
     }
 

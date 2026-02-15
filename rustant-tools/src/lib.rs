@@ -55,6 +55,7 @@ pub mod screen_analyze;
 pub mod self_improvement;
 pub mod shell;
 pub mod skill_tracker;
+pub mod slack;
 pub mod smart_edit;
 pub mod system_monitor;
 pub mod template;
@@ -145,6 +146,8 @@ pub fn register_builtin_tools_with_progress(
         Arc::new(self_improvement::SelfImprovementTool::new(
             workspace.clone(),
         )),
+        // Slack tool — cross-platform, uses Slack Bot Token API
+        Arc::new(slack::SlackTool::new(workspace.clone())),
     ];
 
     // iMessage tools — macOS only
@@ -218,11 +221,11 @@ mod tests {
         let mut registry = ToolRegistry::new();
         register_builtin_tools(&mut registry, dir.path().to_path_buf());
 
-        // 39 base + 3 iMessage + 24 macOS native = 66 on macOS
+        // 40 base + 3 iMessage + 24 macOS native = 67 on macOS
         #[cfg(target_os = "macos")]
-        assert_eq!(registry.len(), 66);
+        assert_eq!(registry.len(), 67);
         #[cfg(not(target_os = "macos"))]
-        assert_eq!(registry.len(), 39);
+        assert_eq!(registry.len(), 40);
 
         // Verify all expected tools are registered
         let names = registry.list_names();
@@ -290,6 +293,9 @@ mod tests {
         assert!(names.contains(&"life_planner".to_string()));
         assert!(names.contains(&"privacy_manager".to_string()));
         assert!(names.contains(&"self_improvement".to_string()));
+
+        // Slack tool
+        assert!(names.contains(&"slack".to_string()));
 
         // Cross-platform productivity tools
         assert!(names.contains(&"pomodoro".to_string()));

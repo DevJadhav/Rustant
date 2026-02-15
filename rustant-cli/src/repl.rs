@@ -277,6 +277,22 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
                 .unwrap_or("inbox");
             Some(contact.to_string())
         }
+        // Slack tool
+        "slack" => {
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let channel = args.get("channel").and_then(|v| v.as_str());
+            let message = args.get("message").and_then(|v| v.as_str());
+            match (channel, message) {
+                (Some(ch), Some(msg)) => {
+                    Some(format!("{}: {} → {}", action, ch, truncate_str(msg, 40)))
+                }
+                (Some(ch), None) => Some(format!("{}: {}", action, ch)),
+                _ => Some(action.to_string()),
+            }
+        }
         // macOS tools with action pattern
         "macos_calendar"
         | "macos_reminders"
