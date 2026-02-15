@@ -87,6 +87,7 @@ pub fn register_builtin_tools_with_progress(
         Arc::new(shell::ShellExecTool::new(workspace.clone()))
     };
 
+    #[allow(unused_mut)]
     let mut tools: Vec<Arc<dyn Tool>> = vec![
         Arc::new(file::FileReadTool::new(workspace.clone())),
         Arc::new(file::FileListTool::new(workspace.clone())),

@@ -23,27 +23,27 @@ jobs:
             os: ubuntu-latest
             artifact_name: rustant
             asset_name: rustant-linux-x86_64
-            extra_features: ""
+            use_cross: false
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             artifact_name: rustant
             asset_name: rustant-linux-aarch64
-            extra_features: "--features vendored-openssl"
+            use_cross: true
           - target: x86_64-apple-darwin
             os: macos-13
             artifact_name: rustant
             asset_name: rustant-macos-x86_64
-            extra_features: ""
+            use_cross: false
           - target: aarch64-apple-darwin
             os: macos-latest
             artifact_name: rustant
             asset_name: rustant-macos-aarch64
-            extra_features: ""
+            use_cross: false
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             artifact_name: rustant.exe
             asset_name: rustant-windows-x86_64.exe
-            extra_features: ""
+            use_cross: false
 
     steps:
       - uses: actions/checkout@v4
@@ -54,16 +54,17 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
 
-      - name: Install cross-compilation tools (aarch64-linux)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Install cross (for Linux cross-compilation)
+        if: matrix.use_cross
+        run: cargo install cross --locked
 
-      - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }} -p rustant ${{ matrix.extra_features }}
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+      - name: Build release binary (cross)
+        if: matrix.use_cross
+        run: cross build --release --target ${{ matrix.target }} -p rustant
+
+      - name: Build release binary (cargo)
+        if: ${{ !matrix.use_cross }}
+        run: cargo build --release --target ${{ matrix.target }} -p rustant
 
       - name: Strip binary (Linux/macOS)
         if: runner.os != 'Windows'
