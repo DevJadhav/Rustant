@@ -50,6 +50,9 @@ dotenvy = "0.15"
 # Networking
 reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
 
+# OpenSSL (vendored feature for cross-compilation in CI)
+openssl = { version = "0.10", features = ["vendored"] }
+
 # Email (SMTP + IMAP)
 lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "builder", "hostname", "pool", "smtp-transport"] }
 async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }

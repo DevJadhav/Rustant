@@ -51,11 +51,13 @@ keyring = { workspace = true }
 reqwest = { workspace = true }
 axum = { workspace = true }
 tower-http = { workspace = true }
+openssl = { workspace = true, optional = true }
 
 [features]
 default = []
 browser = ["rustant-core/browser"]
 voice = ["rustant-core/voice"]
+vendored-openssl = ["dep:openssl"]
 
 [dev-dependencies]
 tokio-test = "0.4"
