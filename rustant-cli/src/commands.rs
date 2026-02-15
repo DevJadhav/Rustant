@@ -771,13 +771,40 @@ async fn handle_cron(action: CronAction, workspace: &Path) -> anyhow::Result<()>
         .map_err(|e| anyhow::anyhow!("Failed to load config: {}", e))?;
     let scheduler_config = config.scheduler.unwrap_or_default();
 
+    // State file for persisting cron jobs across CLI invocations
+    let state_dir = workspace.join(".rustant").join("cron");
+    let state_file = state_dir.join("state.json");
+
+    // Load scheduler from state file first, falling back to config
+    let load_scheduler = || -> rustant_core::CronScheduler {
+        if state_file.exists() {
+            if let Ok(json) = std::fs::read_to_string(&state_file) {
+                if let Ok(scheduler) = rustant_core::CronScheduler::from_json(&json) {
+                    return scheduler;
+                }
+            }
+        }
+        // Fall back to config-defined jobs
+        let mut scheduler = rustant_core::CronScheduler::new();
+        for job_config in &scheduler_config.cron_jobs {
+            let _ = scheduler.add_job(job_config.clone());
+        }
+        scheduler
+    };
+
+    // Save scheduler state to disk
+    let save_scheduler = |scheduler: &rustant_core::CronScheduler| -> anyhow::Result<()> {
+        std::fs::create_dir_all(&state_dir)?;
+        let json = scheduler.to_json()?;
+        let tmp = state_file.with_extension("tmp");
+        std::fs::write(&tmp, &json)?;
+        std::fs::rename(&tmp, &state_file)?;
+        Ok(())
+    };
+
     match action {
         CronAction::List => {
-            let mut scheduler = rustant_core::CronScheduler::new();
-            for job_config in &scheduler_config.cron_jobs {
-                // Silently skip invalid expressions
-                let _ = scheduler.add_job(job_config.clone());
-            }
+            let scheduler = load_scheduler();
             let jobs = scheduler.list_jobs();
             if jobs.is_empty() {
                 println!("No cron jobs configured.");
@@ -807,25 +834,24 @@ async fn handle_cron(action: CronAction, workspace: &Path) -> anyhow::Result<()>
             schedule,
             task,
         } => {
+            let mut scheduler = load_scheduler();
             let job_config = rustant_core::CronJobConfig::new(&name, &schedule, &task);
-            // Validate the cron expression
-            let job = rustant_core::CronJob::new(job_config)?;
+            // Validate and add to scheduler
+            scheduler.add_job(job_config)?;
+            let job = scheduler.get_job(&name).unwrap();
             let next = job
                 .next_run
                 .map(|t| t.format("%Y-%m-%d %H:%M:%S UTC").to_string())
                 .unwrap_or_else(|| "N/A".to_string());
+            save_scheduler(&scheduler)?;
             println!("Cron job '{}' added.", name);
             println!("  Schedule: {}", schedule);
             println!("  Task: {}", task);
             println!("  Next run: {}", next);
-            println!("\nNote: Add this job to your config file to persist it across restarts.");
             Ok(())
         }
         CronAction::Run { name } => {
-            let mut scheduler = rustant_core::CronScheduler::new();
-            for job_config in &scheduler_config.cron_jobs {
-                let _ = scheduler.add_job(job_config.clone());
-            }
+            let scheduler = load_scheduler();
             match scheduler.get_job(&name) {
                 Some(job) => {
                     println!("Manually triggering job '{}'...", name);
@@ -839,31 +865,24 @@ async fn handle_cron(action: CronAction, workspace: &Path) -> anyhow::Result<()>
             }
         }
         CronAction::Disable { name } => {
-            let mut scheduler = rustant_core::CronScheduler::new();
-            for job_config in &scheduler_config.cron_jobs {
-                let _ = scheduler.add_job(job_config.clone());
-            }
+            let mut scheduler = load_scheduler();
             scheduler.disable_job(&name)?;
+            save_scheduler(&scheduler)?;
             println!("Cron job '{}' disabled.", name);
             Ok(())
         }
         CronAction::Enable { name } => {
-            let mut scheduler = rustant_core::CronScheduler::new();
-            for job_config in &scheduler_config.cron_jobs {
-                let _ = scheduler.add_job(job_config.clone());
-            }
+            let mut scheduler = load_scheduler();
             scheduler.enable_job(&name)?;
+            save_scheduler(&scheduler)?;
             println!("Cron job '{}' enabled.", name);
             Ok(())
         }
         CronAction::Remove { name } => {
-            let mut scheduler = rustant_core::CronScheduler::new();
-            for job_config in &scheduler_config.cron_jobs {
-                let _ = scheduler.add_job(job_config.clone());
-            }
+            let mut scheduler = load_scheduler();
             scheduler.remove_job(&name)?;
+            save_scheduler(&scheduler)?;
             println!("Cron job '{}' removed.", name);
-            println!("Note: Also remove it from your config file to persist the change.");
             Ok(())
         }
         CronAction::Jobs => {

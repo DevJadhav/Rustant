@@ -526,14 +526,14 @@ Tool categories:
 File & Code: file_read, file_write, file_list, file_search, file_patch, smart_edit, codebase_search, document_read (for PDFs/docs only)
 Git: git_status, git_diff, git_commit
 Shell: shell_exec (last resort only)
-Utilities: calculator, datetime, echo, web_search, web_fetch, http_api, template, pdf_generate, compress, file_organizer
+Utilities: calculator, datetime, echo, web_search (for web searches — uses DuckDuckGo, preferred over safari/shell), web_fetch (for fetching URL content — preferred over safari/shell), http_api, template, pdf_generate, compress, file_organizer
 Personal Productivity: pomodoro, inbox, finance, flashcards, travel, relationships
-Research & Intelligence: arxiv_research, knowledge_graph (concepts, papers, relationships, BFS traversal), experiment_tracker (hypotheses, experiments, evidence)
+Research & Intelligence: arxiv_research (ALWAYS use this for paper/preprint searches — it has a built-in arXiv API client, never use safari/curl for arXiv), knowledge_graph (concepts, papers, relationships, BFS traversal), experiment_tracker (hypotheses, experiments, evidence)
 Code Analysis: code_intelligence (architecture, patterns, tech debt, API surface, dependency map), codebase_search
 Professional Growth: skill_tracker (proficiency, practice logs, learning paths), career_intel (goals, achievements, portfolio), content_engine (multi-platform content pipeline, calendar)
 Life Management: life_planner (energy-aware scheduling, deadlines, habits), system_monitor (service topology, health checks, incidents), privacy_manager (data boundaries, compliance, audit), self_improvement (usage patterns, performance, preferences)
-macOS Native: macos_calendar, macos_reminders, macos_notes, macos_clipboard, macos_system_info, macos_app_control, macos_notification, macos_screenshot, macos_spotlight, macos_finder, macos_focus_mode, macos_mail, macos_music, macos_shortcuts, macos_meeting_recorder, macos_daily_briefing, macos_contacts, homekit
-macOS Automation: macos_gui_scripting, macos_accessibility, macos_screen_analyze, macos_safari
+macOS Native: macos_calendar, macos_reminders, macos_notes, macos_clipboard, macos_system_info, macos_app_control, macos_notification, macos_screenshot, macos_spotlight, macos_finder, macos_focus_mode, macos_mail, macos_music, macos_shortcuts, macos_meeting_recorder (use 'record_and_transcribe' for full meeting flow — TTS announcement, silence auto-stop, auto-transcribe to Notes.app; use 'stop' to end manually), macos_daily_briefing, macos_contacts, homekit
+macOS Automation: macos_gui_scripting, macos_accessibility, macos_screen_analyze, macos_safari (only for Safari-specific tasks like tab management — for web searches use web_search, for fetching pages use web_fetch)
 iMessage: imessage_contacts, imessage_send, imessage_read
 Voice: macos_say
 

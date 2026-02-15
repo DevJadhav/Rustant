@@ -505,11 +505,13 @@ impl CommandRegistry {
             detailed_help: Some(
                 "Record, transcribe, and summarize meetings.\n\n\
                  Usage:\n  /meeting detect  — Check for active meeting apps\n  \
-                 /meeting record  — Start recording microphone audio\n  \
-                 /meeting stop    — Stop recording\n  \
-                 /meeting status  — Show recording status\n\n\
-                 After recording, use the macos_meeting_recorder tool to transcribe\n\
-                 and save summaries to Notes.app in the 'Meeting Transcripts' folder.",
+                 /meeting record  — Start recording with TTS announcement, silence detection,\n\
+                 \x20                   auto-transcription, and save to Notes.app\n  \
+                 /meeting stop    — Stop recording (auto-transcribes and saves)\n  \
+                 /meeting status  — Show recording status and silence monitor state\n\n\
+                 The record command announces 'Recording has started' via TTS, monitors for\n\
+                 silence (auto-stops after 60s of silence), transcribes via Whisper API,\n\
+                 and saves the transcript to Notes.app 'Meeting Transcripts' folder.",
             ),
         });
         self.register(CommandInfo {

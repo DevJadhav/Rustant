@@ -1,10 +1,15 @@
 [package]
-name = "rustant-cli"
+name = "rustant"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "CLI and TUI application for Rustant"
+repository.workspace = true
+homepage.workspace = true
+description = "Privacy-first autonomous personal agent — CLI and TUI for Rustant"
+readme = "../README.md"
+keywords = ["agent", "llm", "ai", "automation", "assistant"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "rustant"
@@ -13,8 +18,8 @@ path = "src/main.rs"
 [dependencies]
 rustant-core = { workspace = true }
 rustant-tools = { workspace = true }
-rustant-mcp = { path = "../rustant-mcp" }
-rustant-plugins = { path = "../rustant-plugins" }
+rustant-mcp = { workspace = true }
+rustant-plugins = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 futures = { workspace = true }
@@ -56,3 +61,24 @@ voice = ["rustant-core/voice"]
 tokio-test = "0.4"
 pretty_assertions = "1.4"
 tempfile = "3.14"
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/rustant-{ target }.tar.gz"
+bin-dir = "rustant"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-unknown-linux-gnu]
+pkg-url = "{ repo }/releases/download/v{ version }/rustant-linux-x86_64.tar.gz"
+
+[package.metadata.binstall.overrides.aarch64-unknown-linux-gnu]
+pkg-url = "{ repo }/releases/download/v{ version }/rustant-linux-aarch64.tar.gz"
+
+[package.metadata.binstall.overrides.x86_64-apple-darwin]
+pkg-url = "{ repo }/releases/download/v{ version }/rustant-macos-x86_64.tar.gz"
+
+[package.metadata.binstall.overrides.aarch64-apple-darwin]
+pkg-url = "{ repo }/releases/download/v{ version }/rustant-macos-aarch64.tar.gz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/rustant-windows-x86_64.exe"
+pkg-fmt = "bin"

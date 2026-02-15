@@ -1,7 +1,7 @@
 class Rustant < Formula
   desc "Privacy-first autonomous personal agent built in Rust"
   homepage "https://github.com/DevJadhav/Rustant"
-  version "0.1.0"
+  version "1.0.0"
   license "MIT"
 
   on_macos do
@@ -29,6 +29,6 @@ class Rustant < Formula
   end
 
   test do
-    assert_match "rustant", shell_output("#{bin}/rustant --version")
+    assert_match version.to_s, shell_output("#{bin}/rustant --version")
   end
 end

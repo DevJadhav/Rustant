@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "Tauri-based dashboard UI for Rustant"
+publish = false
 
 [dependencies]
 rustant-core = { workspace = true }

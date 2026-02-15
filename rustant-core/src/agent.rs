@@ -1595,14 +1595,15 @@ impl Agent {
             // Web tools → NetworkRequest for approval context.
             "web_search" | "web_fetch" => {
                 let host = if tool_name == "web_search" {
-                    arguments["query"]
-                        .as_str()
-                        .unwrap_or("web search")
-                        .to_string()
+                    "api.duckduckgo.com".to_string()
                 } else {
-                    arguments["url"]
-                        .as_str()
-                        .unwrap_or("unknown URL")
+                    // Extract hostname from URL for web_fetch
+                    let url_str = arguments["url"].as_str().unwrap_or("unknown URL");
+                    url_str
+                        .strip_prefix("https://")
+                        .or_else(|| url_str.strip_prefix("http://"))
+                        .and_then(|s| s.split('/').next())
+                        .unwrap_or(url_str)
                         .to_string()
                 };
                 ActionDetails::NetworkRequest {
@@ -1650,17 +1651,10 @@ impl Agent {
                             size_bytes: 0,
                         }
                     }
-                    _ => {
-                        let query = arguments
-                            .get("query")
-                            .or_else(|| arguments.get("arxiv_id"))
-                            .and_then(|v| v.as_str())
-                            .unwrap_or(action);
-                        ActionDetails::NetworkRequest {
-                            host: format!("arXiv: {}", query),
-                            method: "GET".to_string(),
-                        }
-                    }
+                    _ => ActionDetails::NetworkRequest {
+                        host: "export.arxiv.org".to_string(),
+                        method: "GET".to_string(),
+                    },
                 }
             }
             // Knowledge graph — write actions modify state file
@@ -1888,7 +1882,12 @@ impl Agent {
             "end_of_day_summary"
         } else if lower.contains("email triage") || lower.contains("triage email") {
             "email_triage"
-        } else if lower.contains("meeting record") {
+        } else if lower.contains("meeting record")
+            || lower.contains("record meeting")
+            || lower.contains("record the meeting")
+            || lower.contains("record my meeting")
+            || lower.contains("meeting transcri")
+        {
             "meeting_recorder"
         } else if lower.contains("app automation") || lower.contains("automate app") {
             "app_automation"
@@ -1959,9 +1958,25 @@ impl Agent {
             || lower.contains("close app")
         {
             "For this task, call the 'macos_app_control' tool with the appropriate action: \"list_running\", \"open\", \"quit\", or \"activate\"."
+        } else if (lower.contains("record") && lower.contains("meeting"))
+            || lower.contains("start recording")
+            || lower.contains("stop recording")
+            || lower.contains("stop the recording")
+            || lower.contains("stop the meeting")
+            || lower.contains("transcribe meeting")
+            || lower.contains("meeting transcript")
+            || lower.contains("meeting status")
+            || lower.contains("recording status")
+        {
+            "For this task, call 'macos_meeting_recorder'. Use action 'record_and_transcribe' to start \
+             (announces via TTS, records with silence detection, auto-transcribes to Notes.app). \
+             Use 'stop' to stop manually. Use 'status' to check state."
         } else if lower.contains("calendar")
             || lower.contains("event")
-            || lower.contains("meeting") && !lower.contains("record")
+            || (lower.contains("meeting")
+                && !lower.contains("record")
+                && !lower.contains("transcrib")
+                && !lower.contains("stop"))
         {
             "For this task, call the 'macos_calendar' tool with the appropriate action."
         } else if lower.contains("reminder") || lower.contains("todo") || lower.contains("to-do") {
@@ -2003,8 +2018,23 @@ impl Agent {
             "For this task, call the 'macos_finder' tool with the appropriate action."
         } else if lower.contains("contact") && !lower.contains("file") {
             "For this task, call the 'macos_contacts' tool with the appropriate action."
+        } else if lower.contains("search the web")
+            || lower.contains("web search")
+            || lower.contains("search online")
+            || lower.contains("look up")
+            || lower.contains("google")
+            || (lower.contains("search") && lower.contains("internet"))
+        {
+            "For this task, call the 'web_search' tool with {\"query\": \"your search terms\"}. Do NOT use macos_safari or shell_exec for web searches — use the dedicated web_search tool which queries DuckDuckGo."
+        } else if lower.contains("fetch")
+            && (lower.contains("url")
+                || lower.contains("http")
+                || lower.contains("page")
+                || lower.contains("website"))
+        {
+            "For this task, call the 'web_fetch' tool with {\"url\": \"https://...\"} to retrieve page content. Do NOT use macos_safari or shell_exec — use the dedicated web_fetch tool."
         } else if lower.contains("safari") || lower.contains("browser") && lower.contains("tab") {
-            "For this task, call the 'macos_safari' tool with the appropriate action."
+            "For this task, call the 'macos_safari' tool with the appropriate action. Note: for simple web searches use 'web_search' instead, and for fetching page content use 'web_fetch' instead."
         } else if lower.contains("imessage")
             || lower.contains("text message")
             || lower.contains("send message")
@@ -2014,14 +2044,31 @@ impl Agent {
         } else if lower.contains("arxiv")
             || lower.contains("research paper")
             || lower.contains("academic paper")
+            || lower.contains("scientific paper")
             || lower.contains("paper search")
             || lower.contains("literature review")
             || lower.contains("paper summary")
             || lower.contains("paper to code")
             || lower.contains("paper to notebook")
             || lower.contains("bibtex")
+            || lower.contains("preprint")
+            || (lower.contains("paper")
+                && (lower.contains("search")
+                    || lower.contains("find")
+                    || lower.contains("top")
+                    || lower.contains("latest")
+                    || lower.contains("recent")
+                    || lower.contains("trending")))
+            || (lower.contains("papers")
+                && (lower.contains("search")
+                    || lower.contains("find")
+                    || lower.contains("about")
+                    || lower.contains("top")
+                    || lower.contains("latest")
+                    || lower.contains("recent")
+                    || lower.contains("trending")))
         {
-            "For this task, call the 'arxiv_research' tool. Actions: search (find papers), fetch (get by ID), analyze (LLM summary), trending (recent papers), paper_to_code (generate implementation), paper_to_notebook (generate Jupyter notebook), save/library/remove (manage library), export_bibtex."
+            "For this task, call the 'arxiv_research' tool with {\"action\": \"search\", \"query\": \"your search terms\", \"max_results\": 10}. This tool uses the arXiv API directly — do NOT use macos_safari, shell_exec, or curl. Other actions: fetch (get by ID), analyze (LLM summary), trending (recent papers), paper_to_code, paper_to_notebook, save/library/remove, export_bibtex."
         } else if lower.contains("knowledge graph")
             || lower.contains("concept")
             || lower.contains("citation")
@@ -2114,18 +2161,54 @@ impl Agent {
             return Some(hint);
         }
 
+        // Web tool routing (cross-platform, checked before other tools)
+        if lower.contains("search the web")
+            || lower.contains("web search")
+            || lower.contains("search online")
+            || lower.contains("look up")
+            || lower.contains("google")
+            || (lower.contains("search") && lower.contains("internet"))
+        {
+            return Some("TOOL ROUTING: For this task, call the 'web_search' tool with {\"query\": \"your search terms\"}. Do NOT use shell_exec for web searches — use the dedicated web_search tool which queries DuckDuckGo.".to_string());
+        }
+        if lower.contains("fetch")
+            && (lower.contains("url")
+                || lower.contains("http")
+                || lower.contains("page")
+                || lower.contains("website"))
+        {
+            return Some("TOOL ROUTING: For this task, call the 'web_fetch' tool with {\"url\": \"https://...\"} to retrieve page content. Do NOT use shell_exec — use the dedicated web_fetch tool.".to_string());
+        }
+
         // Cross-platform tool routing
         if lower.contains("arxiv")
             || lower.contains("research paper")
             || lower.contains("academic paper")
+            || lower.contains("scientific paper")
             || lower.contains("paper search")
             || lower.contains("literature review")
             || lower.contains("paper summary")
             || lower.contains("paper to code")
             || lower.contains("paper to notebook")
             || lower.contains("bibtex")
+            || lower.contains("preprint")
+            || (lower.contains("paper")
+                && (lower.contains("search")
+                    || lower.contains("find")
+                    || lower.contains("top")
+                    || lower.contains("latest")
+                    || lower.contains("recent")
+                    || lower.contains("trending")))
+            || (lower.contains("papers")
+                && (lower.contains("search")
+                    || lower.contains("find")
+                    || lower.contains("about")
+                    || lower.contains("top")
+                    || lower.contains("latest")
+                    || lower.contains("recent")
+                    || lower.contains("trending")))
         {
-            return Some("TOOL ROUTING: For this task, call the 'arxiv_research' tool. Actions: search (find papers), fetch (get by ID), analyze (LLM summary), trending (recent papers), paper_to_code (generate implementation), paper_to_notebook (generate Jupyter notebook), save/library/remove (manage library), export_bibtex.".to_string());
+            return Some("TOOL ROUTING: For this task, call the 'arxiv_research' tool with {\"action\": \"search\", \"query\": \"your search terms\", \"max_results\": 10}. This tool uses the arXiv API directly — do NOT use macos_safari, shell_exec, or curl. Other actions: fetch (get by ID), analyze (LLM summary), trending (recent papers), paper_to_code, paper_to_notebook, save/library/remove, export_bibtex.".to_string());
         }
 
         let tool_hint = if lower.contains("knowledge graph")
@@ -2222,7 +2305,48 @@ impl Agent {
         let task = state.current_goal.as_deref().unwrap_or("");
         let lower = task.to_lowercase();
 
+        // Check if the task is about research papers → redirect to arxiv_research
+        let is_paper_task = lower.contains("arxiv")
+            || lower.contains("research paper")
+            || lower.contains("academic paper")
+            || lower.contains("scientific paper")
+            || lower.contains("preprint")
+            || (lower.contains("paper")
+                && (lower.contains("search")
+                    || lower.contains("find")
+                    || lower.contains("top")
+                    || lower.contains("latest")))
+            || (lower.contains("papers")
+                && (lower.contains("search")
+                    || lower.contains("find")
+                    || lower.contains("about")
+                    || lower.contains("top")));
+
+        // Check if the task is a web search → redirect to web_search
+        let is_web_search = lower.contains("search the web")
+            || lower.contains("web search")
+            || lower.contains("search online")
+            || lower.contains("look up")
+            || lower.contains("google");
+
         match failed_tool {
+            // Redirect Safari/shell/curl to arxiv_research for paper tasks
+            "macos_safari" | "shell_exec" | "web_fetch" | "web_search" if is_paper_task => {
+                // Extract query from the task description
+                let query = task.to_string();
+                Some((
+                    "arxiv_research".to_string(),
+                    serde_json::json!({"action": "search", "query": query, "max_results": 10}),
+                ))
+            }
+            // Redirect Safari/shell to web_search for general web searches
+            "macos_safari" | "shell_exec" if is_web_search => {
+                let query = task.to_string();
+                Some((
+                    "web_search".to_string(),
+                    serde_json::json!({"query": query}),
+                ))
+            }
             "document_read" | "file_read" | "shell_exec" => {
                 if lower.contains("clipboard")
                     || lower.contains("paste")

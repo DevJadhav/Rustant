@@ -4,7 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 description = "MCP (Model Context Protocol) server implementation for Rustant"
+keywords = ["agent", "llm", "ai", "mcp", "protocol"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 rustant-core = { workspace = true }

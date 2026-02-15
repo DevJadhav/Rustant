@@ -99,8 +99,18 @@ impl CronJob {
 }
 
 /// Parse a cron expression string into a Schedule.
+/// Accepts standard 5-field (min hour dom month dow), 6-field (sec min hour dom month dow),
+/// or 7-field (sec min hour dom month dow year) formats.
+/// 5-field expressions are automatically prefixed with "0 " (seconds=0) and suffixed
+/// with " *" (year=any) to match the cron crate's 7-field requirement.
 fn parse_cron_expression(expr: &str) -> Result<Schedule, SchedulerError> {
-    Schedule::from_str(expr).map_err(|e| SchedulerError::InvalidCronExpression {
+    let fields = expr.split_whitespace().count();
+    let normalized = match fields {
+        5 => format!("0 {} *", expr), // Add seconds=0 prefix and year=* suffix
+        6 => format!("{} *", expr),   // Add year=* suffix
+        _ => expr.to_string(),        // Already 7-field or let cron crate validate
+    };
+    Schedule::from_str(&normalized).map_err(|e| SchedulerError::InvalidCronExpression {
         expression: expr.to_string(),
         message: e.to_string(),
     })

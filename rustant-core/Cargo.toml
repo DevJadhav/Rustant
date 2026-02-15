@@ -4,7 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 description = "Core agent logic for Rustant - LLM interface, memory, safety, and orchestration"
+keywords = ["agent", "llm", "ai", "automation", "privacy"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 tokio = { workspace = true }

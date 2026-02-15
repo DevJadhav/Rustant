@@ -1514,6 +1514,40 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     }
                     continue;
                 }
+                "/meeting" | "/meet" => {
+                    #[cfg(target_os = "macos")]
+                    {
+                        use rustant_tools::registry::Tool;
+                        let subcommand = if arg1.is_empty() { "status" } else { arg1 };
+                        let tool = rustant_tools::meeting::MacosMeetingRecorderTool;
+                        let args = match subcommand {
+                            "detect" => serde_json::json!({"action": "detect_meeting"}),
+                            "record" => {
+                                let title = if arg2.is_empty() {
+                                    "Meeting".to_string()
+                                } else {
+                                    arg2.to_string()
+                                };
+                                serde_json::json!({"action": "record_and_transcribe", "title": title})
+                            }
+                            "stop" => serde_json::json!({"action": "stop"}),
+                            "status" => serde_json::json!({"action": "status"}),
+                            _ => {
+                                println!("Usage: /meeting detect|record|stop|status");
+                                continue;
+                            }
+                        };
+                        match tool.execute(args).await {
+                            Ok(output) => println!("{}", output.content),
+                            Err(e) => println!("\x1b[31mError: {}\x1b[0m", e),
+                        }
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        println!("Meeting recording is only available on macOS.");
+                    }
+                    continue;
+                }
                 "/verbose" | "/v" => {
                     let prev = verbose_flag.load(Ordering::Relaxed);
                     verbose_flag.store(!prev, Ordering::Relaxed);

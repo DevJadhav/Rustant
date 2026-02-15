@@ -56,7 +56,7 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }} -p rustant-cli
+        run: cargo build --release --target ${{ matrix.target }} -p rustant
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 
@@ -96,6 +96,13 @@ jobs:
             fi
           done
 
+      - name: Generate checksums
+        run: |
+          for f in rustant-*.tar.gz rustant-*.exe; do
+            [ -f "$f" ] && sha256sum "$f" >> checksums-sha256.txt
+          done
+          cat checksums-sha256.txt
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -106,3 +113,106 @@ jobs:
             rustant-macos-x86_64.tar.gz
             rustant-macos-aarch64.tar.gz
             rustant-windows-x86_64.exe
+            checksums-sha256.txt
+
+  publish-crates:
+    name: Publish to crates.io
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Publish crates in dependency order
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          cargo publish -p rustant-core --allow-dirty || true
+          sleep 30
+          cargo publish -p rustant-tools --allow-dirty || true
+          sleep 30
+          cargo publish -p rustant-mcp --allow-dirty || true
+          sleep 15
+          cargo publish -p rustant-plugins --allow-dirty || true
+          sleep 15
+          cargo publish -p rustant --allow-dirty || true
+
+  update-homebrew:
+    name: Update Homebrew Formula
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release assets and compute SHA256
+        id: sha
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          BASE="https://github.com/DevJadhav/Rustant/releases/download/v${VERSION}"
+          for plat in macos-x86_64 macos-aarch64 linux-x86_64 linux-aarch64; do
+            curl -fsSL "${BASE}/rustant-${plat}.tar.gz" -o "${plat}.tar.gz"
+            echo "${plat//-/_}=$(sha256sum ${plat}.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          done
+
+      - name: Generate and push formula
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+
+          cat > rustant.rb << 'ENDFORMULA'
+          class Rustant < Formula
+            desc "Privacy-first autonomous personal agent built in Rust"
+            homepage "https://github.com/DevJadhav/Rustant"
+            version "VERSION_PLACEHOLDER"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/DevJadhav/Rustant/releases/download/v#{version}/rustant-macos-aarch64.tar.gz"
+                sha256 "SHA_MACOS_AARCH64"
+              else
+                url "https://github.com/DevJadhav/Rustant/releases/download/v#{version}/rustant-macos-x86_64.tar.gz"
+                sha256 "SHA_MACOS_X86_64"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/DevJadhav/Rustant/releases/download/v#{version}/rustant-linux-aarch64.tar.gz"
+                sha256 "SHA_LINUX_AARCH64"
+              else
+                url "https://github.com/DevJadhav/Rustant/releases/download/v#{version}/rustant-linux-x86_64.tar.gz"
+                sha256 "SHA_LINUX_X86_64"
+              end
+            end
+
+            def install
+              bin.install "rustant"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/rustant --version")
+            end
+          end
+          ENDFORMULA
+
+          # Substitute placeholders
+          sed -i "s/VERSION_PLACEHOLDER/${VERSION}/" rustant.rb
+          sed -i "s/SHA_MACOS_AARCH64/${{ steps.sha.outputs.macos_aarch64 }}/" rustant.rb
+          sed -i "s/SHA_MACOS_X86_64/${{ steps.sha.outputs.macos_x86_64 }}/" rustant.rb
+          sed -i "s/SHA_LINUX_AARCH64/${{ steps.sha.outputs.linux_aarch64 }}/" rustant.rb
+          sed -i "s/SHA_LINUX_X86_64/${{ steps.sha.outputs.linux_x86_64 }}/" rustant.rb
+
+          # Push to tap repo
+          git clone https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/DevJadhav/homebrew-rustant.git tap
+          mkdir -p tap/Formula
+          cp rustant.rb tap/Formula/rustant.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/rustant.rb
+          git commit -m "Update rustant to ${VERSION}" || true
+          git push

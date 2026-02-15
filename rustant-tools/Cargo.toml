@@ -4,7 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 description = "Tool implementations for Rustant - file, git, shell, and search tools"
+keywords = ["agent", "llm", "ai", "automation", "privacy"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 rustant-core = { workspace = true }

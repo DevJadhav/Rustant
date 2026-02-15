@@ -2081,6 +2081,62 @@ impl App {
                     }
                 }
             }
+            cmd if cmd.starts_with("/meeting") || cmd.starts_with("/meet ") || cmd == "/meet" => {
+                let sub = cmd
+                    .strip_prefix("/meeting")
+                    .or_else(|| cmd.strip_prefix("/meet"))
+                    .unwrap_or("")
+                    .trim();
+
+                #[cfg(target_os = "macos")]
+                {
+                    match sub {
+                        "status" | "" => match rustant_tools::meeting::RecordingState::load() {
+                            Some(state) if state.is_recording => {
+                                let app_info = state.meeting_app.as_deref().unwrap_or("unknown");
+                                let title_info = state.title.as_deref().unwrap_or("Untitled");
+                                let mode = if state.auto_flow {
+                                    "auto-transcribe"
+                                } else {
+                                    "manual"
+                                };
+                                let silence = if state.silence_monitor_active {
+                                    " | silence monitor: active"
+                                } else {
+                                    ""
+                                };
+                                self.push_system_msg(&format!(
+                                        "Recording in progress\n  Title: {title_info}\n  Started: {}\n  Audio: {}\n  App: {app_info}\n  Mode: {mode}{silence}",
+                                        state.started_at, state.audio_path
+                                    ));
+                            }
+                            _ => {
+                                self.push_system_msg(
+                                    "No active recording. Use /meeting record to start.",
+                                );
+                            }
+                        },
+                        "record" | "detect" | "stop" => {
+                            // These require async execution — dispatch as agent task
+                            let task = match sub {
+                                "record" => "Record my meeting using record_and_transcribe",
+                                "stop" => "Stop the meeting recording",
+                                "detect" => "Detect active meeting applications",
+                                _ => unreachable!(),
+                            };
+                            self.submit_task(task);
+                        }
+                        _ => {
+                            self.push_system_msg("Usage: /meeting detect|record|stop|status");
+                        }
+                    }
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    let _ = sub;
+                    self.push_system_msg("Meeting recording is only available on macOS.");
+                }
+            }
             other => {
                 // Use registry for unknown command suggestions
                 let registry = crate::slash::CommandRegistry::with_defaults();

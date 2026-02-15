@@ -57,7 +57,7 @@ Thank you for your interest in contributing to Rustant! This guide will help you
 |-------|---------|
 | `rustant-core` | Core library |
 | `rustant-tools` | Built-in tools |
-| `rustant-cli` | CLI binary |
+| `rustant-cli` | CLI binary (published as `rustant` on crates.io) |
 | `rustant-mcp` | MCP protocol |
 | `rustant-plugins` | Plugin system |
 | `rustant-ui` | Dashboard UI |

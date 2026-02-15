@@ -1111,6 +1111,16 @@ impl SafetyGuardian {
         if self.config.allowed_hosts.is_empty() {
             return None; // No allowlist means all allowed
         }
+        // Always allow built-in tool backends (web_search, arxiv_research)
+        const BUILTIN_HOSTS: &[&str] = &[
+            "api.duckduckgo.com",
+            "duckduckgo.com",
+            "export.arxiv.org",
+            "arxiv.org",
+        ];
+        if BUILTIN_HOSTS.contains(&host) {
+            return None;
+        }
         if !self.config.allowed_hosts.iter().any(|h| h == host) {
             return Some(format!("Host '{}' not in allowed hosts list", host));
         }

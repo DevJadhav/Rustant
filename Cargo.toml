@@ -15,6 +15,7 @@ edition = "2021"
 license = "MIT"
 authors = ["Dev Jadhav"]
 repository = "https://github.com/DevJadhav/Rustant"
+homepage = "https://github.com/DevJadhav/Rustant"
 description = "A high-performance, privacy-first autonomous personal agent built in Rust"
 
 [workspace.dependencies]
@@ -161,9 +162,10 @@ genpdf = "0.2"
 chrono-tz = "0.10"
 
 # Internal crates
-rustant-core = { path = "rustant-core" }
-rustant-tools = { path = "rustant-tools" }
-rustant-mcp = { path = "rustant-mcp" }
+rustant-core = { path = "rustant-core", version = "1.0.0" }
+rustant-tools = { path = "rustant-tools", version = "1.0.0" }
+rustant-mcp = { path = "rustant-mcp", version = "1.0.0" }
+rustant-plugins = { path = "rustant-plugins", version = "1.0.0" }
 
 [profile.release]
 lto = "thin"

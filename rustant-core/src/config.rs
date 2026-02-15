@@ -106,6 +106,8 @@ pub struct MeetingConfig {
     pub auto_transcribe: bool,
     /// Whether to auto-summarize after transcription.
     pub auto_summarize: bool,
+    /// Seconds of silence before auto-stopping a recording (0 = disabled).
+    pub silence_timeout_secs: u64,
 }
 
 impl Default for MeetingConfig {
@@ -119,6 +121,7 @@ impl Default for MeetingConfig {
             auto_detect_virtual_audio: true,
             auto_transcribe: true,
             auto_summarize: true,
+            silence_timeout_secs: 60,
         }
     }
 }

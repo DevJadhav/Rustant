@@ -3,7 +3,7 @@
 ## From Cargo (Recommended)
 
 ```bash
-cargo install rustant-cli
+cargo install rustant
 ```
 
 ## From Cargo with Binary Install
@@ -11,20 +11,25 @@ cargo install rustant-cli
 If you have `cargo-binstall`, you can install pre-built binaries:
 
 ```bash
-cargo binstall rustant-cli
+cargo binstall rustant
 ```
 
-## Homebrew (macOS)
+## Homebrew (macOS/Linux)
 
 ```bash
-brew tap DevJadhav/rustant
-brew install rustant
+brew install DevJadhav/rustant/rustant
 ```
 
 ## Shell Installer (Linux/macOS)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/DevJadhav/Rustant/main/scripts/install.sh | bash
+```
+
+You can also pin a specific version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DevJadhav/Rustant/main/scripts/install.sh | bash -s -- --version 1.0.0
 ```
 
 ## Pre-built Binaries
@@ -39,6 +44,8 @@ Download the latest release for your platform from the
 | macOS x86_64 | `rustant-macos-x86_64.tar.gz` |
 | macOS Apple Silicon | `rustant-macos-aarch64.tar.gz` |
 | Windows x86_64 | `rustant-windows-x86_64.exe` |
+
+Each release includes a `checksums-sha256.txt` file for verification.
 
 ## Build from Source
 

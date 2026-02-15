@@ -5555,7 +5555,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rustant-cli"
+name = "rustant"
 version = "1.0.0"
 dependencies = [
  "anyhow",

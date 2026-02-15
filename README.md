@@ -1,6 +1,7 @@
 # Rustant
 
 [![CI](https://github.com/DevJadhav/Rustant/actions/workflows/ci.yml/badge.svg)](https://github.com/DevJadhav/Rustant/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/rustant.svg)](https://crates.io/crates/rustant)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
 [![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](CHANGELOG.md)
@@ -30,14 +31,17 @@ Rustant is an LLM-powered agent that executes complex tasks through a Think-Act-
 ### Install
 
 ```bash
+# Cargo (from crates.io)
+cargo install rustant
+
+# Pre-built binary (faster, no compilation)
+cargo binstall rustant
+
+# Homebrew (macOS/Linux)
+brew install DevJadhav/rustant/rustant
+
 # Shell installer (Linux/macOS)
 curl -fsSL https://raw.githubusercontent.com/DevJadhav/Rustant/main/scripts/install.sh | bash
-
-# Homebrew (macOS)
-brew install DevJadhav/tap/rustant
-
-# Cargo
-cargo install rustant
 
 # Build from source
 git clone https://github.com/DevJadhav/Rustant.git

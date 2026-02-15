@@ -17,11 +17,17 @@ use rustant_core::voice::types::AudioChunk;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
+use tokio::sync::watch;
 use tracing::{debug, info, warn};
 
 /// Maximum chunk duration for Whisper API (10 minutes at 16kHz mono).
 const CHUNK_SAMPLES: usize = 16000 * 600; // 10 min * 16000 samples/sec
+
+/// Global cancellation channel for the silence monitor background task.
+static SILENCE_MONITOR_STOP: LazyLock<Mutex<Option<watch::Sender<bool>>>> =
+    LazyLock::new(|| Mutex::new(None));
 
 /// Recording state persisted to `.rustant/meeting-recording.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +38,12 @@ pub struct RecordingState {
     pub meeting_app: Option<String>,
     pub pid: Option<u32>,
     pub title: Option<String>,
+    /// Whether the silence monitor background task is active.
+    #[serde(default)]
+    pub silence_monitor_active: bool,
+    /// Whether auto-transcribe/save is enabled (record_and_transcribe flow).
+    #[serde(default)]
+    pub auto_flow: bool,
 }
 
 impl RecordingState {
@@ -39,7 +51,7 @@ impl RecordingState {
         PathBuf::from(".rustant/meeting-recording.json")
     }
 
-    fn load() -> Option<Self> {
+    pub fn load() -> Option<Self> {
         let path = Self::state_path();
         let content = std::fs::read_to_string(&path).ok()?;
         match serde_json::from_str(&content) {
@@ -253,6 +265,158 @@ fn get_api_key() -> Result<String, String> {
     })
 }
 
+/// Announce a message via macOS text-to-speech (`say` command).
+async fn tts_announce(message: &str) {
+    if let Err(e) = tokio::process::Command::new("say")
+        .args(["-v", "Samantha", message])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await
+    {
+        warn!(error = %e, "TTS announcement failed");
+    }
+}
+
+/// Background silence monitor that auto-stops recording after sustained silence.
+///
+/// Records short audio samples at regular intervals, feeds them to a
+/// `VoiceActivityDetector`, and tracks consecutive silence duration.
+/// When silence exceeds `silence_timeout_secs`, stops recording,
+/// announces via TTS, auto-transcribes, and saves to Notes.app.
+async fn silence_monitor(
+    pid: u32,
+    audio_path: String,
+    title: String,
+    silence_timeout_secs: u64,
+    mut cancel_rx: watch::Receiver<bool>,
+) {
+    use rustant_core::voice::audio_io::record_audio_chunk;
+    use rustant_core::voice::vad::VoiceActivityDetector;
+
+    let sample_duration_secs: f32 = 2.0;
+    let check_interval = Duration::from_secs(5);
+    let mut silence_duration_secs: u64 = 0;
+    // Lower threshold for meeting recording (ambient noise expected).
+    let mut vad = VoiceActivityDetector::new(0.005);
+
+    info!(
+        pid = pid,
+        timeout = silence_timeout_secs,
+        "Silence monitor started"
+    );
+
+    loop {
+        // Check for manual cancellation.
+        if *cancel_rx.borrow() {
+            debug!("Silence monitor cancelled");
+            return;
+        }
+
+        // Wait for the check interval or cancellation.
+        tokio::select! {
+            _ = tokio::time::sleep(check_interval) => {}
+            _ = cancel_rx.changed() => {
+                debug!("Silence monitor cancelled during sleep");
+                return;
+            }
+        }
+
+        // Record a short audio sample for VAD analysis.
+        match record_audio_chunk(sample_duration_secs, 16000).await {
+            Ok(chunk) => {
+                let event = vad.process_chunk(&chunk);
+                match event {
+                    rustant_core::voice::vad::VadEvent::SpeechStart => {
+                        silence_duration_secs = 0;
+                        debug!("Speech detected, resetting silence counter");
+                    }
+                    rustant_core::voice::vad::VadEvent::SpeechEnd => {
+                        silence_duration_secs += check_interval.as_secs();
+                        debug!(
+                            silence_secs = silence_duration_secs,
+                            "Speech ended, counting silence"
+                        );
+                    }
+                    rustant_core::voice::vad::VadEvent::NoChange => {
+                        if !vad.is_speaking() {
+                            silence_duration_secs += check_interval.as_secs();
+                        } else {
+                            silence_duration_secs = 0;
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "Silence monitor: failed to record sample");
+                // Don't count as silence on error — keep monitoring.
+                continue;
+            }
+        }
+
+        // Check if silence threshold exceeded.
+        if silence_duration_secs >= silence_timeout_secs {
+            info!(
+                silence_secs = silence_duration_secs,
+                "Silence timeout reached, auto-stopping recording"
+            );
+
+            // Stop the recording.
+            if let Err(e) = stop_recording(pid).await {
+                warn!(error = %e, "Silence monitor: failed to stop recording");
+            }
+
+            // Announce stop via TTS.
+            tts_announce("Meeting recording has stopped due to silence.").await;
+
+            // Auto-transcribe and save.
+            auto_transcribe_and_save(&audio_path, &title).await;
+
+            // Clear recording state.
+            RecordingState::clear().ok();
+
+            // Clear the monitor sender.
+            if let Ok(mut guard) = SILENCE_MONITOR_STOP.lock() {
+                *guard = None;
+            }
+
+            return;
+        }
+    }
+}
+
+/// Transcribe an audio file and save the result to Notes.app.
+async fn auto_transcribe_and_save(audio_path: &str, title: &str) {
+    let api_key = match get_api_key() {
+        Ok(key) => key,
+        Err(e) => {
+            warn!(error = %e, "Auto-transcribe: no API key");
+            return;
+        }
+    };
+
+    if !Path::new(audio_path).exists() {
+        warn!(path = audio_path, "Auto-transcribe: audio file not found");
+        return;
+    }
+
+    info!(path = audio_path, "Auto-transcribing audio");
+    match transcribe_audio_file(audio_path, &api_key).await {
+        Ok(transcript) if !transcript.is_empty() => {
+            let folder = "Meeting Transcripts";
+            let summary = "(Auto-transcribed — use LLM for a detailed summary)";
+            let action_items = "(Auto-transcribed — use LLM to extract action items)";
+
+            match save_to_notes(title, summary, action_items, &transcript, folder).await {
+                Ok(msg) => info!(result = %msg, "Auto-save to Notes.app succeeded"),
+                Err(e) => warn!(error = %e, "Auto-save to Notes.app failed"),
+            }
+        }
+        Ok(_) => info!("Auto-transcribe: no speech detected in audio"),
+        Err(e) => warn!(error = %e, "Auto-transcription failed"),
+    }
+}
+
 pub struct MacosMeetingRecorderTool;
 
 #[async_trait]
@@ -264,8 +428,10 @@ impl Tool for MacosMeetingRecorderTool {
     fn description(&self) -> &str {
         "Record, transcribe, and summarize meetings on macOS. Actions: \
          detect_meeting (check for active Zoom/Teams/FaceTime/etc.), \
-         record (start recording microphone audio), \
-         stop (stop recording and return audio file path), \
+         record (start recording microphone audio — manual flow), \
+         record_and_transcribe (RECOMMENDED: announces via TTS, records with silence auto-stop, \
+         auto-transcribes, and saves to Notes.app), \
+         stop (stop recording — auto-transcribes if using record_and_transcribe flow), \
          transcribe (transcribe audio file via OpenAI Whisper), \
          summarize_to_notes (save transcript summary to Notes.app), \
          status (check recording status)."
@@ -277,8 +443,8 @@ impl Tool for MacosMeetingRecorderTool {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["detect_meeting", "record", "stop", "transcribe", "summarize_to_notes", "status"],
-                    "description": "Action to perform"
+                    "enum": ["detect_meeting", "record", "record_and_transcribe", "stop", "transcribe", "summarize_to_notes", "status"],
+                    "description": "Action to perform. Use 'record_and_transcribe' for the full automated flow."
                 },
                 "title": {
                     "type": "string",
@@ -360,6 +526,8 @@ impl Tool for MacosMeetingRecorderTool {
                     meeting_app: meeting_app.clone(),
                     pid: Some(pid),
                     title,
+                    silence_monitor_active: false,
+                    auto_flow: false,
                 };
                 state.save().map_err(|e| ToolError::ExecutionFailed {
                     name: "macos_meeting_recorder".into(),
@@ -372,6 +540,98 @@ impl Tool for MacosMeetingRecorderTool {
                     .unwrap_or_default();
                 Ok(ToolOutput::text(format!(
                     "Recording started{app_info}.\nAudio: {audio_path}\nPID: {pid}\n\nUse action 'stop' to stop recording."
+                )))
+            }
+
+            "record_and_transcribe" => {
+                // Check if already recording
+                if let Some(state) = RecordingState::load() {
+                    if state.is_recording {
+                        return Err(ToolError::ExecutionFailed {
+                            name: "macos_meeting_recorder".into(),
+                            message: format!(
+                                "Already recording since {}. Use 'stop' first.",
+                                state.started_at
+                            ),
+                        });
+                    }
+                }
+
+                let title = args["title"]
+                    .as_str()
+                    .unwrap_or("Meeting")
+                    .to_string();
+                let timestamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
+                let audio_path = format!("/tmp/rustant_meeting_{timestamp}.wav");
+
+                // Detect meeting app for metadata
+                let meeting_app = detect_meeting_apps().await.ok();
+
+                // Announce recording start via macOS TTS
+                tts_announce("Meeting recording has started.").await;
+
+                debug!(audio_path = %audio_path, "Starting meeting recording with auto-flow");
+                let pid = start_recording(&audio_path, 16000).await.map_err(|e| {
+                    ToolError::ExecutionFailed {
+                        name: "macos_meeting_recorder".into(),
+                        message: e,
+                    }
+                })?;
+
+                // Load silence timeout from config (default 60s)
+                let silence_timeout = rustant_core::config::load_config(None, None)
+                    .ok()
+                    .and_then(|c| c.meeting.map(|m| m.silence_timeout_secs))
+                    .unwrap_or(60);
+
+                let state = RecordingState {
+                    is_recording: true,
+                    started_at: Utc::now().to_rfc3339(),
+                    audio_path: audio_path.clone(),
+                    meeting_app: meeting_app.clone(),
+                    pid: Some(pid),
+                    title: Some(title.clone()),
+                    silence_monitor_active: silence_timeout > 0,
+                    auto_flow: true,
+                };
+                state.save().map_err(|e| ToolError::ExecutionFailed {
+                    name: "macos_meeting_recorder".into(),
+                    message: e,
+                })?;
+
+                // Spawn silence monitor if timeout is configured
+                if silence_timeout > 0 {
+                    let (cancel_tx, cancel_rx) = watch::channel(false);
+                    if let Ok(mut guard) = SILENCE_MONITOR_STOP.lock() {
+                        *guard = Some(cancel_tx);
+                    }
+
+                    let monitor_path = audio_path.clone();
+                    let monitor_title = title.clone();
+                    tokio::spawn(silence_monitor(
+                        pid,
+                        monitor_path,
+                        monitor_title,
+                        silence_timeout,
+                        cancel_rx,
+                    ));
+                }
+
+                info!(pid = pid, path = %audio_path, auto_flow = true, "Meeting recording started with auto-flow");
+                let app_info = meeting_app
+                    .map(|a| format!(" ({a})"))
+                    .unwrap_or_default();
+                let silence_info = if silence_timeout > 0 {
+                    format!(" Auto-stop after {silence_timeout}s of silence.")
+                } else {
+                    String::new()
+                };
+                Ok(ToolOutput::text(format!(
+                    "Recording started{app_info} with auto-transcribe.\n\
+                     Audio: {audio_path}\nPID: {pid}\n\
+                     TTS announced to participants.{silence_info}\n\n\
+                     Recording will auto-transcribe and save to Notes.app when stopped.\n\
+                     Say 'stop the recording' or use /meeting stop to end manually."
                 )))
             }
 
@@ -393,11 +653,25 @@ impl Tool for MacosMeetingRecorderTool {
                     message: "Recording state corrupted: missing PID.".into(),
                 })?;
 
+                // Cancel the silence monitor if running
+                if state.silence_monitor_active {
+                    if let Ok(mut guard) = SILENCE_MONITOR_STOP.lock() {
+                        if let Some(sender) = guard.take() {
+                            let _ = sender.send(true);
+                        }
+                    }
+                }
+
                 debug!(pid = pid, "Stopping meeting recording");
                 stop_recording(pid).await.map_err(|e| ToolError::ExecutionFailed {
                     name: "macos_meeting_recorder".into(),
                     message: e,
                 })?;
+
+                // Announce stop via TTS if auto-flow
+                if state.auto_flow {
+                    tts_announce("Meeting recording has stopped.").await;
+                }
 
                 // Verify the file exists
                 let path = Path::new(&state.audio_path);
@@ -417,18 +691,70 @@ impl Tool for MacosMeetingRecorderTool {
                     .map(|m| m.len())
                     .unwrap_or(0);
 
-                RecordingState::clear().ok();
+                // Auto-flow: transcribe and save to Notes.app
+                if state.auto_flow {
+                    let title = state.title.as_deref().unwrap_or("Meeting");
 
-                info!(
-                    path = %state.audio_path,
-                    size_bytes = file_size,
-                    "Meeting recording stopped"
-                );
-                Ok(ToolOutput::text(format!(
-                    "Recording stopped.\nAudio file: {}\nSize: {:.1} MB\n\nUse action 'transcribe' with audio_path to transcribe.",
-                    state.audio_path,
-                    file_size as f64 / 1_048_576.0
-                )))
+                    info!(
+                        path = %state.audio_path,
+                        size_bytes = file_size,
+                        "Meeting recording stopped, auto-transcribing"
+                    );
+
+                    RecordingState::clear().ok();
+
+                    // Transcribe and save
+                    let api_key = get_api_key().map_err(|e| ToolError::ExecutionFailed {
+                        name: "macos_meeting_recorder".into(),
+                        message: e,
+                    })?;
+
+                    let transcript = transcribe_audio_file(&state.audio_path, &api_key)
+                        .await
+                        .map_err(|e| ToolError::ExecutionFailed {
+                            name: "macos_meeting_recorder".into(),
+                            message: format!("Auto-transcription failed: {e}"),
+                        })?;
+
+                    if transcript.is_empty() {
+                        return Ok(ToolOutput::text(
+                            "Recording stopped. No speech detected in the audio.".to_string(),
+                        ));
+                    }
+
+                    let folder = "Meeting Transcripts";
+                    let summary = "(Auto-transcribed — use LLM for a detailed summary)";
+                    let action_items = "(Auto-transcribed — use LLM to extract action items)";
+
+                    save_to_notes(title, summary, action_items, &transcript, folder)
+                        .await
+                        .map_err(|e| ToolError::ExecutionFailed {
+                            name: "macos_meeting_recorder".into(),
+                            message: format!("Failed to save to Notes.app: {e}"),
+                        })?;
+
+                    Ok(ToolOutput::text(format!(
+                        "Recording stopped. Transcript ({} chars) saved to Notes.app \
+                         in '{folder}' folder.\nAudio: {}\nSize: {:.1} MB",
+                        transcript.len(),
+                        state.audio_path,
+                        file_size as f64 / 1_048_576.0
+                    )))
+                } else {
+                    // Legacy manual flow — just stop
+                    RecordingState::clear().ok();
+
+                    info!(
+                        path = %state.audio_path,
+                        size_bytes = file_size,
+                        "Meeting recording stopped"
+                    );
+                    Ok(ToolOutput::text(format!(
+                        "Recording stopped.\nAudio file: {}\nSize: {:.1} MB\n\nUse action 'transcribe' with audio_path to transcribe.",
+                        state.audio_path,
+                        file_size as f64 / 1_048_576.0
+                    )))
+                }
             }
 
             "transcribe" => {
@@ -505,8 +831,18 @@ impl Tool for MacosMeetingRecorderTool {
                             .title
                             .map(|t| format!("\nTitle: {t}"))
                             .unwrap_or_default();
+                        let flow_info = if state.auto_flow {
+                            "\nMode: auto-transcribe (record_and_transcribe)"
+                        } else {
+                            "\nMode: manual (record)"
+                        };
+                        let silence_info = if state.silence_monitor_active {
+                            "\nSilence monitor: active"
+                        } else {
+                            ""
+                        };
                         Ok(ToolOutput::text(format!(
-                            "Recording in progress.\nStarted: {}\nAudio: {}{app_info}{title_info}",
+                            "Recording in progress.\nStarted: {}\nAudio: {}{app_info}{title_info}{flow_info}{silence_info}",
                             state.started_at, state.audio_path
                         )))
                     }
@@ -519,7 +855,7 @@ impl Tool for MacosMeetingRecorderTool {
             other => Err(ToolError::InvalidArguments {
                 name: "macos_meeting_recorder".to_string(),
                 reason: format!(
-                    "unknown action '{}'. Valid: detect_meeting, record, stop, transcribe, summarize_to_notes, status",
+                    "unknown action '{}'. Valid: detect_meeting, record, record_and_transcribe, stop, transcribe, summarize_to_notes, status",
                     other
                 ),
             }),
@@ -549,7 +885,7 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .len()
-                >= 6
+                >= 7 // detect_meeting, record, record_and_transcribe, stop, transcribe, summarize_to_notes, status
         );
         assert!(schema["required"]
             .as_array()
@@ -563,6 +899,7 @@ mod tests {
         assert_eq!(tool.name(), "macos_meeting_recorder");
         assert!(tool.description().contains("Record"));
         assert!(tool.description().contains("transcribe"));
+        assert!(tool.description().contains("record_and_transcribe"));
         assert_eq!(tool.risk_level(), RiskLevel::Execute);
         assert_eq!(tool.timeout(), Duration::from_secs(300));
     }
@@ -576,6 +913,8 @@ mod tests {
             meeting_app: Some("Zoom".to_string()),
             pid: Some(12345),
             title: Some("Test Meeting".to_string()),
+            silence_monitor_active: false,
+            auto_flow: false,
         };
 
         let json = serde_json::to_string(&state).unwrap();
@@ -585,6 +924,44 @@ mod tests {
         assert_eq!(deserialized.meeting_app, Some("Zoom".to_string()));
         assert_eq!(deserialized.pid, Some(12345));
         assert_eq!(deserialized.title, Some("Test Meeting".to_string()));
+        assert!(!deserialized.silence_monitor_active);
+        assert!(!deserialized.auto_flow);
+    }
+
+    #[test]
+    fn test_recording_state_serde_backward_compat() {
+        // Old state format without silence_monitor_active and auto_flow
+        let old_json = r#"{
+            "is_recording": true,
+            "started_at": "2026-02-06T10:00:00Z",
+            "audio_path": "/tmp/test.wav",
+            "meeting_app": "Zoom",
+            "pid": 12345,
+            "title": "Old Meeting"
+        }"#;
+        let state: RecordingState = serde_json::from_str(old_json).unwrap();
+        assert!(state.is_recording);
+        assert!(!state.silence_monitor_active);
+        assert!(!state.auto_flow);
+    }
+
+    #[test]
+    fn test_recording_state_auto_flow() {
+        let state = RecordingState {
+            is_recording: true,
+            started_at: "2026-02-06T10:00:00Z".to_string(),
+            audio_path: "/tmp/test.wav".to_string(),
+            meeting_app: None,
+            pid: Some(99999),
+            title: Some("Auto Meeting".to_string()),
+            silence_monitor_active: true,
+            auto_flow: true,
+        };
+
+        let json = serde_json::to_string(&state).unwrap();
+        let deserialized: RecordingState = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.silence_monitor_active);
+        assert!(deserialized.auto_flow);
     }
 
     #[test]
