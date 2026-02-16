@@ -35,6 +35,7 @@ pub mod sandbox;
 pub mod sanitize;
 pub mod scheduler;
 pub mod search;
+pub mod secret_ref;
 pub mod session_manager;
 pub mod skills;
 pub mod summarizer;
@@ -54,6 +55,8 @@ pub use browser::ChromiumCdpClient;
 pub use browser::{
     BrowserSecurityGuard, BrowserSession, CdpClient, MockCdpClient, PageSnapshot, SnapshotMode,
 };
+pub use channels::cdc::{CdcAction, CdcConfig, CdcProcessor, CdcState};
+pub use channels::style_tracker::{CommunicationStyleTracker, SenderStyleProfile};
 pub use channels::{
     AutoReplyEngine, Channel, ChannelAgentBridge, ChannelCapabilities, ChannelDigest,
     ChannelManager, ChannelMessage, ChannelStatus, ChannelType, ChannelUser, ClassificationCache,
@@ -132,6 +135,7 @@ pub use scheduler::{
     JobManager, JobStatus, WebhookEndpoint, WebhookHandler,
 };
 pub use search::{HybridSearchEngine, SearchConfig, SearchResult};
+pub use secret_ref::{MigrationResult, SecretRef, SecretResolveError, SecretResolver};
 pub use session_manager::{SessionEntry, SessionIndex, SessionManager};
 pub use skills::{
     parse_skill_md, validate_skill, ParseError as SkillParseError, SkillConfig, SkillDefinition,

@@ -135,6 +135,8 @@ pub struct ArxivLibraryState {
     pub collections: Vec<String>,
     #[serde(default)]
     pub digest_config: Option<DigestConfig>,
+    #[serde(default)]
+    pub implementations: Vec<ImplementationRecord>,
 }
 
 /// Configuration for daily paper digest.
@@ -145,6 +147,172 @@ pub struct DigestConfig {
     pub enabled: bool,
 }
 
+/// Configuration for a target programming language's project scaffold.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LanguageConfig {
+    pub language: String,
+    pub package_manager: String,
+    pub test_framework: String,
+    pub file_extension: String,
+    pub common_ml_libraries: Vec<String>,
+    /// Command to create an isolated environment (venv, etc.)
+    pub env_setup_commands: Vec<String>,
+    /// Command to activate the environment
+    pub env_activate: String,
+}
+
+/// A file in a project scaffold.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScaffoldFile {
+    pub path: String,
+    pub content: String,
+    pub is_test: bool,
+}
+
+/// A complete project scaffold generated from a paper.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectScaffold {
+    pub paper_id: String,
+    pub project_name: String,
+    pub language_config: LanguageConfig,
+    pub directory_structure: Vec<String>,
+    pub files: Vec<ScaffoldFile>,
+    pub dependencies: Vec<String>,
+    pub setup_commands: Vec<String>,
+    pub test_commands: Vec<String>,
+}
+
+/// Implementation mode for paper-to-code.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ImplementationMode {
+    StandaloneProject,
+    Notebook,
+}
+
+/// Status of a paper implementation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ImplementationStatus {
+    Scaffolded,
+    DepsInstalled,
+    TestsGenerated,
+    Implementing,
+    TestsPassing,
+    Complete,
+    Failed(String),
+}
+
+impl std::fmt::Display for ImplementationStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Scaffolded => write!(f, "scaffolded"),
+            Self::DepsInstalled => write!(f, "deps_installed"),
+            Self::TestsGenerated => write!(f, "tests_generated"),
+            Self::Implementing => write!(f, "implementing"),
+            Self::TestsPassing => write!(f, "tests_passing"),
+            Self::Complete => write!(f, "complete"),
+            Self::Failed(msg) => write!(f, "failed: {}", msg),
+        }
+    }
+}
+
+/// Record of a paper implementation tracked in the library.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImplementationRecord {
+    pub paper_id: String,
+    pub project_path: String,
+    pub language: String,
+    pub mode: ImplementationMode,
+    pub status: ImplementationStatus,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Get language-specific project configuration.
+///
+/// IMPORTANT: All language configs include environment isolation commands
+/// (venv for Python, cargo for Rust, etc.) to prevent polluting the system.
+pub fn language_config(lang: &str) -> Option<LanguageConfig> {
+    match lang.to_lowercase().as_str() {
+        "python" | "py" => Some(LanguageConfig {
+            language: "python".to_string(),
+            package_manager: "pip".to_string(),
+            test_framework: "pytest".to_string(),
+            file_extension: "py".to_string(),
+            common_ml_libraries: vec![
+                "numpy".into(),
+                "torch".into(),
+                "tensorflow".into(),
+                "scikit-learn".into(),
+                "matplotlib".into(),
+                "pandas".into(),
+            ],
+            env_setup_commands: vec!["python3 -m venv .venv".to_string()],
+            env_activate: "source .venv/bin/activate".to_string(),
+        }),
+        "rust" | "rs" => Some(LanguageConfig {
+            language: "rust".to_string(),
+            package_manager: "cargo".to_string(),
+            test_framework: "cargo test".to_string(),
+            file_extension: "rs".to_string(),
+            common_ml_libraries: vec![
+                "ndarray".into(),
+                "burn".into(),
+                "candle".into(),
+                "linfa".into(),
+                "plotters".into(),
+            ],
+            env_setup_commands: vec![], // Cargo handles isolation via Cargo.toml
+            env_activate: String::new(),
+        }),
+        "typescript" | "ts" | "javascript" | "js" => Some(LanguageConfig {
+            language: "typescript".to_string(),
+            package_manager: "npm".to_string(),
+            test_framework: "jest".to_string(),
+            file_extension: "ts".to_string(),
+            common_ml_libraries: vec![
+                "@tensorflow/tfjs".into(),
+                "onnxruntime-node".into(),
+                "mathjs".into(),
+                "chart.js".into(),
+            ],
+            env_setup_commands: vec!["npm init -y".to_string()],
+            env_activate: String::new(), // node_modules is project-local by default
+        }),
+        "go" | "golang" => Some(LanguageConfig {
+            language: "go".to_string(),
+            package_manager: "go mod".to_string(),
+            test_framework: "go test".to_string(),
+            file_extension: "go".to_string(),
+            common_ml_libraries: vec!["gonum.org/v1/gonum".into(), "gorgonia.org/gorgonia".into()],
+            env_setup_commands: vec!["go mod init paper_impl".to_string()],
+            env_activate: String::new(), // Go modules are project-local
+        }),
+        "cpp" | "c++" => Some(LanguageConfig {
+            language: "cpp".to_string(),
+            package_manager: "cmake".to_string(),
+            test_framework: "ctest".to_string(),
+            file_extension: "cpp".to_string(),
+            common_ml_libraries: vec!["Eigen".into(), "libtorch".into(), "xtensor".into()],
+            env_setup_commands: vec!["mkdir -p build".to_string()],
+            env_activate: String::new(),
+        }),
+        "julia" | "jl" => Some(LanguageConfig {
+            language: "julia".to_string(),
+            package_manager: "Pkg".to_string(),
+            test_framework: "Test".to_string(),
+            file_extension: "jl".to_string(),
+            common_ml_libraries: vec![
+                "Flux".into(),
+                "MLJ".into(),
+                "Plots".into(),
+                "DataFrames".into(),
+            ],
+            env_setup_commands: vec![], // Julia uses project-local Manifest.toml
+            env_activate: String::new(),
+        }),
+        _ => None,
+    }
+}
+
 // ── ArXiv API Client ──────────────────────────────────────────
 
 const ARXIV_API_BASE: &str = "https://export.arxiv.org/api/query";
@@ -153,6 +321,7 @@ const USER_AGENT: &str = "Rustant/1.0 (https://github.com/rustant)";
 /// HTTP client for the ArXiv API.
 pub struct ArxivClient {
     client: reqwest::Client,
+    last_request: std::sync::Mutex<Option<std::time::Instant>>,
 }
 
 impl ArxivClient {
@@ -163,11 +332,39 @@ impl ArxivClient {
             .user_agent(USER_AGENT)
             .build()
             .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            last_request: std::sync::Mutex::new(None),
+        })
+    }
+
+    /// Enforce a minimum 3-second delay between ArXiv API requests.
+    async fn rate_limit(&self) {
+        let wait_duration = {
+            let last = self.last_request.lock().unwrap();
+            if let Some(instant) = *last {
+                let elapsed = instant.elapsed();
+                if elapsed < Duration::from_secs(3) {
+                    Some(Duration::from_secs(3) - elapsed)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }; // MutexGuard is dropped here before any .await
+
+        if let Some(wait) = wait_duration {
+            tokio::time::sleep(wait).await;
+        }
+
+        let mut last = self.last_request.lock().unwrap();
+        *last = Some(std::time::Instant::now());
     }
 
     /// Search ArXiv with the given parameters.
     pub async fn search(&self, params: &ArxivSearchParams) -> Result<ArxivSearchResult, String> {
+        self.rate_limit().await;
         let url = build_search_url(params);
         tracing::debug!("ArXiv search URL: {}", url);
 
@@ -193,6 +390,7 @@ impl ArxivClient {
 
     /// Fetch a single paper by its ArXiv ID.
     pub async fn fetch_paper(&self, arxiv_id: &str) -> Result<ArxivPaper, String> {
+        self.rate_limit().await;
         let clean_id = arxiv_id.trim();
         validate_arxiv_id(clean_id)?;
 
@@ -904,6 +1102,7 @@ convolutional neural networks that include an encoder and a decoder.  </summary>
                 categories: vec!["cs.AI".to_string()],
                 enabled: true,
             }),
+            implementations: Vec::new(),
         };
 
         let json = serde_json::to_string_pretty(&state).unwrap();

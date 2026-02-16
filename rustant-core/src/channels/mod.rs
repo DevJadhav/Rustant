@@ -28,6 +28,9 @@ pub mod webchat;
 pub mod webhook;
 pub mod whatsapp;
 
+pub mod cdc;
+pub mod style_tracker;
+
 pub use agent_bridge::ChannelAgentBridge;
 pub use auto_reply::{AutoReplyEngine, PendingReply, ReplyStatus};
 pub use digest::{ChannelDigest, DigestActionItem, DigestCollector, DigestHighlight};
@@ -51,6 +54,9 @@ pub use types::{
     MessageId, StreamingMode, ThreadId,
 };
 pub use webhook::{WebhookChannel, WebhookConfig};
+
+pub use cdc::{CdcAction, CdcConfig, CdcProcessor, CdcState};
+pub use style_tracker::{CommunicationStyleTracker, SenderStyleProfile};
 
 use crate::error::RustantError;
 use async_trait::async_trait;
@@ -92,6 +98,16 @@ pub trait Channel: Send + Sync {
     /// How this channel receives incoming messages.
     fn streaming_mode(&self) -> StreamingMode {
         StreamingMode::default()
+    }
+
+    /// Poll for new messages since a given cursor position.
+    /// Returns (messages, new_cursor). Default falls back to receive_messages().
+    async fn receive_messages_since(
+        &self,
+        _cursor: Option<&str>,
+    ) -> Result<(Vec<ChannelMessage>, Option<String>), RustantError> {
+        let msgs = self.receive_messages().await?;
+        Ok((msgs, None))
     }
 }
 

@@ -7,10 +7,11 @@ The name: **Rust** + **Ass**istant = **Rustant**.
 ## Key Features
 
 - **Multi-provider LLM support** — OpenAI, Anthropic, Gemini, Azure, Ollama, vLLM with circuit-breaker failover
-- **39 built-in tools** — File I/O, Git, shell execution, search, productivity, research, cognitive extension (knowledge graph, experiments, code intelligence, content, skills, career, monitoring, life planning, privacy, self-improvement), and more
-- **13 messaging channels** — Slack, Discord, Telegram, Email, Teams, WhatsApp, Signal, Matrix, IRC, SMS, iMessage, WebChat, Webhook
-- **Three-tier memory** — Working, short-term, and long-term memory with auto-summarization
-- **Five-layer safety** — Input validation, authorization, sandboxing, output validation, and audit trail
+- **39 built-in tools** — File I/O, Git, shell execution, search, productivity, research (ArXiv with full TDD paper implementation pipeline), cognitive extension (knowledge graph, experiments, code intelligence, content, skills, career, monitoring, life planning, privacy, self-improvement), and more
+- **13 messaging channels** — Slack, Discord, Telegram, Email, Teams, WhatsApp, Signal, Matrix, IRC, SMS, iMessage, WebChat, Webhook with CDC auto-reply and communication style learning
+- **Three-tier memory** — Working, short-term, and long-term memory with auto-summarization and communication style facts from CDC
+- **Five-layer safety** — Input validation, authorization, sandboxing, output validation, and audit trail with SecretRef credential security
+- **API resilience** — Automatic exponential backoff retry for all LLM providers with configurable RetryConfig
 - **Voice interface** — Text-to-speech and speech-to-text via OpenAI
 - **Browser automation** — Headless Chrome via CDP
 - **Workflow engine** — Declarative multi-step workflows with cron scheduling

@@ -74,6 +74,37 @@ Credentials are stored using the OS keyring via the `keyring` crate:
 
 OAuth tokens include refresh token support with automatic expiration tracking.
 
+### SecretRef
+
+The `SecretRef` type provides a unified way to reference secrets:
+
+- `"keychain:<account>"` — resolve from OS keychain
+- `"env:<VAR_NAME>"` — resolve from environment variable
+- Plain string — inline plaintext (deprecated, emits warnings)
+
+Channel tokens can be migrated from plaintext to keychain:
+
+```bash
+rustant setup migrate-secrets
+```
+
+This scans all channel configs for plaintext tokens, stores them in the OS keychain under `channel:{type}:{field}` namespaces, and replaces the config values with `SecretRef::keychain(...)` references.
+
+## API Rate Limiting
+
+All LLM providers implement automatic retry with exponential backoff for transient errors (429 rate limits, timeouts, connection failures). The `RetryConfig` is configurable:
+
+```toml
+[llm.retry]
+max_retries = 3
+initial_backoff_ms = 1000
+max_backoff_ms = 60000
+backoff_multiplier = 2.0
+jitter = true
+```
+
+Non-retryable errors (authentication failures, parse errors) fail immediately without retry.
+
 ## Configuration
 
 ```toml

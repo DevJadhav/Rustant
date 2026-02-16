@@ -279,10 +279,7 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
         }
         // Slack tool
         "slack" => {
-            let action = args
-                .get("action")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
+            let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("?");
             let channel = args.get("channel").and_then(|v| v.as_str());
             let message = args.get("message").and_then(|v| v.as_str());
             match (channel, message) {

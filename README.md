@@ -174,6 +174,82 @@ digest = "hourly"
 
 REPL/TUI commands: `/digest`, `/digest history`, `/replies`, `/replies approve <id>`, `/reminders`, `/reminders dismiss <id>`, `/intelligence`, `/intelligence on/off`.
 
+### CDC — Change Data Capture
+
+Stateful channel polling with cursor-based tracking, reply-chain detection, and communication style learning:
+
+- **Cursor-Based Polling** — Tracks per-channel message cursors to avoid re-processing. State persisted to `.rustant/cdc/state.json`
+- **Reply-Chain Detection** — Tracks sent message IDs to prioritize replies to agent messages
+- **Communication Style Learning** — Per-sender style profiles (formality, emoji usage, greetings, topics) feed into long-term memory for adaptive responses
+- **Background Polling** — Configurable per-channel intervals (default 60s) with enable/disable per channel
+- **Natural Language Control** — "change slack polling to 5 min", "stop imessage polling", "disable cdc"
+
+```toml
+[cdc]
+enabled = true
+default_interval_secs = 60
+
+[cdc.channel_intervals]
+slack = 30
+email = 300
+```
+
+REPL/TUI commands: `/cdc status`, `/cdc on/off`, `/cdc interval <channel> <secs>`, `/cdc enable/disable <channel>`, `/cdc cursors`, `/cdc style`.
+
+### API Key Security
+
+Secure credential management with keychain migration:
+
+- **SecretRef** — Unified secret reference type: `keychain:<account>`, `env:<VAR>`, or inline plaintext (deprecated with warnings)
+- **Automatic Migration** — `rustant setup migrate-secrets` moves plaintext tokens from config to OS keychain
+- **Backward Compatible** — Existing configs continue working with deprecation warnings
+
+```toml
+# After migration
+[channels.slack]
+bot_token_ref = "keychain:channel:slack:bot_token"
+```
+
+### API Rate Limiting & Retry
+
+Automatic exponential backoff with jitter for all LLM providers:
+
+- **Retryable Errors** — 429 Rate Limited, timeouts, connection failures, streaming errors
+- **Non-Retryable** — Authentication failures, response parse errors (fail immediately)
+- **ArXiv Rate Limiting** — 3-second minimum delay between API requests
+- **Slack 429 Handling** — Respects `Retry-After` headers
+
+```toml
+[llm.retry]
+max_retries = 3
+initial_backoff_ms = 1000
+max_backoff_ms = 60000
+backoff_multiplier = 2.0
+jitter = true
+```
+
+### ArXiv Implementation Pipeline
+
+Full TDD project scaffolding from academic papers with environment isolation:
+
+- **`implement`** — Generate complete project scaffold (tests first) for Python, Rust, TypeScript, Go, C++, Julia
+- **`setup_env`** — Language-specific environment setup (Python venv, Rust cargo, Node local modules)
+- **`verify`** — Run lint, tests, and type checking for an implementation
+- **`implementation_status`** — Track all paper implementations with lifecycle status
+
+Environment isolation ensures implementations never affect the system:
+- Python: always uses `python3 -m venv`
+- Rust: isolated cargo project
+- Node: local `node_modules` only
+- Go: go modules
+
+```
+> implement paper 1706.03762 in python
+> setup environment for implementation
+> verify implementation passes tests
+> show implementation status
+```
+
 ### Voice & Audio
 
 - **Speech-to-Text** — OpenAI Whisper (cloud and local models)
@@ -307,7 +383,7 @@ Code intelligence powered by language servers (Rust, Python, TypeScript, Go, Jav
 
 | Tool | Description |
 |------|-------------|
-| `arxiv_research` | ArXiv paper search, analysis, library management, BibTeX export, paper-to-code |
+| `arxiv_research` | ArXiv paper search, analysis, library management, BibTeX export, paper-to-code, full TDD project scaffolding with environment isolation |
 
 ### Cognitive Extension Tools (10)
 
@@ -368,6 +444,7 @@ rustant setup                              # Interactive provider setup wizard
 rustant init                               # Smart project init (auto-detect type, generate config)
 rustant config init                        # Create default config
 rustant config show                        # Display current config
+rustant setup migrate-secrets              # Migrate plaintext tokens to OS keychain
 
 # Sessions
 rustant resume [name]                      # Resume a session (most recent if no name)
@@ -479,6 +556,10 @@ rustant ui [--port 18790]                  # Launch Tauri dashboard
 /skill list|info|validate <path>          # Skill management (SKILL.md files)
 /plugin list|info <name>                  # Plugin management
 /update check|install                     # Check for and install updates
+/cdc status|on|off                        # CDC polling control
+/cdc interval <channel> <secs>            # Set per-channel polling interval
+/cdc enable|disable <channel>             # Per-channel CDC toggle
+/cdc cursors|style                        # Show cursor positions or learned styles
 ```
 
 ## Configuration
@@ -512,8 +593,16 @@ max_iterations = 50
 window_size = 20
 enable_persistence = true
 
+[llm.retry]
+max_retries = 3
+initial_backoff_ms = 1000
+
 [channels.slack]
 bot_token_env = "SLACK_BOT_TOKEN"
+
+[cdc]
+enabled = true
+default_interval_secs = 60
 
 [gateway]
 enabled = true
@@ -529,7 +618,7 @@ See the [Configuration Guide](docs/src/getting-started/configuration.md) for ful
 
 ## Security & Privacy
 
-- **Credential Storage** — OS-native keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service)
+- **Credential Storage** — OS-native keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service) with `SecretRef` abstraction for keychain/env/inline resolution and automatic migration from plaintext configs
 - **OAuth 2.0 + PKCE** — Browser-based authentication for LLM providers and channels
 - **WASM Sandboxing** — Plugin isolation via wasmi with capability-based permissions
 - **Filesystem Sandboxing** — Path restrictions via cap-std

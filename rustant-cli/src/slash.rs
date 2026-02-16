@@ -956,6 +956,24 @@ impl CommandRegistry {
             ),
         });
         self.register(CommandInfo {
+            name: "/cdc",
+            aliases: &[],
+            description: "Change Data Capture: background channel polling and auto-reply",
+            usage: "/cdc [status|on|off|interval <channel> <secs>|enable <channel>|disable <channel>|cursors|style]",
+            category: CommandCategory::System,
+            tui_only: false,
+            detailed_help: Some(
+                "Manage background channel polling.\n\n\
+                 Subcommands:\n  status   — Show polling state and intervals\n  \
+                 on/off   — Enable/disable global CDC\n  \
+                 interval — Set per-channel polling interval\n  \
+                 enable   — Enable a specific channel\n  \
+                 disable  — Disable a specific channel\n  \
+                 cursors  — Show cursor positions\n  \
+                 style    — Show learned communication style profiles",
+            ),
+        });
+        self.register(CommandInfo {
             name: "/improve",
             aliases: &["/meta"],
             description: "Self-improvement: usage patterns, performance, and preferences",
@@ -1168,10 +1186,10 @@ mod tests {
     #[test]
     fn test_register_defaults_populates() {
         let registry = CommandRegistry::with_defaults();
-        // We have 42+ commands registered (25 core + 7 TUI-only + 9 CLI parity + 1 arxiv)
+        // We have 43+ commands registered (25 core + 7 TUI-only + 9 CLI parity + 1 arxiv + 1 cdc)
         assert!(
-            registry.len() >= 43,
-            "Expected at least 43 commands, got {}",
+            registry.len() >= 44,
+            "Expected at least 44 commands, got {}",
             registry.len()
         );
     }

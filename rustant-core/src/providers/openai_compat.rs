@@ -672,6 +672,7 @@ mod tests {
             credential_store_key: None,
             auth_method: String::new(),
             api_key: None,
+            retry: crate::config::RetryConfig::default(),
         }
     }
 

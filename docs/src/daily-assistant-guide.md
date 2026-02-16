@@ -190,6 +190,33 @@ Interact with Finder.
 - Prompt injection detection is enabled by default
 - Denied paths protect sensitive files (.env, .ssh, credentials)
 
+## Channel Auto-Reply (CDC)
+
+Rustant can monitor your messaging channels and automatically reply to incoming messages:
+
+```
+/cdc on                    # Start background polling
+/cdc interval slack 30     # Poll Slack every 30 seconds
+/cdc style                 # See learned communication profiles
+```
+
+The agent learns each sender's communication style (formality, emoji usage, greeting patterns) and adapts its responses over time.
+
+## ArXiv Paper Implementation
+
+Implement academic papers as working code with full environment isolation:
+
+```
+> implement paper 1706.03762 in python
+```
+
+This creates a complete project scaffold with:
+- Virtual environment (venv for Python, cargo for Rust)
+- Test files first (TDD approach)
+- Implementation stubs with paper section references
+- Dependency management
+- README with paper citation
+
 ## Troubleshooting
 
 ### "Permission denied" for Calendar/Reminders/Notes

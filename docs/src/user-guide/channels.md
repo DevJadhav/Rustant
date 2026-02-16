@@ -77,3 +77,54 @@ poll_interval_secs = 60
 ## Channel Agent Bridge
 
 When channels are enabled, incoming messages are routed to the agent via the `ChannelAgentBridge`. The bridge normalizes messages from all platforms into a unified format, routes them to the agent, and sends responses back through the originating channel.
+
+## Change Data Capture (CDC)
+
+CDC provides stateful, cursor-based polling for all channels with automatic reply-chain detection and communication style learning.
+
+### How It Works
+
+1. **Cursor Tracking** — Each channel maintains a cursor (e.g., Slack timestamp, IMAP UID) to track which messages have been processed. No duplicate processing.
+2. **Reply-Chain Detection** — The agent tracks message IDs it has sent. Incoming replies to these messages receive priority boost.
+3. **Style Learning** — Per-sender communication profiles (formality, emoji usage, greeting patterns, topics) are built over time and fed into long-term memory for adaptive responses.
+
+### CDC Commands
+
+```
+/cdc status              # Show polling state and per-channel intervals
+/cdc on                  # Enable CDC globally
+/cdc off                 # Disable CDC globally
+/cdc interval slack 30   # Set Slack polling to 30 seconds
+/cdc enable email        # Enable CDC for email
+/cdc disable imessage    # Disable CDC for iMessage
+/cdc cursors             # Show current cursor positions
+/cdc style               # Show learned communication style profiles
+```
+
+### CDC Configuration
+
+```toml
+[cdc]
+enabled = true
+default_interval_secs = 60
+sent_record_ttl_days = 7
+style_fact_threshold = 50
+
+[cdc.channel_intervals]
+slack = 30
+email = 300
+```
+
+## Credential Security
+
+Channel tokens support the `SecretRef` format for secure storage:
+
+- **Keychain**: `bot_token_ref = "keychain:channel:slack:bot_token"` — stored in OS keychain
+- **Environment**: `bot_token_ref = "env:SLACK_BOT_TOKEN"` — resolved from environment variable
+- **Inline** (deprecated): plain string values still work but emit warnings
+
+Migrate existing plaintext tokens to keychain:
+
+```bash
+rustant setup migrate-secrets
+```

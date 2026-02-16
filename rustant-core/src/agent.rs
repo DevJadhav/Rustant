@@ -1673,10 +1673,7 @@ impl Agent {
                             .as_str()
                             .unwrap_or("unknown")
                             .to_string(),
-                        preview: format!(
-                            ":{}:",
-                            arguments["emoji"].as_str().unwrap_or("?")
-                        ),
+                        preview: format!(":{}:", arguments["emoji"].as_str().unwrap_or("?")),
                         priority: MessagePriority::Normal,
                     },
                     _ => ActionDetails::Other {
@@ -2397,12 +2394,10 @@ impl Agent {
 
         match failed_tool {
             // Redirect GUI scripting / app control / shell to slack for Slack tasks
-            "macos_gui_scripting" | "macos_app_control" | "shell_exec" if is_slack_task => {
-                Some((
-                    "slack".to_string(),
-                    serde_json::json!({"action": "send_message"}),
-                ))
-            }
+            "macos_gui_scripting" | "macos_app_control" | "shell_exec" if is_slack_task => Some((
+                "slack".to_string(),
+                serde_json::json!({"action": "send_message"}),
+            )),
             // Redirect Safari/shell/curl to arxiv_research for paper tasks
             "macos_safari" | "shell_exec" | "web_fetch" | "web_search" if is_paper_task => {
                 // Extract query from the task description

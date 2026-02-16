@@ -392,11 +392,10 @@ async fn slack_api_get(
         })?;
 
     let status = resp.status();
-    let body: serde_json::Value =
-        resp.json().await.map_err(|e| ToolError::ExecutionFailed {
-            name: "slack".to_string(),
-            message: format!("Failed to parse response: {}", e),
-        })?;
+    let body: serde_json::Value = resp.json().await.map_err(|e| ToolError::ExecutionFailed {
+        name: "slack".to_string(),
+        message: format!("Failed to parse response: {}", e),
+    })?;
 
     if !status.is_success() {
         return Err(ToolError::ExecutionFailed {
@@ -592,7 +591,9 @@ mod tests {
         std::env::set_var("SLACK_BOT_TOKEN", "xoxb-test-token");
         let tool = SlackTool::new(PathBuf::from("/tmp"));
         let result = tool
-            .execute(json!({"action": "add_reaction", "channel": "#general", "thread_ts": "123.456"}))
+            .execute(
+                json!({"action": "add_reaction", "channel": "#general", "thread_ts": "123.456"}),
+            )
             .await;
         assert!(result.is_err());
         std::env::remove_var("SLACK_BOT_TOKEN");

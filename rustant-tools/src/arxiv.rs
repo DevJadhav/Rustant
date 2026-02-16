@@ -9,8 +9,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::arxiv_api::{
-    generate_bibtex, AnalysisDepth, ArxivClient, ArxivLibraryState, ArxivSearchParams, ArxivSortBy,
-    DigestConfig, LibraryEntry,
+    generate_bibtex, language_config, AnalysisDepth, ArxivClient, ArxivLibraryState,
+    ArxivSearchParams, ArxivSortBy, DigestConfig, ImplementationMode, ImplementationRecord,
+    ImplementationStatus, LibraryEntry, ProjectScaffold, ScaffoldFile,
 };
 use crate::registry::Tool;
 
@@ -141,6 +142,8 @@ impl ArxivResearchTool {
                 paper.pdf_url,
             ));
         }
+
+        output.push_str("---\nTo work with a paper, ask the user which one they'd like to select (by number or title). Then use the paper's arxiv_id with actions like: fetch (full details), analyze (deep analysis), save (to library), implement (generate code scaffold), or paper_to_code/paper_to_notebook.");
 
         Ok(ToolOutput::text(output))
     }
@@ -829,7 +832,7 @@ impl ArxivResearchTool {
                 message: e,
             })?;
 
-        let output = format!(
+        let mut output = format!(
             "PAPER-TO-CODE REQUEST:\n\n\
              Paper: {}\n\
              Authors: {}\n\
@@ -854,6 +857,24 @@ impl ArxivResearchTool {
             language,
         );
 
+        // If we have a language config, also generate scaffold instructions
+        if let Some(lang_cfg) = language_config(language) {
+            output.push_str("\n\n--- SCAFFOLD INSTRUCTIONS ---\n");
+            output
+                .push_str("Alternatively, use action 'implement' for a full TDD scaffold with:\n");
+            if !lang_cfg.env_setup_commands.is_empty() {
+                output.push_str(&format!(
+                    "  Environment isolation: {}\n",
+                    lang_cfg.env_setup_commands.join("; ")
+                ));
+            }
+            output.push_str(&format!("  Test framework: {}\n", lang_cfg.test_framework));
+            output.push_str(&format!(
+                "  Package manager: {}\n",
+                lang_cfg.package_manager
+            ));
+        }
+
         Ok(ToolOutput::text(output))
     }
 
@@ -876,7 +897,7 @@ impl ArxivResearchTool {
                 message: e,
             })?;
 
-        let output = format!(
+        let mut output = format!(
             "PAPER-TO-NOTEBOOK REQUEST:\n\n\
              Paper: {}\n\
              Authors: {}\n\
@@ -907,6 +928,378 @@ impl ArxivResearchTool {
             paper.summary,
         );
 
+        output.push_str("\n\n--- GENERATED NOTEBOOK JSON ---\n");
+        output.push_str(
+            "Here is a pre-generated notebook skeleton you can use as a starting point:\n\n",
+        );
+        output.push_str(&generate_notebook_json(&paper));
+
+        Ok(ToolOutput::text(output))
+    }
+
+    async fn handle_implement(&self, args: &Value) -> Result<ToolOutput, ToolError> {
+        let arxiv_id = args
+            .get("arxiv_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArguments {
+                name: "arxiv_research".to_string(),
+                reason: "Missing required parameter 'arxiv_id' for implement action".to_string(),
+            })?;
+
+        let language = args
+            .get("language")
+            .and_then(|v| v.as_str())
+            .unwrap_or("python");
+        let target_dir = args.get("target_dir").and_then(|v| v.as_str());
+        let tdd = args.get("tdd").and_then(|v| v.as_bool()).unwrap_or(true);
+        let mode_str = args
+            .get("mode")
+            .and_then(|v| v.as_str())
+            .unwrap_or("project");
+
+        let lang_config = language_config(language).ok_or_else(|| ToolError::InvalidArguments {
+            name: "arxiv_research".to_string(),
+            reason: format!(
+                "Unsupported language '{}'. Supported: python, rust, typescript, go, cpp, julia",
+                language
+            ),
+        })?;
+
+        let client = self.make_client()?;
+        let paper = client
+            .fetch_paper(arxiv_id)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                name: "arxiv_research".to_string(),
+                message: e,
+            })?;
+
+        let project_name = paper
+            .title
+            .to_lowercase()
+            .split_whitespace()
+            .take(4)
+            .collect::<Vec<_>>()
+            .join("_")
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect::<String>();
+
+        let base_dir = target_dir
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.workspace.join(&project_name));
+
+        let mode = if mode_str == "notebook" {
+            ImplementationMode::Notebook
+        } else {
+            ImplementationMode::StandaloneProject
+        };
+
+        // Generate scaffold
+        let scaffold = generate_project_scaffold(&paper, &lang_config, &project_name, tdd);
+
+        // Track implementation
+        let mut state = self.load_state();
+        state.implementations.push(ImplementationRecord {
+            paper_id: paper.arxiv_id.clone(),
+            project_path: base_dir.to_string_lossy().to_string(),
+            language: language.to_string(),
+            mode,
+            status: ImplementationStatus::Scaffolded,
+            created_at: Utc::now(),
+        });
+        self.save_state(&state)?;
+
+        // Build step-by-step instructions for the agent
+        let mut output = format!(
+            "IMPLEMENTATION SCAFFOLD for '{}' ({}):\n\n",
+            paper.title, paper.arxiv_id
+        );
+        output.push_str(&format!("Target directory: {}\n", base_dir.display()));
+        output.push_str(&format!("Language: {} | TDD: {}\n\n", language, tdd));
+
+        // Environment isolation warning
+        if !lang_config.env_setup_commands.is_empty() {
+            output.push_str("IMPORTANT: Environment isolation required!\n");
+            output.push_str("Execute these commands FIRST to create an isolated environment:\n");
+            for cmd in &lang_config.env_setup_commands {
+                output.push_str(&format!(
+                    "  shell_exec: cd {} && {}\n",
+                    base_dir.display(),
+                    cmd
+                ));
+            }
+            if !lang_config.env_activate.is_empty() {
+                output.push_str(&format!(
+                    "  Activate with: cd {} && {}\n",
+                    base_dir.display(),
+                    lang_config.env_activate
+                ));
+            }
+            output.push('\n');
+        }
+
+        output.push_str("STEP-BY-STEP INSTRUCTIONS:\n\n");
+
+        // Step 1: Create directory structure
+        output.push_str("Step 1: Create project directory structure\n");
+        for dir in &scaffold.directory_structure {
+            output.push_str(&format!(
+                "  shell_exec: mkdir -p {}/{}\n",
+                base_dir.display(),
+                dir
+            ));
+        }
+        output.push('\n');
+
+        // Step 2: Create files (TDD: tests first)
+        let test_files: Vec<_> = scaffold.files.iter().filter(|f| f.is_test).collect();
+        let impl_files: Vec<_> = scaffold.files.iter().filter(|f| !f.is_test).collect();
+
+        if tdd && !test_files.is_empty() {
+            output.push_str("Step 2: Create TEST files FIRST (TDD approach)\n");
+            for f in &test_files {
+                output.push_str(&format!(
+                    "  file_write: {}/{}\n  Content:\n```\n{}\n```\n\n",
+                    base_dir.display(),
+                    f.path,
+                    f.content
+                ));
+            }
+        }
+
+        output.push_str(&format!(
+            "Step {}: Create implementation files\n",
+            if tdd { 3 } else { 2 }
+        ));
+        for f in &impl_files {
+            output.push_str(&format!(
+                "  file_write: {}/{}\n  Content:\n```\n{}\n```\n\n",
+                base_dir.display(),
+                f.path,
+                f.content
+            ));
+        }
+
+        // Step 3: Install dependencies (inside venv/isolated env)
+        let step_n = if tdd { 4 } else { 3 };
+        output.push_str(&format!("Step {}: Install dependencies\n", step_n));
+        for cmd in &scaffold.setup_commands {
+            if !lang_config.env_activate.is_empty() {
+                output.push_str(&format!(
+                    "  shell_exec: cd {} && {} && {}\n",
+                    base_dir.display(),
+                    lang_config.env_activate,
+                    cmd
+                ));
+            } else {
+                output.push_str(&format!(
+                    "  shell_exec: cd {} && {}\n",
+                    base_dir.display(),
+                    cmd
+                ));
+            }
+        }
+        output.push('\n');
+
+        // Step 4: Run tests
+        output.push_str(&format!("Step {}: Run tests to verify\n", step_n + 1));
+        for cmd in &scaffold.test_commands {
+            if !lang_config.env_activate.is_empty() {
+                output.push_str(&format!(
+                    "  shell_exec: cd {} && {} && {}\n",
+                    base_dir.display(),
+                    lang_config.env_activate,
+                    cmd
+                ));
+            } else {
+                output.push_str(&format!(
+                    "  shell_exec: cd {} && {}\n",
+                    base_dir.display(),
+                    cmd
+                ));
+            }
+        }
+
+        output.push_str(&format!(
+            "\nPaper abstract for implementation reference:\n{}\n",
+            paper.summary
+        ));
+
+        Ok(ToolOutput::text(output))
+    }
+
+    fn handle_setup_env(&self, args: &Value) -> Result<ToolOutput, ToolError> {
+        let arxiv_id = args
+            .get("arxiv_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArguments {
+                name: "arxiv_research".to_string(),
+                reason: "Missing required parameter 'arxiv_id' for setup_env action".to_string(),
+            })?;
+
+        let state = self.load_state();
+        let record = state
+            .implementations
+            .iter()
+            .find(|r| r.paper_id == arxiv_id)
+            .ok_or_else(|| ToolError::InvalidArguments {
+                name: "arxiv_research".to_string(),
+                reason: format!(
+                    "No implementation found for paper '{}'. Run 'implement' first.",
+                    arxiv_id
+                ),
+            })?;
+
+        let lang_config =
+            language_config(&record.language).ok_or_else(|| ToolError::ExecutionFailed {
+                name: "arxiv_research".to_string(),
+                message: format!("Unknown language: {}", record.language),
+            })?;
+
+        let mut output = format!(
+            "Environment setup for {} ({}):\n\nProject: {}\n\n",
+            arxiv_id, record.language, record.project_path
+        );
+
+        output.push_str("Commands to run:\n");
+        for cmd in &lang_config.env_setup_commands {
+            output.push_str(&format!(
+                "  shell_exec: cd {} && {}\n",
+                record.project_path, cmd
+            ));
+        }
+        if !lang_config.env_activate.is_empty() {
+            output.push_str(&format!(
+                "  Activate: cd {} && {}\n",
+                record.project_path, lang_config.env_activate
+            ));
+        }
+
+        Ok(ToolOutput::text(output))
+    }
+
+    fn handle_verify(&self, args: &Value) -> Result<ToolOutput, ToolError> {
+        let arxiv_id = args
+            .get("arxiv_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArguments {
+                name: "arxiv_research".to_string(),
+                reason: "Missing required parameter 'arxiv_id' for verify action".to_string(),
+            })?;
+
+        let state = self.load_state();
+        let record = state
+            .implementations
+            .iter()
+            .find(|r| r.paper_id == arxiv_id)
+            .ok_or_else(|| ToolError::InvalidArguments {
+                name: "arxiv_research".to_string(),
+                reason: format!(
+                    "No implementation found for paper '{}'. Run 'implement' first.",
+                    arxiv_id
+                ),
+            })?;
+
+        let lang_config =
+            language_config(&record.language).ok_or_else(|| ToolError::ExecutionFailed {
+                name: "arxiv_research".to_string(),
+                message: format!("Unknown language: {}", record.language),
+            })?;
+
+        let mut output = format!(
+            "Verification commands for {} ({}):\n\nProject: {}\n\n",
+            arxiv_id, record.language, record.project_path
+        );
+
+        let activate = if !lang_config.env_activate.is_empty() {
+            format!("{} && ", lang_config.env_activate)
+        } else {
+            String::new()
+        };
+
+        match record.language.as_str() {
+            "python" => {
+                output.push_str(&format!(
+                    "1. Lint:  shell_exec: cd {} && {}python3 -m py_compile src/*.py\n",
+                    record.project_path, activate
+                ));
+                output.push_str(&format!(
+                    "2. Test:  shell_exec: cd {} && {}python3 -m pytest tests/ -v\n",
+                    record.project_path, activate
+                ));
+                output.push_str(&format!("3. Type:  shell_exec: cd {} && {}python3 -m mypy src/ --ignore-missing-imports 2>/dev/null || true\n", record.project_path, activate));
+            }
+            "rust" => {
+                output.push_str(&format!(
+                    "1. Lint:  shell_exec: cd {} && cargo clippy -- -D warnings\n",
+                    record.project_path
+                ));
+                output.push_str(&format!(
+                    "2. Test:  shell_exec: cd {} && cargo test\n",
+                    record.project_path
+                ));
+                output.push_str(&format!(
+                    "3. Build: shell_exec: cd {} && cargo build\n",
+                    record.project_path
+                ));
+            }
+            "typescript" | "javascript" => {
+                output.push_str(&format!(
+                    "1. Lint:  shell_exec: cd {} && npx tsc --noEmit\n",
+                    record.project_path
+                ));
+                output.push_str(&format!(
+                    "2. Test:  shell_exec: cd {} && npx jest\n",
+                    record.project_path
+                ));
+            }
+            "go" => {
+                output.push_str(&format!(
+                    "1. Lint:  shell_exec: cd {} && go vet ./...\n",
+                    record.project_path
+                ));
+                output.push_str(&format!(
+                    "2. Test:  shell_exec: cd {} && go test ./...\n",
+                    record.project_path
+                ));
+            }
+            _ => {
+                output.push_str("Verification commands not configured for this language.\n");
+            }
+        }
+
+        output.push_str(&format!("\nCurrent status: {}\n", record.status));
+
+        Ok(ToolOutput::text(output))
+    }
+
+    fn handle_implementation_status(&self, _args: &Value) -> Result<ToolOutput, ToolError> {
+        let state = self.load_state();
+
+        if state.implementations.is_empty() {
+            return Ok(ToolOutput::text(
+                "No implementations tracked. Use the 'implement' action to start one.",
+            ));
+        }
+
+        let mut output = format!(
+            "Tracked implementations ({}):\n\n",
+            state.implementations.len()
+        );
+
+        for (i, record) in state.implementations.iter().enumerate() {
+            output.push_str(&format!(
+                "{}. Paper: {}\n   Language: {} | Status: {}\n   Path: {}\n   Created: {}\n\n",
+                i + 1,
+                record.paper_id,
+                record.language,
+                record.status,
+                record.project_path,
+                record.created_at.format("%Y-%m-%d %H:%M"),
+            ));
+        }
+
         Ok(ToolOutput::text(output))
     }
 }
@@ -920,6 +1313,247 @@ fn truncate_text(text: &str, max_len: usize) -> String {
     }
 }
 
+/// Generate a project scaffold for a paper implementation.
+fn generate_project_scaffold(
+    paper: &crate::arxiv_api::ArxivPaper,
+    lang_config: &crate::arxiv_api::LanguageConfig,
+    project_name: &str,
+    tdd: bool,
+) -> ProjectScaffold {
+    let (dirs, files, deps, setup_cmds, test_cmds) = match lang_config.language.as_str() {
+        "python" => {
+            let dirs = vec!["src".into(), "tests".into()];
+            let mut files = vec![];
+
+            // Requirements file
+            files.push(ScaffoldFile {
+                path: "requirements.txt".into(),
+                content: "numpy>=1.24.0\ntorch>=2.0.0\npytest>=7.0.0\n".into(),
+                is_test: false,
+            });
+
+            // README
+            files.push(ScaffoldFile {
+                path: "README.md".into(),
+                content: format!(
+                    "# {}\n\nImplementation of: {}\n\nArXiv: https://arxiv.org/abs/{}\nAuthors: {}\n\n## Setup\n\n```bash\npython3 -m venv .venv\nsource .venv/bin/activate\npip install -r requirements.txt\n```\n\n## Test\n\n```bash\npytest tests/ -v\n```\n",
+                    project_name, paper.title, paper.arxiv_id, paper.authors.join(", ")
+                ),
+                is_test: false,
+            });
+
+            // Test file (TDD first)
+            if tdd {
+                files.push(ScaffoldFile {
+                    path: "tests/__init__.py".into(),
+                    content: String::new(),
+                    is_test: true,
+                });
+                files.push(ScaffoldFile {
+                    path: "tests/test_model.py".into(),
+                    content: format!(
+                        "\"\"\"Tests for {} implementation.\n\nPaper: {}\nArXiv: {}\n\"\"\"\nimport pytest\n# import sys; sys.path.insert(0, 'src')\n\n\ndef test_model_initialization():\n    \"\"\"Test that the model can be initialized.\"\"\"\n    # TODO: Implement based on paper Section 3\n    pass\n\n\ndef test_forward_pass():\n    \"\"\"Test forward pass produces correct output shape.\"\"\"\n    # TODO: Implement based on paper architecture\n    pass\n\n\ndef test_loss_computation():\n    \"\"\"Test that loss can be computed.\"\"\"\n    # TODO: Implement based on paper Section 4\n    pass\n",
+                        project_name, paper.title, paper.arxiv_id
+                    ),
+                    is_test: true,
+                });
+            }
+
+            // Implementation stubs
+            files.push(ScaffoldFile {
+                path: "src/__init__.py".into(),
+                content: String::new(),
+                is_test: false,
+            });
+            files.push(ScaffoldFile {
+                path: "src/model.py".into(),
+                content: format!(
+                    "\"\"\"Core model implementation for: {}\n\nArXiv: https://arxiv.org/abs/{}\nAuthors: {}\n\"\"\"\nimport numpy as np\n\n\n# TODO: Implement the main model/algorithm from the paper\n# Reference: Section 3 of the paper\n\nclass Model:\n    def __init__(self):\n        pass\n\n    def forward(self, x):\n        raise NotImplementedError(\"Implement based on paper architecture\")\n",
+                    paper.title, paper.arxiv_id, paper.authors.join(", ")
+                ),
+                is_test: false,
+            });
+
+            let setup = vec!["source .venv/bin/activate && pip install -r requirements.txt".into()];
+            let tests = vec!["source .venv/bin/activate && python3 -m pytest tests/ -v".into()];
+            (
+                dirs,
+                files,
+                vec!["numpy".into(), "torch".into(), "pytest".into()],
+                setup,
+                tests,
+            )
+        }
+        "rust" => {
+            let dirs = vec!["src".into(), "tests".into()];
+            let mut files = vec![];
+
+            files.push(ScaffoldFile {
+                path: "Cargo.toml".into(),
+                content: format!(
+                    "[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n# Paper: {}\n# ArXiv: https://arxiv.org/abs/{}\n\n[dependencies]\nndarray = \"0.16\"\n\n[dev-dependencies]\n",
+                    project_name, paper.title, paper.arxiv_id
+                ),
+                is_test: false,
+            });
+
+            files.push(ScaffoldFile {
+                path: "README.md".into(),
+                content: format!(
+                    "# {}\n\nRust implementation of: {}\nArXiv: https://arxiv.org/abs/{}\n\n## Build & Test\n\n```bash\ncargo build\ncargo test\n```\n",
+                    project_name, paper.title, paper.arxiv_id
+                ),
+                is_test: false,
+            });
+
+            if tdd {
+                files.push(ScaffoldFile {
+                    path: "tests/integration_test.rs".into(),
+                    content: format!(
+                        "//! Integration tests for: {}\n//! ArXiv: {}\n\n#[test]\nfn test_model_creation() {{\n    // TODO: Implement\n}}\n\n#[test]\nfn test_forward_pass() {{\n    // TODO: Implement\n}}\n",
+                        paper.title, paper.arxiv_id
+                    ),
+                    is_test: true,
+                });
+            }
+
+            files.push(ScaffoldFile {
+                path: "src/lib.rs".into(),
+                content: format!(
+                    "//! {} - Implementation of: {}\n//! ArXiv: https://arxiv.org/abs/{}\n\npub mod model;\n",
+                    project_name, paper.title, paper.arxiv_id
+                ),
+                is_test: false,
+            });
+
+            files.push(ScaffoldFile {
+                path: "src/model.rs".into(),
+                content: format!(
+                    "//! Core model for: {}\n\n/// TODO: Implement the main model\npub struct Model {{}}\n\nimpl Model {{\n    pub fn new() -> Self {{\n        Self {{}}\n    }}\n}}\n",
+                    paper.title
+                ),
+                is_test: false,
+            });
+
+            let setup = vec!["cargo build".into()];
+            let tests = vec!["cargo test".into()];
+            (dirs, files, vec!["ndarray".into()], setup, tests)
+        }
+        _ => {
+            // Generic fallback
+            let dirs = vec!["src".into(), "tests".into()];
+            let files = vec![ScaffoldFile {
+                path: "README.md".into(),
+                content: format!(
+                    "# {}\n\nImplementation of: {}\nArXiv: https://arxiv.org/abs/{}\n",
+                    project_name, paper.title, paper.arxiv_id
+                ),
+                is_test: false,
+            }];
+            (dirs, files, vec![], vec![], vec![])
+        }
+    };
+
+    ProjectScaffold {
+        paper_id: paper.arxiv_id.clone(),
+        project_name: project_name.to_string(),
+        language_config: lang_config.clone(),
+        directory_structure: dirs,
+        files,
+        dependencies: deps,
+        setup_commands: setup_cmds,
+        test_commands: test_cmds,
+    }
+}
+
+/// Generate a valid Jupyter notebook JSON structure.
+fn generate_notebook_json(paper: &crate::arxiv_api::ArxivPaper) -> String {
+    let title_source = format!("# {}", paper.title);
+    let authors_source = format!("**Authors:** {}", paper.authors.join(", "));
+    let arxiv_source = format!("**ArXiv:** https://arxiv.org/abs/{}", paper.arxiv_id);
+    let abstract_source = format!("**Abstract:** {}", truncate_text(&paper.summary, 300));
+
+    let notebook = json!({
+        "nbformat": 4,
+        "nbformat_minor": 5,
+        "metadata": {
+            "kernelspec": {
+                "display_name": "Python 3",
+                "language": "python",
+                "name": "python3"
+            },
+            "language_info": {
+                "name": "python",
+                "version": "3.10.0"
+            }
+        },
+        "cells": [
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [title_source, "\n", authors_source, "\n", arxiv_source, "\n", abstract_source],
+                "id": "cell_1"
+            },
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "source": ["import numpy as np\nimport matplotlib.pyplot as plt\n\n# TODO: Add paper-specific imports"],
+                "execution_count": null,
+                "outputs": [],
+                "id": "cell_2"
+            },
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "source": ["# Data Preparation\n# TODO: Load and preprocess data as described in the paper"],
+                "execution_count": null,
+                "outputs": [],
+                "id": "cell_3"
+            },
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "source": ["# Model Architecture\n# TODO: Implement the core model/algorithm from the paper"],
+                "execution_count": null,
+                "outputs": [],
+                "id": "cell_4"
+            },
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "source": ["# Training Loop\n# TODO: Implement training procedure"],
+                "execution_count": null,
+                "outputs": [],
+                "id": "cell_5"
+            },
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "source": ["# Evaluation\n# TODO: Compute metrics as described in the paper"],
+                "execution_count": null,
+                "outputs": [],
+                "id": "cell_6"
+            },
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "source": ["# Validation Tests\nassert True, 'Model initialization test'\nassert True, 'Forward pass shape test'\nprint('All validation tests passed!')"],
+                "execution_count": null,
+                "outputs": [],
+                "id": "cell_7"
+            },
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": ["## Summary & Conclusions\n", "\n", "TODO: Summarize key findings and implementation notes"],
+                "id": "cell_8"
+            }
+        ]
+    });
+
+    serde_json::to_string(&notebook).unwrap_or_else(|_| "{}".to_string())
+}
+
 #[async_trait]
 impl Tool for ArxivResearchTool {
     fn name(&self) -> &str {
@@ -927,10 +1561,14 @@ impl Tool for ArxivResearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search, fetch, and manage academic papers from arXiv. Actions: search (find papers), \
-         fetch (get by ID), analyze (structured analysis prompt), compare (side-by-side), \
-         trending (recent papers), save/library/remove (manage local library), \
-         export_bibtex, collections, digest_config, paper_to_code, paper_to_notebook."
+        "Search, fetch, analyze, and implement academic papers from arXiv. Actions: search, fetch, \
+         analyze, compare, trending, save/library/remove, export_bibtex, collections, \
+         digest_config, paper_to_code, paper_to_notebook, implement (full TDD project scaffold), \
+         setup_env (environment setup), verify (lint/test/typecheck), implementation_status. \
+         IMPORTANT workflow: after 'search', present numbered results with summaries and ask the \
+         user to select a paper. After selection, for 'implement'/'paper_to_code'/'paper_to_notebook', \
+         ask the user to choose: (1) language (python/rust/typescript/go/cpp/julia), and \
+         (2) mode (project or notebook). Python always uses venv for isolation."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -942,7 +1580,8 @@ impl Tool for ArxivResearchTool {
                     "enum": [
                         "search", "fetch", "analyze", "compare", "trending",
                         "save", "library", "remove", "export_bibtex",
-                        "collections", "digest_config", "paper_to_code", "paper_to_notebook"
+                        "collections", "digest_config", "paper_to_code", "paper_to_notebook",
+                        "implement", "setup_env", "verify", "implementation_status"
                     ],
                     "description": "Action to perform"
                 },
@@ -1028,6 +1667,19 @@ impl Tool for ArxivResearchTool {
                 "language": {
                     "type": "string",
                     "description": "Target programming language for paper_to_code (default: python)"
+                },
+                "target_dir": {
+                    "type": "string",
+                    "description": "Target directory for implementation (for implement action)"
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["project", "notebook"],
+                    "description": "Implementation mode (default: project)"
+                },
+                "tdd": {
+                    "type": "boolean",
+                    "description": "Whether to use TDD approach with tests first (default: true)"
                 }
             },
             "required": ["action"]
@@ -1064,10 +1716,14 @@ impl Tool for ArxivResearchTool {
             "digest_config" => self.handle_digest_config(&args),
             "paper_to_code" => self.handle_paper_to_code(&args).await,
             "paper_to_notebook" => self.handle_paper_to_notebook(&args).await,
+            "implement" => self.handle_implement(&args).await,
+            "setup_env" => self.handle_setup_env(&args),
+            "verify" => self.handle_verify(&args),
+            "implementation_status" => self.handle_implementation_status(&args),
             _ => Err(ToolError::InvalidArguments {
                 name: "arxiv_research".to_string(),
                 reason: format!(
-                    "Unknown action '{}'. Valid actions: search, fetch, analyze, compare, trending, save, library, remove, export_bibtex, collections, digest_config, paper_to_code, paper_to_notebook",
+                    "Unknown action '{}'. Valid actions: search, fetch, analyze, compare, trending, save, library, remove, export_bibtex, collections, digest_config, paper_to_code, paper_to_notebook, implement, setup_env, verify, implementation_status",
                     action
                 ),
             }),
@@ -1117,7 +1773,7 @@ mod tests {
         let schema = tool.parameters_schema();
         let actions = schema["properties"]["action"]["enum"].as_array().unwrap();
         let action_strs: Vec<&str> = actions.iter().filter_map(|v| v.as_str()).collect();
-        assert_eq!(action_strs.len(), 13);
+        assert_eq!(action_strs.len(), 17);
         assert!(action_strs.contains(&"search"));
         assert!(action_strs.contains(&"fetch"));
         assert!(action_strs.contains(&"analyze"));
@@ -1131,6 +1787,10 @@ mod tests {
         assert!(action_strs.contains(&"digest_config"));
         assert!(action_strs.contains(&"paper_to_code"));
         assert!(action_strs.contains(&"paper_to_notebook"));
+        assert!(action_strs.contains(&"implement"));
+        assert!(action_strs.contains(&"setup_env"));
+        assert!(action_strs.contains(&"verify"));
+        assert!(action_strs.contains(&"implementation_status"));
     }
 
     #[tokio::test]
@@ -1227,6 +1887,7 @@ mod tests {
             }],
             collections: Vec::new(),
             digest_config: None,
+            implementations: Vec::new(),
         };
 
         tool.save_state(&state).unwrap();

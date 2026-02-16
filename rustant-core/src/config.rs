@@ -82,6 +82,9 @@ pub struct AgentConfig {
     /// Optional plan mode configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<crate::plan::PlanConfig>,
+    /// Optional CDC (Change Data Capture) configuration for channel polling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cdc: Option<crate::channels::cdc::CdcConfig>,
     /// External MCP server configurations (e.g., Chrome DevTools MCP).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_servers: Vec<ExternalMcpServerConfig>,
@@ -641,6 +644,33 @@ fn is_valid_time_format(s: &str) -> bool {
     }
 }
 
+/// Configuration for retry behavior on transient API errors.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetryConfig {
+    /// Maximum number of retry attempts.
+    pub max_retries: u32,
+    /// Initial backoff delay in milliseconds.
+    pub initial_backoff_ms: u64,
+    /// Maximum backoff delay in milliseconds.
+    pub max_backoff_ms: u64,
+    /// Multiplier for exponential backoff.
+    pub backoff_multiplier: f64,
+    /// Whether to add random jitter to backoff delays.
+    pub jitter: bool,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            max_retries: 3,
+            initial_backoff_ms: 1000,
+            max_backoff_ms: 60000,
+            backoff_multiplier: 2.0,
+            jitter: true,
+        }
+    }
+}
+
 /// Configuration for messaging channels.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChannelsConfig {
@@ -712,6 +742,9 @@ pub struct LlmConfig {
     /// service name and the actual key is resolved at startup via `resolve_credentials()`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
+    /// Retry configuration for transient API errors (429, 5xx, timeouts).
+    #[serde(default)]
+    pub retry: RetryConfig,
 }
 
 /// Configuration for a fallback LLM provider.
@@ -745,6 +778,7 @@ impl Default for LlmConfig {
             credential_store_key: None,
             auth_method: String::new(),
             api_key: None,
+            retry: RetryConfig::default(),
         }
     }
 }

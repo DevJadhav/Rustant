@@ -17,14 +17,97 @@ use crate::brain::LlmProvider;
 use crate::config::LlmConfig;
 use crate::credentials::CredentialStore;
 use crate::error::LlmError;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
+pub use crate::config::RetryConfig;
 pub use anthropic::AnthropicProvider;
 pub use failover::{AuthProfile, CircuitBreaker, CircuitState, FailoverProvider};
 pub use gemini::GeminiProvider;
 pub use models::ModelInfo;
 pub use openai_compat::OpenAiCompatibleProvider;
+
+/// Execute an async operation with exponential backoff retry on transient errors.
+///
+/// Retries on `LlmError::RateLimited` (respects `retry_after_secs`), `LlmError::Streaming`,
+/// `LlmError::Connection`, and `LlmError::Timeout`. Permanent errors (auth, parse) return immediately.
+pub async fn with_retry<F, Fut, T>(config: &RetryConfig, operation: F) -> Result<T, LlmError>
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Result<T, LlmError>>,
+{
+    let mut last_err = None;
+    for attempt in 0..=config.max_retries {
+        match operation().await {
+            Ok(val) => return Ok(val),
+            Err(e) => {
+                if !is_retryable(&e) || attempt == config.max_retries {
+                    return Err(e);
+                }
+
+                let backoff_ms = compute_backoff(config, attempt, &e);
+                tracing::warn!(
+                    attempt = attempt + 1,
+                    max = config.max_retries,
+                    backoff_ms = backoff_ms,
+                    error = %e,
+                    "Retrying after transient error"
+                );
+                tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                last_err = Some(e);
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| LlmError::Connection {
+        message: "All retry attempts exhausted".to_string(),
+    }))
+}
+
+/// Check if an error is retryable (transient).
+fn is_retryable(err: &LlmError) -> bool {
+    matches!(
+        err,
+        LlmError::RateLimited { .. }
+            | LlmError::Streaming { .. }
+            | LlmError::Connection { .. }
+            | LlmError::Timeout { .. }
+    )
+}
+
+/// Compute backoff delay, respecting rate limit retry-after headers.
+fn compute_backoff(config: &RetryConfig, attempt: u32, err: &LlmError) -> u64 {
+    // For rate limiting, respect the server's retry-after if present
+    if let LlmError::RateLimited { retry_after_secs } = err {
+        let server_ms = retry_after_secs * 1000;
+        let computed = compute_exponential_backoff(config, attempt);
+        return server_ms.max(computed);
+    }
+    compute_exponential_backoff(config, attempt)
+}
+
+/// Pure exponential backoff with optional jitter.
+fn compute_exponential_backoff(config: &RetryConfig, attempt: u32) -> u64 {
+    let base = config.initial_backoff_ms as f64 * config.backoff_multiplier.powi(attempt as i32);
+    let capped = base.min(config.max_backoff_ms as f64) as u64;
+    if config.jitter {
+        // Add up to 25% jitter
+        let jitter = (capped as f64 * 0.25 * rand_simple()) as u64;
+        capped + jitter
+    } else {
+        capped
+    }
+}
+
+/// Simple deterministic pseudo-random for jitter (avoids pulling in rand crate).
+fn rand_simple() -> f64 {
+    use std::time::SystemTime;
+    let nanos = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos();
+    (nanos % 1000) as f64 / 1000.0
+}
 
 /// Resolve the API key for a provider, checking the credential store first,
 /// then falling back to the environment variable.
@@ -272,6 +355,7 @@ mod tests {
             credential_store_key: None,
             auth_method: String::new(),
             api_key: None,
+            retry: RetryConfig::default(),
         }
     }
 
@@ -383,5 +467,98 @@ mod tests {
         let key = resolve_api_key(&config, &store).unwrap();
         assert_eq!(key, "sk-from-env");
         std::env::remove_var("RUSTANT_RESOLVE_FALLBACK_KEY");
+    }
+
+    #[test]
+    fn test_is_retryable() {
+        assert!(super::is_retryable(&LlmError::RateLimited {
+            retry_after_secs: 30
+        }));
+        assert!(super::is_retryable(&LlmError::Connection {
+            message: "timeout".into()
+        }));
+        assert!(super::is_retryable(&LlmError::Timeout { timeout_secs: 30 }));
+        assert!(super::is_retryable(&LlmError::Streaming {
+            message: "eof".into()
+        }));
+        assert!(!super::is_retryable(&LlmError::AuthFailed {
+            provider: "test".into()
+        }));
+        assert!(!super::is_retryable(&LlmError::ResponseParse {
+            message: "bad json".into()
+        }));
+    }
+
+    #[test]
+    fn test_compute_backoff_exponential() {
+        let config = RetryConfig {
+            max_retries: 3,
+            initial_backoff_ms: 1000,
+            max_backoff_ms: 60000,
+            backoff_multiplier: 2.0,
+            jitter: false,
+        };
+        assert_eq!(super::compute_exponential_backoff(&config, 0), 1000);
+        assert_eq!(super::compute_exponential_backoff(&config, 1), 2000);
+        assert_eq!(super::compute_exponential_backoff(&config, 2), 4000);
+    }
+
+    #[test]
+    fn test_compute_backoff_respects_cap() {
+        let config = RetryConfig {
+            max_retries: 3,
+            initial_backoff_ms: 1000,
+            max_backoff_ms: 3000,
+            backoff_multiplier: 2.0,
+            jitter: false,
+        };
+        assert_eq!(super::compute_exponential_backoff(&config, 0), 1000);
+        assert_eq!(super::compute_exponential_backoff(&config, 1), 2000);
+        assert_eq!(super::compute_exponential_backoff(&config, 2), 3000); // capped
+    }
+
+    #[test]
+    fn test_compute_backoff_rate_limit_uses_server_value() {
+        let config = RetryConfig {
+            max_retries: 3,
+            initial_backoff_ms: 1000,
+            max_backoff_ms: 60000,
+            backoff_multiplier: 2.0,
+            jitter: false,
+        };
+        let err = LlmError::RateLimited {
+            retry_after_secs: 30,
+        };
+        let backoff = super::compute_backoff(&config, 0, &err);
+        assert_eq!(backoff, 30000); // server says 30s, computed is 1s, use max
+    }
+
+    #[tokio::test]
+    async fn test_with_retry_succeeds_first_try() {
+        let config = RetryConfig::default();
+        let result = with_retry(&config, || async { Ok::<_, LlmError>(42) }).await;
+        assert_eq!(result.unwrap(), 42);
+    }
+
+    #[tokio::test]
+    async fn test_with_retry_permanent_error_no_retry() {
+        let config = RetryConfig {
+            max_retries: 3,
+            ..Default::default()
+        };
+        let call_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let cc = call_count.clone();
+        let result = with_retry(&config, || {
+            let cc = cc.clone();
+            async move {
+                cc.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Err::<i32, _>(LlmError::AuthFailed {
+                    provider: "test".into(),
+                })
+            }
+        })
+        .await;
+        assert!(result.is_err());
+        assert_eq!(call_count.load(std::sync::atomic::Ordering::SeqCst), 1); // no retries
     }
 }

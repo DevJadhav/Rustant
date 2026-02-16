@@ -169,10 +169,50 @@ impl InputWidget {
                     InputAction::Consumed
                 }
             }
+            Event::Key(KeyEvent {
+                code: KeyCode::Backspace,
+                ..
+            })
+            | Event::Key(KeyEvent {
+                code: KeyCode::Delete,
+                ..
+            }) => {
+                self.textarea.input(event.clone());
+                self.sanitize_after_delete();
+                InputAction::Consumed
+            }
             _ => {
                 self.textarea.input(event.clone());
                 InputAction::Consumed
             }
+        }
+    }
+
+    /// Remove trailing phantom empty lines that may appear after delete/backspace.
+    ///
+    /// When tui-textarea processes backspace at certain positions, it can leave
+    /// trailing empty lines in its internal line array. This method detects and
+    /// removes them, unless the cursor is actually on those lines.
+    fn sanitize_after_delete(&mut self) {
+        let lines = self.textarea.lines().to_vec();
+        let cursor = self.textarea.cursor();
+        // Find how many trailing empty lines exist beyond the cursor
+        let mut end = lines.len();
+        while end > 1 && lines[end - 1].is_empty() && cursor.0 < end - 1 {
+            end -= 1;
+        }
+        if end < lines.len() {
+            let text: String = lines[..end].join("\n");
+            let saved_cursor = cursor;
+            self.clear_textarea();
+            if !text.is_empty() {
+                self.textarea.insert_str(&text);
+            }
+            // Restore cursor position
+            self.textarea.move_cursor(tui_textarea::CursorMove::Jump(
+                saved_cursor.0 as u16,
+                saved_cursor.1 as u16,
+            ));
         }
     }
 
@@ -409,6 +449,52 @@ mod tests {
 
         input.history_next();
         assert_eq!(input.text(), "current draft");
+    }
+
+    #[test]
+    fn test_backspace_removes_character() {
+        let mut input = make_input();
+        for ch in "hello".chars() {
+            input.handle_event(&key_event(KeyCode::Char(ch)));
+        }
+        assert_eq!(input.text(), "hello");
+        input.handle_event(&key_event(KeyCode::Backspace));
+        assert_eq!(input.text(), "hell");
+        // No extra lines should appear
+        assert_eq!(input.textarea.lines().len(), 1);
+    }
+
+    #[test]
+    fn test_delete_no_phantom_lines() {
+        let mut input = make_input();
+        for ch in "hello world".chars() {
+            input.handle_event(&key_event(KeyCode::Char(ch)));
+        }
+        // Backspace 5 times to remove "world"
+        for _ in 0..5 {
+            input.handle_event(&key_event(KeyCode::Backspace));
+        }
+        let text = input.text();
+        assert_eq!(text, "hello ");
+        // Should be a single line, no phantom empty lines
+        assert_eq!(input.textarea.lines().len(), 1);
+    }
+
+    #[test]
+    fn test_backspace_multiline_no_artifacts() {
+        let mut input = make_input();
+        input.set_text("line1");
+        // Add a newline
+        input.handle_event(&key_event_with_mod(KeyCode::Enter, KeyModifiers::SHIFT));
+        for ch in "line2".chars() {
+            input.handle_event(&key_event(KeyCode::Char(ch)));
+        }
+        assert!(input.text().contains('\n'));
+        // Delete characters from line2
+        input.handle_event(&key_event(KeyCode::Backspace));
+        input.handle_event(&key_event(KeyCode::Backspace));
+        // Should have 2 lines, no phantom third line
+        assert!(input.textarea.lines().len() <= 2);
     }
 
     #[test]
