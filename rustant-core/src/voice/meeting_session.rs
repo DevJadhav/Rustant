@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
+#[allow(unused_imports)]
 use tracing::{debug, info, warn};
 
 /// Result returned when a meeting recording is stopped.
@@ -47,7 +48,9 @@ pub struct MeetingStatus {
 /// A meeting recording session with background silence monitoring
 /// and graceful shutdown.
 pub struct MeetingRecordingSession {
+    #[allow(dead_code)]
     cancel_tx: watch::Sender<bool>,
+    #[allow(dead_code)]
     monitor_handle: Option<JoinHandle<()>>,
     active: Arc<AtomicBool>,
     state: Arc<Mutex<SessionState>>,
@@ -55,6 +58,7 @@ pub struct MeetingRecordingSession {
 
 #[derive(Debug, Clone)]
 struct SessionState {
+    #[allow(dead_code)]
     pid: u32,
     audio_path: String,
     title: String,

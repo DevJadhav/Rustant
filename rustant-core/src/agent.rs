@@ -1990,10 +1990,7 @@ impl Agent {
         _args: &serde_json::Value,
         state: &AgentState,
     ) -> Option<(String, serde_json::Value)> {
-        let classification = match state.task_classification.as_ref() {
-            Some(c) => c,
-            None => return None,
-        };
+        let classification = state.task_classification.as_ref()?;
 
         if matches!(classification, TaskClassification::Slack)
             && matches!(failed_tool, "shell_exec" | "web_fetch")
