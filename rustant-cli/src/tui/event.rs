@@ -9,6 +9,7 @@ use futures::StreamExt;
 pub enum Action {
     Quit,
     Cancel,
+    Interrupt,
     Submit(String),
     ScrollUp,
     ScrollDown,
@@ -63,7 +64,7 @@ impl Default for EventHandler {
 /// Returns None if the event should be passed to the input widget.
 pub fn map_global_key(event: &KeyEvent) -> Option<Action> {
     match (event.modifiers, event.code) {
-        (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(Action::Quit),
+        (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(Action::Interrupt),
         (KeyModifiers::CONTROL, KeyCode::Char('d')) => Some(Action::Quit),
         (KeyModifiers::CONTROL, KeyCode::Char('l')) => Some(Action::ScrollToBottom),
         _ => None,
@@ -96,10 +97,10 @@ mod tests {
     }
 
     #[test]
-    fn test_ctrl_c_quits() {
+    fn test_ctrl_c_interrupts() {
         assert_eq!(
             map_global_key(&ctrl(KeyCode::Char('c'))),
-            Some(Action::Quit)
+            Some(Action::Interrupt)
         );
     }
 

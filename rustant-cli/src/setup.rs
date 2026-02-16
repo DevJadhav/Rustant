@@ -178,6 +178,92 @@ pub async fn run_setup(workspace: &Path) -> anyhow::Result<()> {
     let auth_method: &str;
     let api_key: String;
 
+    // Check for existing API key in the credential store
+    if !use_oauth {
+        if let Ok(existing_key) = cred_store.get_key(&chosen_provider.name) {
+            if !existing_key.trim().is_empty() {
+                println!(
+                    "  An API key for {} is already stored in the OS credential store.",
+                    chosen_provider.display_name
+                );
+                let reuse_options = vec!["Use existing key", "Enter a new key"];
+                let reuse_selection = Select::new()
+                    .with_prompt("What would you like to do?")
+                    .items(&reuse_options)
+                    .default(0)
+                    .interact()?;
+                if reuse_selection == 0 {
+                    // Validate existing key by fetching models
+                    println!("\n  Validating existing credentials...");
+                    let base_url: Option<String> = if chosen_provider.name == "custom" {
+                        let url: String = Input::new()
+                            .with_prompt(
+                                "Enter the base URL (e.g., http://localhost:11434/v1)",
+                            )
+                            .interact_text()?;
+                        Some(url)
+                    } else {
+                        None
+                    };
+                    match list_models(
+                        &chosen_provider.name,
+                        &existing_key,
+                        base_url.as_deref(),
+                    )
+                    .await
+                    {
+                        Ok(models) if !models.is_empty() => {
+                            println!("  Credentials valid! Found {} model(s).\n", models.len());
+
+                            let model_names: Vec<String> = models
+                                .iter()
+                                .map(|m| {
+                                    if let Some(ctx) = m.context_window {
+                                        format!("{} ({}k context)", m.id, ctx / 1000)
+                                    } else {
+                                        m.id.clone()
+                                    }
+                                })
+                                .collect();
+                            let model_refs: Vec<&str> =
+                                model_names.iter().map(|s| s.as_str()).collect();
+                            let model_selection = Select::new()
+                                .with_prompt("Select a model")
+                                .items(&model_refs)
+                                .default(0)
+                                .interact()?;
+                            let chosen_model = &models[model_selection];
+
+                            update_config(
+                                workspace,
+                                chosen_provider,
+                                chosen_model,
+                                base_url.as_deref(),
+                                "api_key",
+                            )?;
+                            println!(
+                                "  Configuration saved to {}",
+                                workspace.join(".rustant").join("config.toml").display()
+                            );
+                            println!(
+                                "\n  Setup complete! Using {} with model {}.\n",
+                                chosen_provider.display_name, chosen_model.id
+                            );
+                            return Ok(());
+                        }
+                        _ => {
+                            println!(
+                                "  Existing key validation failed. Please enter a new key.\n"
+                            );
+                            // Fall through to normal flow
+                        }
+                    }
+                }
+                // "Enter a new key" selected or validation failed — fall through
+            }
+        }
+    }
+
     if use_oauth {
         // OAuth browser flow
         auth_method = "oauth";
@@ -302,6 +388,59 @@ pub async fn run_setup(workspace: &Path) -> anyhow::Result<()> {
 
 /// Fallback: run the API key setup flow when OAuth fails.
 async fn run_setup_api_key(workspace: &Path, provider: &ProviderChoice) -> anyhow::Result<()> {
+    let cred_store = KeyringCredentialStore::new();
+
+    // Check for existing key before prompting
+    if let Ok(existing_key) = cred_store.get_key(&provider.name) {
+        if !existing_key.trim().is_empty() {
+            println!(
+                "  An API key for {} is already stored.",
+                provider.display_name
+            );
+            let reuse_options = vec!["Use existing key", "Enter a new key"];
+            let reuse_selection = Select::new()
+                .with_prompt("What would you like to do?")
+                .items(&reuse_options)
+                .default(0)
+                .interact()?;
+            if reuse_selection == 0 {
+                println!("\n  Validating existing credentials...");
+                match list_models(&provider.name, &existing_key, None).await {
+                    Ok(models) if !models.is_empty() => {
+                        println!("  Credentials valid! Found {} model(s).\n", models.len());
+                        let model_names: Vec<String> = models
+                            .iter()
+                            .map(|m| {
+                                if let Some(ctx) = m.context_window {
+                                    format!("{} ({}k context)", m.id, ctx / 1000)
+                                } else {
+                                    m.id.clone()
+                                }
+                            })
+                            .collect();
+                        let model_refs: Vec<&str> =
+                            model_names.iter().map(|s| s.as_str()).collect();
+                        let model_selection = Select::new()
+                            .with_prompt("Select a model")
+                            .items(&model_refs)
+                            .default(0)
+                            .interact()?;
+                        let chosen_model = &models[model_selection];
+                        update_config(workspace, provider, chosen_model, None, "api_key")?;
+                        println!(
+                            "\n  Setup complete! Using {} with model {}.\n",
+                            provider.display_name, chosen_model.id
+                        );
+                        return Ok(());
+                    }
+                    _ => {
+                        println!("  Existing key validation failed. Please enter a new key.\n");
+                    }
+                }
+            }
+        }
+    }
+
     let api_key: String = Password::new()
         .with_prompt(format!("Enter your {} API key", provider.display_name))
         .interact()?;
@@ -310,8 +449,6 @@ async fn run_setup_api_key(workspace: &Path, provider: &ProviderChoice) -> anyho
         println!("  Warning: {}", warning);
         println!("  Continuing anyway — the key will be validated against the API.\n");
     }
-
-    let cred_store = KeyringCredentialStore::new();
     cred_store
         .store_key(&provider.name, &api_key)
         .map_err(|e| anyhow::anyhow!("Failed to store API key: {}", e))?;

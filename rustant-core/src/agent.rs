@@ -2610,6 +2610,12 @@ impl Agent {
         self.cancellation.cancel();
     }
 
+    /// Reset the cancellation token so the agent can process another task.
+    /// Must be called before `process_task()` if a previous task was cancelled.
+    pub fn reset_cancellation(&mut self) {
+        self.cancellation = CancellationToken::new();
+    }
+
     /// Get the brain reference (for usage stats).
     pub fn brain(&self) -> &Brain {
         &self.brain

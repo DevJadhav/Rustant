@@ -62,6 +62,18 @@ impl SecretRef {
     }
 }
 
+impl From<String> for SecretRef {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for SecretRef {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
 /// Resolves `SecretRef` values to actual secret strings.
 pub struct SecretResolver;
 

@@ -111,6 +111,7 @@ pub async fn run_channel_setup(workspace: &Path, channel: Option<&str>) -> anyho
 async fn setup_slack(workspace: &Path) -> anyhow::Result<()> {
     use rustant_core::channels::slack::SlackConfig;
     use rustant_core::oauth::AuthMethod;
+    use rustant_core::secret_ref::SecretRef;
 
     println!("\n  Slack Setup\n");
     println!("  Create a Slack App to connect Rustant to your workspace.\n");
@@ -165,6 +166,11 @@ async fn setup_slack(workspace: &Path) -> anyhow::Result<()> {
         rustant_core::oauth::store_oauth_token(&cred_store, "slack", &token)
             .map_err(|e| anyhow::anyhow!("Failed to store OAuth token: {}", e))?;
 
+        // Also store the access token under the standard channel key
+        cred_store
+            .store_key("channel:slack:bot_token", &token.access_token)
+            .map_err(|e| anyhow::anyhow!("Failed to store token: {}", e))?;
+
         println!("  OAuth token stored securely in OS credential store.");
         bot_token = token.access_token;
         auth_method = AuthMethod::OAuth;
@@ -180,7 +186,7 @@ async fn setup_slack(workspace: &Path) -> anyhow::Result<()> {
 
         // Store in credential store
         cred_store
-            .store_key("slack_bot_token", &bot_token)
+            .store_key("channel:slack:bot_token", &bot_token)
             .map_err(|e| anyhow::anyhow!("Failed to store token: {}", e))?;
 
         auth_method = AuthMethod::ApiKey;
@@ -199,7 +205,7 @@ async fn setup_slack(workspace: &Path) -> anyhow::Result<()> {
         .interact_text()?;
 
     let slack_config = SlackConfig {
-        bot_token: bot_token.clone(),
+        bot_token: SecretRef::keychain("channel:slack:bot_token"),
         app_token: None,
         default_channel: if default_channel.is_empty() {
             None

@@ -360,7 +360,11 @@ fn get_bot_token(workspace: &Path) -> Result<String, ToolError> {
         if let Some(channels) = &config.channels {
             if let Some(slack) = &channels.slack {
                 if !slack.bot_token.is_empty() {
-                    return Ok(slack.bot_token.clone());
+                    match slack.resolve_bot_token() {
+                        Ok(token) if !token.is_empty() => return Ok(token),
+                        Ok(_) => {}
+                        Err(e) => tracing::warn!("Failed to resolve Slack bot token: {}", e),
+                    }
                 }
             }
         }

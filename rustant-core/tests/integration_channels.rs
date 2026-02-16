@@ -17,7 +17,7 @@ async fn test_slack_real_auth() {
     let token =
         std::env::var("RUSTANT_TEST_SLACK_TOKEN").expect("RUSTANT_TEST_SLACK_TOKEN not set");
     let config = rustant_core::channels::slack::SlackConfig {
-        bot_token: token,
+        bot_token: token.into(),
         ..Default::default()
     };
     let mut ch = rustant_core::channels::slack::create_slack_channel(config);
@@ -124,7 +124,7 @@ async fn test_build_channel_manager_with_slack() {
         std::env::var("RUSTANT_TEST_SLACK_TOKEN").expect("RUSTANT_TEST_SLACK_TOKEN not set");
     let channels_config = rustant_core::config::ChannelsConfig {
         slack: Some(rustant_core::channels::slack::SlackConfig {
-            bot_token: token,
+            bot_token: token.into(),
             ..Default::default()
         }),
         ..Default::default()

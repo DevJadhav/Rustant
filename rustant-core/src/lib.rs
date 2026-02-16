@@ -50,6 +50,7 @@ pub use agent::{
     RegisteredTool, TaskResult,
 };
 pub use brain::{Brain, LlmProvider, MockLlmProvider, TokenCounter};
+pub use tokio_util::sync::CancellationToken;
 #[cfg(feature = "browser")]
 pub use browser::ChromiumCdpClient;
 pub use browser::{

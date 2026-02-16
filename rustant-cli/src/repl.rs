@@ -8,7 +8,9 @@ use rustant_core::safety::{ActionRequest, ApprovalDecision};
 #[cfg(feature = "browser")]
 use rustant_core::types::ToolDefinition;
 use rustant_core::types::{AgentStatus, CostEstimate, RiskLevel, TokenUsage, ToolOutput};
-use rustant_core::{Agent, AgentCallback, AgentConfig, MockLlmProvider, RegisteredTool};
+use rustant_core::{
+    Agent, AgentCallback, AgentConfig, CancellationToken, MockLlmProvider, RegisteredTool,
+};
 #[cfg(feature = "browser")]
 use rustant_tools::browser::{create_browser_tools, BrowserToolContext};
 use rustant_tools::register_builtin_tools;
@@ -973,33 +975,42 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
         }
     }
 
-    // Set up signal handling for graceful shutdown
-    let cancel_token = agent.cancellation_token();
-    let ws_for_signal = workspace.clone();
-    tokio::spawn(async move {
-        use tokio::signal;
-        let ctrl_c = signal::ctrl_c();
-        #[cfg(unix)]
-        let mut sigterm = signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("Failed to register SIGTERM handler");
-        #[cfg(unix)]
-        let sigterm_recv = sigterm.recv();
-        #[cfg(not(unix))]
-        let sigterm_recv = std::future::pending::<Option<()>>();
-
-        tokio::select! {
-            _ = ctrl_c => {
-                tracing::info!("Received SIGINT, initiating graceful shutdown");
+    // Set up signal handling with double-tap Ctrl+C support:
+    // First Ctrl+C cancels the current task, second within 2s exits.
+    let interrupt_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let shared_cancel_token: Arc<tokio::sync::Mutex<CancellationToken>> =
+        Arc::new(tokio::sync::Mutex::new(agent.cancellation_token()));
+    {
+        let interrupt_count = interrupt_count.clone();
+        let shared_cancel_token = shared_cancel_token.clone();
+        let ws_for_signal = workspace.clone();
+        tokio::spawn(async move {
+            loop {
+                if tokio::signal::ctrl_c().await.is_err() {
+                    break;
+                }
+                let count =
+                    interrupt_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                if count == 1 {
+                    // First Ctrl+C: cancel the current task
+                    let token = shared_cancel_token.lock().await;
+                    token.cancel();
+                    eprintln!("\nInterrupted. Press Ctrl+C again to exit.");
+                    // Start a 2-second window; reset counter if no second press
+                    let ic = interrupt_count.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        ic.store(0, std::sync::atomic::Ordering::SeqCst);
+                    });
+                } else {
+                    // Second Ctrl+C within 2 seconds: exit
+                    let _ = auto_save_wip_session(&ws_for_signal);
+                    eprintln!("\nExiting...");
+                    std::process::exit(0);
+                }
             }
-            _ = sigterm_recv => {
-                tracing::info!("Received SIGTERM, initiating graceful shutdown");
-            }
-        }
-        cancel_token.cancel();
-        // Best-effort auto-save WIP session
-        let _ = auto_save_wip_session(&ws_for_signal);
-        eprintln!("\nShutting down gracefully...");
-    });
+        });
+    }
 
     let cmd_registry = crate::slash::CommandRegistry::with_defaults();
     let mut repl_input = crate::repl_input::ReplInput::new(&workspace);
@@ -1595,6 +1606,11 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                 }
             }
         }
+
+        // Reset cancellation for the new task and update the shared token
+        agent.reset_cancellation();
+        *shared_cancel_token.lock().await = agent.cancellation_token();
+        interrupt_count.store(0, std::sync::atomic::Ordering::SeqCst);
 
         // Process task
         match agent.process_task(input).await {

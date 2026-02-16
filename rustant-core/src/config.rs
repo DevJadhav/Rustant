@@ -1235,6 +1235,7 @@ pub fn load_config(
 
     let mut config: AgentConfig = figment.extract().map_err(Box::new)?;
     resolve_credentials(&mut config);
+    auto_migrate_channel_secrets(&mut config, workspace);
     Ok(config)
 }
 
@@ -1284,6 +1285,66 @@ pub fn resolve_credentials(config: &mut AgentConfig) {
                         cs_key,
                         e
                     );
+                }
+            }
+        }
+    }
+}
+
+/// Auto-migrate plaintext channel secrets to the OS keychain.
+///
+/// If `channels.slack.bot_token` contains an inline plaintext token,
+/// migrate it to the keychain and update the in-memory config to use a
+/// `keychain:` reference. Optionally rewrites the config file.
+fn auto_migrate_channel_secrets(config: &mut AgentConfig, workspace: Option<&Path>) {
+    use crate::credentials::{CredentialStore, KeyringCredentialStore};
+    use crate::secret_ref::SecretRef;
+
+    let needs_slack_migration = config
+        .channels
+        .as_ref()
+        .and_then(|c| c.slack.as_ref())
+        .map(|s| s.bot_token.is_inline())
+        .unwrap_or(false);
+
+    if !needs_slack_migration {
+        return;
+    }
+
+    let store = KeyringCredentialStore::new();
+    let slack = config
+        .channels
+        .as_ref()
+        .and_then(|c| c.slack.as_ref())
+        .unwrap();
+    let plaintext = slack.bot_token.as_str().to_string();
+
+    if plaintext.is_empty() {
+        return;
+    }
+
+    // Store in keychain
+    if let Err(e) = store.store_key("channel:slack:bot_token", &plaintext) {
+        tracing::warn!("Failed to migrate Slack token to keychain: {}", e);
+        return;
+    }
+
+    tracing::info!("Migrated Slack bot_token from plaintext to keychain");
+
+    // Update in-memory config
+    if let Some(channels) = config.channels.as_mut() {
+        if let Some(slack) = channels.slack.as_mut() {
+            slack.bot_token = SecretRef::keychain("channel:slack:bot_token");
+        }
+    }
+
+    // Best-effort: rewrite config file with keychain reference
+    if let Some(ws) = workspace {
+        let config_path = ws.join(".rustant").join("config.toml");
+        if config_path.exists() {
+            if let Ok(toml_str) = toml::to_string_pretty(config) {
+                if let Err(e) = std::fs::write(&config_path, &toml_str) {
+                    tracing::warn!("Failed to rewrite config after migration: {}", e);
                 }
             }
         }

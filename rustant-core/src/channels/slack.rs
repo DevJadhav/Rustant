@@ -9,6 +9,7 @@ use super::{
 };
 use crate::error::{ChannelError, RustantError};
 use crate::oauth::AuthMethod;
+use crate::secret_ref::{SecretRef, SecretResolver};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -16,7 +17,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SlackConfig {
     /// Bot token (xoxb-...) or OAuth access token.
-    pub bot_token: String,
+    /// Supports `SecretRef` format: `"keychain:channel:slack:bot_token"`, `"env:SLACK_BOT_TOKEN"`,
+    /// or inline plaintext (deprecated).
+    pub bot_token: SecretRef,
     pub app_token: Option<String>,
     pub default_channel: Option<String>,
     pub allowed_channels: Vec<String>,
@@ -24,6 +27,14 @@ pub struct SlackConfig {
     /// the OAuth 2.0 access token obtained via `slack_oauth_config()`.
     #[serde(default)]
     pub auth_method: AuthMethod,
+}
+
+impl SlackConfig {
+    /// Resolve the bot token from its `SecretRef` to an actual token string.
+    pub fn resolve_bot_token(&self) -> Result<String, crate::secret_ref::SecretResolveError> {
+        let store = crate::credentials::KeyringCredentialStore::new();
+        SecretResolver::resolve(&self.bot_token, &store)
+    }
 }
 
 // ── Slack API response types ───────────────────────────────────────────────
@@ -1037,7 +1048,11 @@ impl SlackHttpClient for RealSlackHttp {
 
 /// Create a SlackChannel with a real HTTP client.
 pub fn create_slack_channel(config: SlackConfig) -> SlackChannel {
-    let http = RealSlackHttp::new(config.bot_token.clone());
+    let resolved_token = config.resolve_bot_token().unwrap_or_else(|e| {
+        tracing::warn!("Failed to resolve Slack bot token: {}. Falling back to raw value.", e);
+        config.bot_token.as_str().to_string()
+    });
+    let http = RealSlackHttp::new(resolved_token);
     SlackChannel::new(config, Box::new(http))
 }
 
