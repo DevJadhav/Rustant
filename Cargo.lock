@@ -5637,6 +5637,7 @@ dependencies = [
  "lettre",
  "native-tls",
  "open",
+ "openssl",
  "pin-project-lite",
  "pretty_assertions",
  "proptest",
