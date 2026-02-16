@@ -1092,6 +1092,10 @@ impl SafetyGuardian {
 
     /// Check if a command is denied.
     fn check_command_denied(&self, command: &str) -> Option<String> {
+        // Check for shell expansion bypass attempts first
+        if let Some(reason) = Self::check_shell_expansion(command) {
+            return Some(reason);
+        }
         let cmd_lower = command.to_lowercase();
         for denied in &self.config.denied_commands {
             if cmd_lower.starts_with(&denied.to_lowercase())
@@ -1104,6 +1108,76 @@ impl SafetyGuardian {
             }
         }
         None
+    }
+
+    /// Check for shell expansion bypass attempts in a command string.
+    ///
+    /// Detects patterns that could be used to evade deny-list matching by
+    /// constructing commands via shell expansion:
+    /// - Command substitution: `$(...)` and backticks
+    /// - Variable expansion: `${...}`
+    /// - Hex/octal escapes: `\x`, `\0` sequences
+    /// - Eval/exec wrappers: `eval`, `exec`, `source`, `. `
+    pub fn check_shell_expansion(command: &str) -> Option<String> {
+        // Command substitution: $(...) or `...`
+        if command.contains("$(") || command.contains('`') {
+            return Some(format!(
+                "Command contains shell substitution which may bypass safety checks: '{}'",
+                Self::truncate_for_display(command)
+            ));
+        }
+
+        // Variable expansion: ${...}
+        if command.contains("${") {
+            return Some(format!(
+                "Command contains variable expansion which may bypass safety checks: '{}'",
+                Self::truncate_for_display(command)
+            ));
+        }
+
+        // Hex/octal escapes: \x or \0 sequences
+        if command.contains("\\x") || command.contains("\\0") {
+            return Some(format!(
+                "Command contains escape sequences which may bypass safety checks: '{}'",
+                Self::truncate_for_display(command)
+            ));
+        }
+
+        // Eval/exec wrappers that could construct arbitrary commands
+        let cmd_lower = command.trim().to_lowercase();
+        let wrapper_prefixes = ["eval ", "exec ", "source "];
+        for prefix in &wrapper_prefixes {
+            if cmd_lower.starts_with(prefix) {
+                return Some(format!(
+                    "Command uses '{}' wrapper which may bypass safety checks: '{}'",
+                    prefix.trim(),
+                    Self::truncate_for_display(command)
+                ));
+            }
+        }
+
+        // Dot-sourcing: `. script` (must be `. ` at start, not `./`)
+        if cmd_lower.starts_with(". ") && !cmd_lower.starts_with("./") {
+            return Some(format!(
+                "Command uses dot-sourcing which may bypass safety checks: '{}'",
+                Self::truncate_for_display(command)
+            ));
+        }
+
+        None
+    }
+
+    /// Truncate a string for display in error messages.
+    fn truncate_for_display(s: &str) -> String {
+        if s.len() > 100 {
+            let mut end = 100;
+            while end > 0 && !s.is_char_boundary(end) {
+                end -= 1;
+            }
+            format!("{}...", &s[..end])
+        } else {
+            s.to_string()
+        }
     }
 
     /// Check if a host is denied (not in allowlist).
@@ -2559,6 +2633,87 @@ mod tests {
         );
         let result = guardian.check_network_egress("openai.com");
         // "*.openai.com" should match subdomains but "openai.com" doesn't end with ".openai.com"
+        assert!(matches!(result, PermissionResult::Denied { .. }));
+    }
+
+    // --- Shell Expansion Bypass Tests ---
+
+    #[test]
+    fn test_shell_expansion_command_substitution_dollar() {
+        let result = SafetyGuardian::check_shell_expansion("echo $(cat /etc/passwd)");
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("shell substitution"));
+    }
+
+    #[test]
+    fn test_shell_expansion_command_substitution_backtick() {
+        let result = SafetyGuardian::check_shell_expansion("echo `whoami`");
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("shell substitution"));
+    }
+
+    #[test]
+    fn test_shell_expansion_variable_expansion() {
+        let result = SafetyGuardian::check_shell_expansion("echo ${PATH}");
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("variable expansion"));
+    }
+
+    #[test]
+    fn test_shell_expansion_hex_escape() {
+        let result = SafetyGuardian::check_shell_expansion("printf '\\x73\\x75\\x64\\x6f'");
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("escape sequences"));
+    }
+
+    #[test]
+    fn test_shell_expansion_eval() {
+        let result = SafetyGuardian::check_shell_expansion("eval 'rm -rf /'");
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("eval"));
+    }
+
+    #[test]
+    fn test_shell_expansion_exec() {
+        let result = SafetyGuardian::check_shell_expansion("exec /bin/sh");
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("exec"));
+    }
+
+    #[test]
+    fn test_shell_expansion_source() {
+        let result = SafetyGuardian::check_shell_expansion("source ./malicious.sh");
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("source"));
+    }
+
+    #[test]
+    fn test_shell_expansion_dot_sourcing() {
+        let result = SafetyGuardian::check_shell_expansion(". ./malicious.sh");
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("dot-sourcing"));
+    }
+
+    #[test]
+    fn test_shell_expansion_safe_commands() {
+        assert!(SafetyGuardian::check_shell_expansion("cargo test --workspace").is_none());
+        assert!(SafetyGuardian::check_shell_expansion("git status").is_none());
+        assert!(SafetyGuardian::check_shell_expansion("npm install").is_none());
+        // ./script is NOT dot-sourcing
+        assert!(SafetyGuardian::check_shell_expansion("./run.sh").is_none());
+    }
+
+    #[test]
+    fn test_shell_expansion_blocks_in_permission_check() {
+        let mut guardian = default_guardian();
+        let action = make_action(
+            "shell_exec",
+            RiskLevel::Execute,
+            ActionDetails::ShellCommand {
+                command: "echo $(rm -rf /)".into(),
+            },
+        );
+        let result = guardian.check_permission(&action);
         assert!(matches!(result, PermissionResult::Denied { .. }));
     }
 }

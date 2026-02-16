@@ -10,7 +10,10 @@
 //! detection require the `voice` feature flag.
 
 pub mod audio_io;
+pub mod meeting_session;
+pub mod session;
 pub mod stt;
+pub mod toggle;
 pub mod tts;
 pub mod types;
 pub mod vad;
@@ -29,6 +32,11 @@ pub use types::{
 };
 pub use vad::{VadEvent, VoiceActivityDetector};
 pub use wake::{MockWakeDetector, SttWakeDetector, WakeWordDetector};
+
+// Voice & meeting session toggles
+pub use meeting_session::{MeetingRecordingSession, MeetingResult, MeetingStatus};
+pub use session::VoiceCommandSession;
+pub use toggle::ToggleState;
 
 // Feature-gated re-exports
 #[cfg(feature = "voice")]

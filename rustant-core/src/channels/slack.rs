@@ -1049,7 +1049,10 @@ impl SlackHttpClient for RealSlackHttp {
 /// Create a SlackChannel with a real HTTP client.
 pub fn create_slack_channel(config: SlackConfig) -> SlackChannel {
     let resolved_token = config.resolve_bot_token().unwrap_or_else(|e| {
-        tracing::warn!("Failed to resolve Slack bot token: {}. Falling back to raw value.", e);
+        tracing::warn!(
+            "Failed to resolve Slack bot token: {}. Falling back to raw value.",
+            e
+        );
         config.bot_token.as_str().to_string()
     });
     let http = RealSlackHttp::new(resolved_token);

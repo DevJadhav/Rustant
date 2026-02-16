@@ -81,7 +81,7 @@ pub fn render_header(frame: &mut Frame, area: Rect, data: &HeaderData, theme: &T
             theme
                 .header_style()
                 .add_modifier(Modifier::BOLD)
-                .fg(theme.accent),
+                .fg(theme.success_fg),
         ),
         Span::styled(" │ ", theme.header_style().fg(theme.border_color)),
         Span::styled(

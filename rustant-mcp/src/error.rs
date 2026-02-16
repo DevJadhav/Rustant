@@ -30,6 +30,12 @@ pub enum McpError {
     #[error("Server not initialized")]
     NotInitialized,
 
+    #[error("Tool denied by safety policy: {message}")]
+    ToolDenied { message: String },
+
+    #[error("Rate limit exceeded: {message}")]
+    RateLimited { message: String },
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -50,6 +56,8 @@ impl McpError {
             McpError::ResourceNotFound { .. } => -32001,
             McpError::TransportError { .. } => -32002,
             McpError::NotInitialized => -32003,
+            McpError::ToolDenied { .. } => -32004,
+            McpError::RateLimited { .. } => -32005,
             McpError::Io(_) => -32603,
             McpError::Json(_) => -32700,
         }

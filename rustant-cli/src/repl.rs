@@ -853,7 +853,7 @@ fn show_onboarding(workspace: &Path) {
     let info = rustant_core::project_detect::detect_project(workspace);
     let tasks = rustant_core::project_detect::example_tasks(&info);
 
-    println!("\x1b[1;36m  Welcome to Rustant!\x1b[0m");
+    println!("\x1b[1;32m  Welcome to Rustant!\x1b[0m");
     println!();
 
     // Project-specific welcome
@@ -876,11 +876,11 @@ fn show_onboarding(workspace: &Path) {
     }
     println!();
     println!("  Quick reference:");
-    println!("    \x1b[36m@\x1b[0m reference files  |  \x1b[36m/\x1b[0m commands  |  \x1b[36m/tools\x1b[0m list tools");
-    println!("    \x1b[36m/permissions\x1b[0m adjust safety  |  \x1b[36m/context\x1b[0m check memory usage");
+    println!("    \x1b[32m@\x1b[0m reference files  |  \x1b[32m/\x1b[0m commands  |  \x1b[32m/tools\x1b[0m list tools");
+    println!("    \x1b[32m/permissions\x1b[0m adjust safety  |  \x1b[32m/context\x1b[0m check memory usage");
     println!();
     println!(
-        "  I'll ask for approval before modifying files. Adjust with \x1b[36m/permissions\x1b[0m."
+        "  I'll ask for approval before modifying files. Adjust with \x1b[32m/permissions\x1b[0m."
     );
     println!();
     println!("  \x1b[2mPress Enter to continue, or type 'skip' to dismiss.\x1b[0m");
@@ -888,7 +888,7 @@ fn show_onboarding(workspace: &Path) {
     let mut input = String::new();
     let _ = std::io::stdin().read_line(&mut input);
     if input.trim().eq_ignore_ascii_case("skip") {
-        println!("  Tour dismissed. Run \x1b[36m/help\x1b[0m anytime for commands.\n");
+        println!("  Tour dismissed. Run \x1b[32m/help\x1b[0m anytime for commands.\n");
     }
 
     // Create the marker so the tour doesn't show again
@@ -952,6 +952,9 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
     // Keep _browser_client alive so Chrome stays open for the REPL session.
     let _browser_client = try_register_browser_tools(&mut agent, &config_ref, &workspace).await;
 
+    // Create shared toggle state for voice/meeting toggles
+    let toggle_state = rustant_core::ToggleState::new();
+
     // Load scheduler state from disk
     let scheduler_state_dir = workspace.join(".rustant").join("scheduler");
     agent.load_scheduler_state(&scheduler_state_dir);
@@ -989,8 +992,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                 if tokio::signal::ctrl_c().await.is_err() {
                     break;
                 }
-                let count =
-                    interrupt_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                let count = interrupt_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
                 if count == 1 {
                     // First Ctrl+C: cancel the current task
                     let token = shared_cancel_token.lock().await;
@@ -1535,6 +1537,96 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     };
                     if let Err(e) = crate::commands::handle_update(action).await {
                         println!("\x1b[31mError: {}\x1b[0m", e);
+                    }
+                    continue;
+                }
+                "/voicecmd" | "/vc" => {
+                    match arg1 {
+                        "on" | "" if !toggle_state.voice_active().await => {
+                            let ts = toggle_state.clone();
+                            let cfg = config_ref.clone();
+                            let ws = workspace.clone();
+                            let on_text = Arc::new(|text: String| {
+                                println!("\n\x1b[36m  [Voice] \x1b[0m{}", text);
+                            });
+                            match ts.voice_start(cfg, ws, on_text).await {
+                                Ok(()) => println!("\x1b[32m  Voice command mode ON\x1b[0m — listening for speech..."),
+                                Err(e) => println!("\x1b[31mError starting voice: {}\x1b[0m", e),
+                            }
+                        }
+                        "off" | "" if toggle_state.voice_active().await => {
+                            match toggle_state.voice_stop().await {
+                                Ok(()) => println!("\x1b[33m  Voice command mode OFF\x1b[0m"),
+                                Err(e) => println!("\x1b[31mError stopping voice: {}\x1b[0m", e),
+                            }
+                        }
+                        "status" => {
+                            if toggle_state.voice_active().await {
+                                println!("\x1b[32m  Voice command mode: ON\x1b[0m");
+                            } else {
+                                println!("\x1b[90m  Voice command mode: OFF\x1b[0m");
+                            }
+                        }
+                        "on" => println!("\x1b[33m  Voice command mode is already ON\x1b[0m"),
+                        "off" => println!("\x1b[90m  Voice command mode is already OFF\x1b[0m"),
+                        _ => println!("Usage: /voicecmd [on|off|status]"),
+                    }
+                    continue;
+                }
+                "/record" | "/rec" => {
+                    match arg1 {
+                        "start" | "" if !toggle_state.meeting_active().await => {
+                            let title = if arg2.is_empty() {
+                                None
+                            } else {
+                                Some(arg2.to_string())
+                            };
+                            let meeting_config = config_ref.meeting.clone().unwrap_or_default();
+                            match toggle_state.meeting_start(meeting_config, title).await {
+                                Ok(()) => {
+                                    println!("\x1b[31m  ● REC\x1b[0m Meeting recording started")
+                                }
+                                Err(e) => println!("\x1b[31mError: {}\x1b[0m", e),
+                            }
+                        }
+                        "stop" | "" if toggle_state.meeting_active().await => {
+                            match toggle_state.meeting_stop().await {
+                                Ok(result) => {
+                                    println!("\x1b[32m  Meeting recording stopped\x1b[0m");
+                                    println!("  Duration: {}s", result.duration_secs);
+                                    if !result.transcript.is_empty() {
+                                        let preview = if result.transcript.len() > 200 {
+                                            format!("{}...", &result.transcript[..200])
+                                        } else {
+                                            result.transcript.clone()
+                                        };
+                                        println!("  Transcript preview: {}", preview);
+                                    } else {
+                                        println!(
+                                            "  No transcript available (check OPENAI_API_KEY)"
+                                        );
+                                    }
+                                    if result.notes_saved {
+                                        println!("  Saved to Notes.app");
+                                    }
+                                }
+                                Err(e) => println!("\x1b[31mError: {}\x1b[0m", e),
+                            }
+                        }
+                        "status" => {
+                            if let Some(status) = toggle_state.meeting_status().await {
+                                println!("\x1b[31m  ● REC\x1b[0m Recording active");
+                                if let Some(title) = &status.title {
+                                    println!("  Title: {}", title);
+                                }
+                                println!("  Elapsed: {}s", status.elapsed_secs);
+                            } else {
+                                println!("\x1b[90m  No active recording\x1b[0m");
+                            }
+                        }
+                        "start" => println!("\x1b[33m  Recording is already active\x1b[0m"),
+                        "stop" => println!("\x1b[90m  No active recording to stop\x1b[0m"),
+                        _ => println!("Usage: /record [start|stop|status] [title]"),
                     }
                     continue;
                 }

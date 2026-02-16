@@ -1582,6 +1582,7 @@ async fn handle_ui(port: u16) -> anyhow::Result<()> {
         auth_tokens: Vec::new(),
         max_connections: 50,
         session_timeout_secs: 3600,
+        broadcast_capacity: 256,
     };
 
     let gw: rustant_core::gateway::SharedGateway = std::sync::Arc::new(tokio::sync::Mutex::new(

@@ -49,12 +49,34 @@ pub struct VerificationResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MerkleChain {
     nodes: Vec<AuditNode>,
+    /// Periodic checkpoints: (sequence_number, root_hash_at_that_point).
+    #[serde(default)]
+    checkpoints: Vec<(u64, String)>,
+    /// How often to create a checkpoint (every N appends). 0 = disabled.
+    #[serde(default)]
+    checkpoint_interval: u64,
 }
 
 impl MerkleChain {
     /// Create a new, empty chain.
     pub fn new() -> Self {
-        Self { nodes: Vec::new() }
+        Self {
+            nodes: Vec::new(),
+            checkpoints: Vec::new(),
+            checkpoint_interval: 0,
+        }
+    }
+
+    /// Create a new chain with checkpoint interval.
+    ///
+    /// Every `interval` appends, a checkpoint is automatically stored recording
+    /// the current sequence number and root hash. Set to 0 to disable.
+    pub fn with_checkpoint_interval(interval: u64) -> Self {
+        Self {
+            nodes: Vec::new(),
+            checkpoints: Vec::new(),
+            checkpoint_interval: interval,
+        }
     }
 
     /// Number of nodes in the chain.
@@ -102,6 +124,13 @@ impl MerkleChain {
             timestamp: Utc::now(),
         });
 
+        // Auto-checkpoint if interval is configured
+        if self.checkpoint_interval > 0 && (sequence + 1).is_multiple_of(self.checkpoint_interval) {
+            if let Some(hash) = self.root_hash() {
+                self.checkpoints.push((sequence, hash.to_string()));
+            }
+        }
+
         self.nodes.last().unwrap()
     }
 
@@ -126,7 +155,7 @@ impl MerkleChain {
         }
     }
 
-    /// Verify the integrity of the entire chain.
+    /// Verify the integrity of the entire chain, including checkpoints.
     pub fn verify_chain(&self) -> VerificationResult {
         if self.nodes.is_empty() {
             return VerificationResult {
@@ -146,11 +175,41 @@ impl MerkleChain {
             }
         }
 
+        // Also verify checkpoints
+        if !self.verify_checkpoints() {
+            return VerificationResult {
+                is_valid: false,
+                checked_nodes: self.nodes.len(),
+                first_invalid: None, // Checkpoint failure, not a specific node
+            };
+        }
+
         VerificationResult {
             is_valid: true,
             checked_nodes: self.nodes.len(),
             first_invalid: None,
         }
+    }
+
+    /// Verify that all stored checkpoints match the current chain state.
+    ///
+    /// Returns `true` if all checkpoints are valid (or there are none).
+    pub fn verify_checkpoints(&self) -> bool {
+        for (seq, expected_hash) in &self.checkpoints {
+            let idx = *seq as usize;
+            if idx >= self.nodes.len() {
+                return false; // Checkpoint refers to a node that doesn't exist
+            }
+            if self.nodes[idx].chain_hash != *expected_hash {
+                return false; // Chain hash at checkpoint doesn't match
+            }
+        }
+        true
+    }
+
+    /// Get a reference to the stored checkpoints.
+    pub fn checkpoints(&self) -> &[(u64, String)] {
+        &self.checkpoints
     }
 }
 
@@ -379,5 +438,68 @@ mod tests {
         chain.append(b"second");
         let root2 = chain.root_hash().unwrap().to_owned();
         assert_ne!(root1, root2);
+    }
+
+    // -- Checkpoint tests ---------------------------------------------------
+
+    #[test]
+    fn test_checkpoint_creation() {
+        let mut chain = MerkleChain::with_checkpoint_interval(5);
+        for i in 0..10 {
+            chain.append(format!("event-{}", i).as_bytes());
+        }
+        // Checkpoints at sequence 4 and 9
+        assert_eq!(chain.checkpoints().len(), 2);
+        assert_eq!(chain.checkpoints()[0].0, 4);
+        assert_eq!(chain.checkpoints()[1].0, 9);
+    }
+
+    #[test]
+    fn test_checkpoint_verification_valid() {
+        let mut chain = MerkleChain::with_checkpoint_interval(3);
+        for i in 0..9 {
+            chain.append(format!("event-{}", i).as_bytes());
+        }
+        assert!(chain.verify_checkpoints());
+        assert!(chain.verify_chain().is_valid);
+    }
+
+    #[test]
+    fn test_checkpoint_verification_detects_tampering() {
+        let mut chain = MerkleChain::with_checkpoint_interval(3);
+        for i in 0..6 {
+            chain.append(format!("event-{}", i).as_bytes());
+        }
+        assert_eq!(chain.checkpoints().len(), 2);
+
+        // Tamper with a node that has a checkpoint
+        chain.nodes[2].chain_hash = "tampered".to_string();
+
+        // verify_chain detects it via node verification
+        let result = chain.verify_chain();
+        assert!(!result.is_valid);
+    }
+
+    #[test]
+    fn test_no_checkpoints_when_disabled() {
+        let mut chain = MerkleChain::new();
+        for i in 0..100 {
+            chain.append(format!("event-{}", i).as_bytes());
+        }
+        assert!(chain.checkpoints().is_empty());
+    }
+
+    #[test]
+    fn test_checkpoint_serialization_roundtrip() {
+        let mut chain = MerkleChain::with_checkpoint_interval(2);
+        for i in 0..4 {
+            chain.append(format!("event-{}", i).as_bytes());
+        }
+        assert_eq!(chain.checkpoints().len(), 2);
+
+        let json = serde_json::to_string(&chain).expect("serialize");
+        let restored: MerkleChain = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(restored.checkpoints().len(), 2);
+        assert!(restored.verify_chain().is_valid);
     }
 }

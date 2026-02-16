@@ -991,6 +991,41 @@ impl CommandRegistry {
                  Data stored in .rustant/meta/improvement.json.",
             ),
         });
+        self.register(CommandInfo {
+            name: "/voicecmd",
+            aliases: &["/vc"],
+            description: "Toggle voice command mode (listen→transcribe→respond)",
+            usage: "/voicecmd [on|off|status]",
+            category: CommandCategory::System,
+            tui_only: false,
+            detailed_help: Some(
+                "Start or stop background voice command listening.\n\n\
+                 Usage:\n  /voicecmd on      — Start voice command session\n  \
+                 /voicecmd off     — Stop voice command session\n  \
+                 /voicecmd status  — Show voice session status\n  \
+                 /voicecmd         — Toggle (start if off, stop if on)\n\n\
+                 Requires OPENAI_API_KEY for Whisper STT.\n\
+                 TUI shortcut: Ctrl+V",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/record",
+            aliases: &["/rec"],
+            description: "Toggle meeting recording with auto-transcription",
+            usage: "/record [start|stop|status] [title]",
+            category: CommandCategory::System,
+            tui_only: false,
+            detailed_help: Some(
+                "Start or stop meeting recording with transcription.\n\n\
+                 Usage:\n  /record start [title]  — Start recording (macOS only)\n  \
+                 /record stop           — Stop recording, transcribe, show results\n  \
+                 /record status         — Show recording status\n  \
+                 /record                — Toggle (start if off, stop if on)\n\n\
+                 Requires OPENAI_API_KEY for Whisper transcription.\n\
+                 Audio recorded via afrecord, silence auto-stop supported.\n\
+                 TUI shortcut: Ctrl+M",
+            ),
+        });
     }
 
     /// Look up a command by name or alias.
@@ -1188,8 +1223,8 @@ mod tests {
         let registry = CommandRegistry::with_defaults();
         // We have 43+ commands registered (25 core + 7 TUI-only + 9 CLI parity + 1 arxiv + 1 cdc)
         assert!(
-            registry.len() >= 44,
-            "Expected at least 44 commands, got {}",
+            registry.len() >= 46,
+            "Expected at least 46 commands, got {}",
             registry.len()
         );
     }

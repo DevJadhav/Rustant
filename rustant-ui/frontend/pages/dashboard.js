@@ -45,6 +45,29 @@ const DashboardPage = {
         </div>
       </div>
 
+      <div class="section">
+        <div class="section-title">Voice & Meeting Controls</div>
+        <div class="card toggle-controls" id="toggle-controls">
+          <div class="toggle-group">
+            <div class="toggle-item">
+              <span class="toggle-label">Voice Commands</span>
+              <span class="toggle-status" id="voice-status-dot"></span>
+              <button class="btn btn-toggle" id="btn-voice-toggle" onclick="DashboardPage.toggleVoice()">
+                Loading...
+              </button>
+            </div>
+            <div class="toggle-item">
+              <span class="toggle-label">Meeting Recording</span>
+              <span class="toggle-status" id="meeting-status-dot"></span>
+              <button class="btn btn-toggle" id="btn-meeting-toggle" onclick="DashboardPage.toggleMeeting()">
+                Loading...
+              </button>
+            </div>
+          </div>
+          <div id="meeting-info" class="meeting-info" style="display:none"></div>
+        </div>
+      </div>
+
       <div class="two-col">
         <div class="section">
           <div class="section-title">Channels</div>
@@ -140,5 +163,65 @@ const DashboardPage = {
       this.activityLog.push({ time: now, text });
       if (this.activityLog.length > 200) this.activityLog.shift();
     }
+  },
+
+  async refreshToggles() {
+    const status = await App.apiGet('/api/voice/status');
+    const meeting = await App.apiGet('/api/meeting/status');
+
+    const voiceBtn = document.getElementById('btn-voice-toggle');
+    const voiceDot = document.getElementById('voice-status-dot');
+    const meetingBtn = document.getElementById('btn-meeting-toggle');
+    const meetingDot = document.getElementById('meeting-status-dot');
+    const meetingInfo = document.getElementById('meeting-info');
+
+    if (voiceBtn && status) {
+      if (status.active) {
+        voiceBtn.textContent = 'Stop';
+        voiceBtn.className = 'btn btn-toggle btn-active';
+        if (voiceDot) voiceDot.innerHTML = '<span class="dot connected"></span>';
+      } else {
+        voiceBtn.textContent = 'Start';
+        voiceBtn.className = 'btn btn-toggle';
+        if (voiceDot) voiceDot.innerHTML = '<span class="dot disconnected"></span>';
+      }
+    }
+
+    if (meetingBtn && meeting) {
+      if (meeting.active) {
+        meetingBtn.textContent = 'Stop';
+        meetingBtn.className = 'btn btn-toggle btn-recording';
+        if (meetingDot) meetingDot.innerHTML = '<span class="dot recording"></span>';
+        if (meetingInfo) {
+          meetingInfo.style.display = 'block';
+          meetingInfo.innerHTML = `Recording: ${App.escapeHtml(meeting.title || 'Untitled')} — ${App.formatUptime(meeting.elapsed_secs || 0)}`;
+        }
+      } else {
+        meetingBtn.textContent = 'Start';
+        meetingBtn.className = 'btn btn-toggle';
+        if (meetingDot) meetingDot.innerHTML = '<span class="dot disconnected"></span>';
+        if (meetingInfo) meetingInfo.style.display = 'none';
+      }
+    }
+  },
+
+  async toggleVoice() {
+    const status = await App.apiGet('/api/voice/status');
+    if (status && status.active) {
+      await App.apiPost('/api/voice/stop');
+    } else {
+      await App.apiPost('/api/voice/start');
+    }
+    setTimeout(() => this.refreshToggles(), 500);
+  },
+
+  async toggleMeeting() {
+    const status = await App.apiGet('/api/meeting/status');
+    if (status && status.active) {
+      await App.apiPost('/api/meeting/stop');
+    } else {
+      await App.apiPost('/api/meeting/start', { title: 'Meeting ' + new Date().toLocaleString() });
+    }
+    setTimeout(() => this.refreshToggles(), 500);
   }
 };

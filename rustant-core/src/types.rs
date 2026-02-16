@@ -303,6 +303,406 @@ impl std::fmt::Display for AgentStatus {
     }
 }
 
+/// Cached classification of the current task, computed once at task start.
+///
+/// Used by `tool_routing_hint()` and `auto_correct_tool_call()` to avoid
+/// repeated `.contains()` string matching on every tool call (~300 calls
+/// per iteration without caching).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TaskClassification {
+    Calendar,
+    Reminders,
+    Notes,
+    Email,
+    Music,
+    AppControl,
+    Clipboard,
+    Screenshot,
+    SystemInfo,
+    Contacts,
+    Safari,
+    HomeKit,
+    Photos,
+    Voice,
+    Meeting,
+    DailyBriefing,
+    GuiScripting,
+    Accessibility,
+    Browser,
+    Messaging,
+    Slack,
+    FileOperation,
+    GitOperation,
+    Search,
+    WebSearch,
+    WebFetch,
+    CodeAnalysis,
+    ArxivResearch,
+    KnowledgeGraph,
+    ExperimentTracking,
+    CodeIntelligence,
+    ContentEngine,
+    SkillTracker,
+    CareerIntel,
+    SystemMonitor,
+    LifePlanner,
+    PrivacyManager,
+    SelfImprovement,
+    Notification,
+    Spotlight,
+    FocusMode,
+    Finder,
+    Workflow(String),
+    General,
+}
+
+impl TaskClassification {
+    /// Classify a task description once, returning a cached classification.
+    ///
+    /// This replaces the ~300 `.contains()` calls that previously ran on every
+    /// tool call. Call once at task start and store the result in `AgentState`.
+    pub fn classify(task: &str) -> Self {
+        let lower = task.to_lowercase();
+
+        // Workflow routing (checked first — platform-independent)
+        if lower.contains("security scan")
+            || lower.contains("security audit")
+            || lower.contains("vulnerability")
+        {
+            return Self::Workflow("security_scan".into());
+        }
+        if lower.contains("code review") {
+            return Self::Workflow("code_review".into());
+        }
+        if lower.contains("refactor") && !lower.contains("file") {
+            return Self::Workflow("refactor".into());
+        }
+        if lower.contains("generate test")
+            || lower.contains("write test")
+            || lower.contains("test generation")
+        {
+            return Self::Workflow("test_generation".into());
+        }
+        if lower.contains("generate doc") || lower.contains("write docs") {
+            return Self::Workflow("documentation".into());
+        }
+        if lower.contains("update dependenc") || lower.contains("dependency update") {
+            return Self::Workflow("dependency_update".into());
+        }
+        if lower.contains("deploy") {
+            return Self::Workflow("deployment".into());
+        }
+        if lower.contains("incident response") {
+            return Self::Workflow("incident_response".into());
+        }
+        if lower.contains("morning briefing") || lower.contains("daily briefing") {
+            return Self::Workflow("morning_briefing".into());
+        }
+        if lower.contains("pr review") || lower.contains("pull request review") {
+            return Self::Workflow("pr_review".into());
+        }
+        if lower.contains("dependency audit") || lower.contains("audit dependenc") {
+            return Self::Workflow("dependency_audit".into());
+        }
+        if lower.contains("changelog") || lower.contains("release notes") {
+            return Self::Workflow("changelog".into());
+        }
+        if lower.contains("end of day") || lower.contains("eod summary") {
+            return Self::Workflow("end_of_day_summary".into());
+        }
+        if lower.contains("email triage") || lower.contains("triage email") {
+            return Self::Workflow("email_triage".into());
+        }
+        if lower.contains("meeting record")
+            || lower.contains("record meeting")
+            || lower.contains("record the meeting")
+            || lower.contains("record my meeting")
+            || lower.contains("meeting transcri")
+        {
+            return Self::Workflow("meeting_recorder".into());
+        }
+        if lower.contains("app automation") || lower.contains("automate app") {
+            return Self::Workflow("app_automation".into());
+        }
+        if lower.contains("arxiv")
+            || lower.contains("research paper")
+            || lower.contains("academic paper")
+            || lower.contains("literature review")
+        {
+            return Self::Workflow("arxiv_research".into());
+        }
+        if lower.contains("knowledge graph") || lower.contains("concept map") {
+            return Self::Workflow("knowledge_graph".into());
+        }
+        if lower.contains("experiment") || lower.contains("hypothesis") {
+            return Self::Workflow("experiment_tracking".into());
+        }
+        if lower.contains("code analysis") || lower.contains("architecture review") {
+            return Self::Workflow("code_analysis".into());
+        }
+        if lower.contains("content strategy") || lower.contains("blog pipeline") {
+            return Self::Workflow("content_pipeline".into());
+        }
+        if lower.contains("skill assessment") || lower.contains("learning plan") {
+            return Self::Workflow("skill_development".into());
+        }
+        if lower.contains("career planning") || lower.contains("portfolio review") {
+            return Self::Workflow("career_planning".into());
+        }
+        if lower.contains("service monitoring") || lower.contains("health check") {
+            return Self::Workflow("system_monitoring".into());
+        }
+        if lower.contains("daily planning") || lower.contains("productivity review") {
+            return Self::Workflow("life_planning".into());
+        }
+        if lower.contains("privacy audit") || lower.contains("data management") {
+            return Self::Workflow("privacy_audit".into());
+        }
+        if lower.contains("self improvement") || lower.contains("performance analysis") {
+            return Self::Workflow("self_improvement_loop".into());
+        }
+
+        // Tool-specific classifications (macOS + cross-platform)
+        if lower.contains("slack")
+            || lower.contains("send slack")
+            || lower.contains("slack message")
+            || lower.contains("slack channel")
+            || lower.contains("post to slack")
+        {
+            return Self::Slack;
+        }
+        if lower.contains("clipboard")
+            || lower.contains("paste")
+            || (lower.contains("copy") && !lower.contains("file"))
+        {
+            return Self::Clipboard;
+        }
+        if lower.contains("battery")
+            || (lower.contains("system") && lower.contains("info"))
+            || lower.contains("disk space")
+            || lower.contains("cpu")
+            || lower.contains("ram")
+            || lower.contains("memory usage")
+        {
+            return Self::SystemInfo;
+        }
+        if lower.contains("running app")
+            || lower.contains("open app")
+            || lower.contains("launch")
+            || lower.contains("quit app")
+            || lower.contains("close app")
+        {
+            return Self::AppControl;
+        }
+        if (lower.contains("record") && lower.contains("meeting"))
+            || lower.contains("start recording")
+            || lower.contains("stop recording")
+            || lower.contains("stop the recording")
+            || lower.contains("stop the meeting")
+            || lower.contains("transcribe meeting")
+            || lower.contains("meeting transcript")
+            || lower.contains("meeting status")
+            || lower.contains("recording status")
+        {
+            return Self::Meeting;
+        }
+        if lower.contains("calendar")
+            || lower.contains("event")
+            || (lower.contains("meeting")
+                && !lower.contains("record")
+                && !lower.contains("transcrib")
+                && !lower.contains("stop"))
+        {
+            return Self::Calendar;
+        }
+        if lower.contains("reminder") || lower.contains("todo") || lower.contains("to-do") {
+            return Self::Reminders;
+        }
+        if lower.contains("note") && !lower.contains("notification") {
+            return Self::Notes;
+        }
+        if lower.contains("screenshot")
+            || lower.contains("screen capture")
+            || lower.contains("screen shot")
+        {
+            return Self::Screenshot;
+        }
+        if lower.contains("notification") || lower.contains("notify") || lower.contains("alert me")
+        {
+            return Self::Notification;
+        }
+        if lower.contains("spotlight")
+            || lower.contains("find file")
+            || lower.contains("search for file")
+            || lower.contains("locate file")
+        {
+            return Self::Spotlight;
+        }
+        if lower.contains("do not disturb") || lower.contains("focus mode") || lower.contains("dnd")
+        {
+            return Self::FocusMode;
+        }
+        if lower.contains("music")
+            || lower.contains("song")
+            || lower.contains("play ")
+            || lower.contains("pause")
+            || lower.contains("now playing")
+        {
+            return Self::Music;
+        }
+        if lower.contains("mail") || lower.contains("email") || lower.contains("inbox") {
+            return Self::Email;
+        }
+        if lower.contains("finder") || lower.contains("trash") || lower.contains("reveal in") {
+            return Self::Finder;
+        }
+        if lower.contains("contact") && !lower.contains("file") {
+            return Self::Contacts;
+        }
+        if lower.contains("search the web")
+            || lower.contains("web search")
+            || lower.contains("search online")
+            || lower.contains("look up")
+            || lower.contains("google")
+            || (lower.contains("search") && lower.contains("internet"))
+        {
+            return Self::WebSearch;
+        }
+        if lower.contains("fetch")
+            && (lower.contains("url")
+                || lower.contains("http")
+                || lower.contains("page")
+                || lower.contains("website"))
+        {
+            return Self::WebFetch;
+        }
+        if lower.contains("safari") || (lower.contains("browser") && lower.contains("tab")) {
+            return Self::Safari;
+        }
+        if lower.contains("imessage")
+            || lower.contains("text message")
+            || lower.contains("send message")
+            || lower.contains("sms")
+        {
+            return Self::Messaging;
+        }
+        // ArXiv (tool-level, not workflow-level)
+        if lower.contains("arxiv")
+            || lower.contains("scientific paper")
+            || lower.contains("paper search")
+            || lower.contains("paper summary")
+            || lower.contains("paper to code")
+            || lower.contains("paper to notebook")
+            || lower.contains("bibtex")
+            || lower.contains("preprint")
+            || (lower.contains("paper")
+                && (lower.contains("search")
+                    || lower.contains("find")
+                    || lower.contains("top")
+                    || lower.contains("latest")
+                    || lower.contains("recent")
+                    || lower.contains("trending")))
+            || (lower.contains("papers")
+                && (lower.contains("search")
+                    || lower.contains("find")
+                    || lower.contains("about")
+                    || lower.contains("top")
+                    || lower.contains("latest")
+                    || lower.contains("recent")
+                    || lower.contains("trending")))
+        {
+            return Self::ArxivResearch;
+        }
+        if lower.contains("knowledge graph")
+            || lower.contains("concept")
+            || lower.contains("citation")
+            || lower.contains("paper relationship")
+        {
+            return Self::KnowledgeGraph;
+        }
+        if lower.contains("experiment")
+            || lower.contains("hypothesis")
+            || lower.contains("test result")
+            || lower.contains("lab ")
+        {
+            return Self::ExperimentTracking;
+        }
+        if lower.contains("code architecture")
+            || lower.contains("tech debt")
+            || lower.contains("translate code")
+            || lower.contains("api surface")
+            || lower.contains("pattern detection")
+        {
+            return Self::CodeIntelligence;
+        }
+        if lower.contains("blog")
+            || lower.contains("content")
+            || lower.contains("article")
+            || lower.contains("publish")
+            || lower.contains("twitter")
+            || lower.contains("linkedin")
+            || lower.contains("newsletter")
+        {
+            return Self::ContentEngine;
+        }
+        if lower.contains("skill")
+            || lower.contains("learning")
+            || lower.contains("practice")
+            || lower.contains("proficiency")
+            || lower.contains("knowledge gap")
+        {
+            return Self::SkillTracker;
+        }
+        if lower.contains("career")
+            || lower.contains("achievement")
+            || lower.contains("portfolio")
+            || lower.contains("job")
+            || lower.contains("resume")
+            || lower.contains("networking")
+        {
+            return Self::CareerIntel;
+        }
+        if lower.contains("service monitor")
+            || lower.contains("health check")
+            || lower.contains("incident")
+            || lower.contains("topology")
+            || lower.contains("runbook")
+        {
+            return Self::SystemMonitor;
+        }
+        if lower.contains("schedule")
+            || lower.contains("deadline")
+            || lower.contains("habit")
+            || lower.contains("energy")
+            || lower.contains("daily plan")
+            || lower.contains("weekly review")
+            || lower.contains("context switch")
+        {
+            return Self::LifePlanner;
+        }
+        if lower.contains("privacy")
+            || lower.contains("data boundary")
+            || lower.contains("encrypt")
+            || lower.contains("delete data")
+            || lower.contains("compliance")
+            || lower.contains("audit access")
+        {
+            return Self::PrivacyManager;
+        }
+        if lower.contains("usage pattern")
+            || lower.contains("performance")
+            || lower.contains("cognitive load")
+            || lower.contains("preference")
+            || lower.contains("feedback")
+            || lower.contains("self-improvement")
+        {
+            return Self::SelfImprovement;
+        }
+
+        Self::General
+    }
+}
+
 /// Tracks the full state of the agent during task execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentState {
@@ -312,6 +712,9 @@ pub struct AgentState {
     pub iteration: usize,
     pub max_iterations: usize,
     pub checkpoints: Vec<String>,
+    /// Cached task classification, computed once at task start.
+    #[serde(default)]
+    pub task_classification: Option<TaskClassification>,
 }
 
 impl AgentState {
@@ -323,13 +726,16 @@ impl AgentState {
             iteration: 0,
             max_iterations,
             checkpoints: Vec::new(),
+            task_classification: None,
         }
     }
 
     pub fn start_task(&mut self, goal: impl Into<String>) {
+        let goal_str = goal.into();
         self.task_id = Some(Uuid::new_v4());
         self.status = AgentStatus::Thinking;
-        self.current_goal = Some(goal.into());
+        self.task_classification = Some(TaskClassification::classify(&goal_str));
+        self.current_goal = Some(goal_str);
         self.iteration = 0;
         self.checkpoints.clear();
     }
@@ -353,6 +759,7 @@ impl AgentState {
         self.current_goal = None;
         self.iteration = 0;
         self.checkpoints.clear();
+        self.task_classification = None;
     }
 }
 

@@ -54,6 +54,10 @@ pub struct StatusBarData {
     pub context_window: usize,
     /// Cumulative cost in USD.
     pub cost_usd: f64,
+    /// Whether voice command mode is active.
+    pub voice_active: bool,
+    /// Whether meeting recording is active.
+    pub meeting_active: bool,
 }
 
 /// Format a token count as a compact string (e.g., "12.4k", "1.2M").
@@ -103,7 +107,7 @@ pub fn render_status_bar(
         String::new()
     };
 
-    let left_spans = vec![
+    let mut left_spans = vec![
         Span::styled(
             format!(" {} ", mode.label()),
             theme
@@ -113,8 +117,33 @@ pub fn render_status_bar(
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(" ", theme.status_bar_style()),
-        Span::styled(hints, theme.status_bar_style()),
     ];
+
+    // Voice/meeting indicators
+    if data.voice_active {
+        left_spans.push(Span::styled(
+            " MIC ON ",
+            theme
+                .status_bar_style()
+                .fg(ratatui::style::Color::Black)
+                .bg(ratatui::style::Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ));
+        left_spans.push(Span::styled(" ", theme.status_bar_style()));
+    }
+    if data.meeting_active {
+        left_spans.push(Span::styled(
+            " REC ",
+            theme
+                .status_bar_style()
+                .fg(ratatui::style::Color::White)
+                .bg(ratatui::style::Color::Red)
+                .add_modifier(Modifier::BOLD),
+        ));
+        left_spans.push(Span::styled(" ", theme.status_bar_style()));
+    }
+
+    left_spans.push(Span::styled(hints, theme.status_bar_style()));
 
     let left_bar = Paragraph::new(Line::from(left_spans)).style(theme.status_bar_style());
     frame.render_widget(left_bar, area);
@@ -189,6 +218,7 @@ mod tests {
             tokens_used: 12400,
             context_window: 128000,
             cost_usd: 0.0342,
+            ..Default::default()
         };
         terminal
             .draw(|frame| {
@@ -206,6 +236,7 @@ mod tests {
             tokens_used: 1_500_000,
             context_window: 2_000_000,
             cost_usd: 12.5678,
+            ..Default::default()
         };
         terminal
             .draw(|frame| {

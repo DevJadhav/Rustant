@@ -93,6 +93,16 @@ impl ToolRegistry {
         self.tools.keys().cloned().collect()
     }
 
+    /// Get the risk level of a tool by name.
+    pub fn get_risk_level(&self, name: &str) -> Option<RiskLevel> {
+        self.tools.get(name).map(|t| t.risk_level())
+    }
+
+    /// Get the parameters schema for a tool by name.
+    pub fn get_parameters_schema(&self, name: &str) -> Option<serde_json::Value> {
+        self.tools.get(name).map(|t| t.parameters_schema())
+    }
+
     /// Get the number of registered tools.
     pub fn len(&self) -> usize {
         self.tools.len()

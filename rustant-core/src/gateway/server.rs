@@ -47,10 +47,12 @@ pub struct GatewayServer {
     /// Counters for metrics dashboard.
     total_tool_calls: u64,
     total_llm_requests: u64,
-    /// Pending approvals for security queue.
-    pending_approvals: Vec<PendingApproval>,
+    /// Pending approvals for security queue (HashMap for O(1) lookup/removal).
+    pending_approvals: std::collections::HashMap<Uuid, PendingApproval>,
     /// Snapshot of configuration JSON for the UI.
     config_json: String,
+    /// Shared toggle state for voice/meeting sessions.
+    toggle_state: Option<Arc<crate::voice::toggle::ToggleState>>,
 }
 
 /// A pending approval request awaiting user decision.
@@ -82,7 +84,7 @@ impl GatewayServer {
         let auth = GatewayAuth::from_config(&config);
         let connections = ConnectionManager::new(config.max_connections);
         let sessions = SessionManager::new();
-        let (event_tx, _) = broadcast::channel(256);
+        let (event_tx, _) = broadcast::channel(config.broadcast_capacity);
 
         Self {
             config,
@@ -94,8 +96,9 @@ impl GatewayServer {
             status_provider: None,
             total_tool_calls: 0,
             total_llm_requests: 0,
-            pending_approvals: Vec::new(),
+            pending_approvals: std::collections::HashMap::new(),
             config_json: "{}".to_string(),
+            toggle_state: None,
         }
     }
 
@@ -150,6 +153,16 @@ impl GatewayServer {
         self.status_provider = Some(provider);
     }
 
+    /// Set the shared toggle state for voice/meeting controls.
+    pub fn set_toggle_state(&mut self, state: Arc<crate::voice::toggle::ToggleState>) {
+        self.toggle_state = Some(state);
+    }
+
+    /// Get a reference to the toggle state (if set).
+    pub fn toggle_state(&self) -> Option<&Arc<crate::voice::toggle::ToggleState>> {
+        self.toggle_state.as_ref()
+    }
+
     /// Number of active connections.
     pub fn active_connections(&self) -> usize {
         self.connections.active_count()
@@ -183,32 +196,26 @@ impl GatewayServer {
     /// Add a pending approval request.
     pub fn add_approval(&mut self, approval: PendingApproval) {
         let id = approval.id;
-        self.pending_approvals.push(approval.clone());
+        let tool_name = approval.tool_name.clone();
+        let description = approval.description.clone();
+        let risk_level = approval.risk_level.clone();
+        self.pending_approvals.insert(id, approval);
         self.broadcast(GatewayEvent::ApprovalRequest {
             approval_id: id,
-            tool_name: approval.tool_name,
-            description: approval.description,
-            risk_level: approval.risk_level,
+            tool_name,
+            description,
+            risk_level,
         });
     }
 
-    /// Resolve a pending approval (returns true if found).
+    /// Resolve a pending approval (returns true if found). O(1) via HashMap.
     pub fn resolve_approval(&mut self, approval_id: &Uuid, _approved: bool) -> bool {
-        if let Some(pos) = self
-            .pending_approvals
-            .iter()
-            .position(|a| a.id == *approval_id)
-        {
-            self.pending_approvals.remove(pos);
-            true
-        } else {
-            false
-        }
+        self.pending_approvals.remove(approval_id).is_some()
     }
 
     /// Get all pending approvals.
-    pub fn pending_approvals(&self) -> &[PendingApproval] {
-        &self.pending_approvals
+    pub fn pending_approvals(&self) -> Vec<&PendingApproval> {
+        self.pending_approvals.values().collect()
     }
 
     /// Set the configuration JSON snapshot for the UI.
@@ -336,6 +343,12 @@ pub fn router(shared: SharedGateway) -> Router {
         .route("/api/audit", get(api_audit_handler))
         .route("/api/approvals", get(api_approvals_handler))
         .route("/api/approval/{id}", post(api_approval_decision_handler))
+        .route("/api/voice/start", post(api_voice_start_handler))
+        .route("/api/voice/stop", post(api_voice_stop_handler))
+        .route("/api/voice/status", get(api_voice_status_handler))
+        .route("/api/meeting/start", post(api_meeting_start_handler))
+        .route("/api/meeting/stop", post(api_meeting_stop_handler))
+        .route("/api/meeting/status", get(api_meeting_status_handler))
         .with_state(shared)
 }
 
@@ -557,6 +570,181 @@ async fn handle_socket(mut socket: WebSocket, gw: SharedGateway) {
         gw.broadcast(GatewayEvent::Disconnected {
             connection_id: conn_id,
         });
+    }
+}
+
+// ── Voice & Meeting Toggle Endpoints ────────────────────────────────
+
+/// REST API: Start voice command session.
+async fn api_voice_start_handler(State(gw): State<SharedGateway>) -> impl IntoResponse {
+    let gw = gw.lock().await;
+    let ts = match gw.toggle_state() {
+        Some(ts) => ts.clone(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                axum::Json(serde_json::json!({"error": "Toggle state not configured"})),
+            );
+        }
+    };
+    drop(gw); // Release lock before async operation
+
+    if ts.voice_active().await {
+        return (
+            StatusCode::CONFLICT,
+            axum::Json(serde_json::json!({"error": "Voice session already active"})),
+        );
+    }
+
+    // Voice start requires config and workspace — return instruction to use CLI
+    (
+        StatusCode::OK,
+        axum::Json(serde_json::json!({
+            "status": "voice_start_requested",
+            "message": "Voice session start requires agent config. Use /voicecmd on in the REPL or Ctrl+V in TUI."
+        })),
+    )
+}
+
+/// REST API: Stop voice command session.
+async fn api_voice_stop_handler(State(gw): State<SharedGateway>) -> impl IntoResponse {
+    let gw = gw.lock().await;
+    let ts = match gw.toggle_state() {
+        Some(ts) => ts.clone(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                axum::Json(serde_json::json!({"error": "Toggle state not configured"})),
+            );
+        }
+    };
+    drop(gw);
+
+    match ts.voice_stop().await {
+        Ok(()) => (
+            StatusCode::OK,
+            axum::Json(serde_json::json!({"status": "stopped"})),
+        ),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({"error": e.to_string()})),
+        ),
+    }
+}
+
+/// REST API: Get voice session status.
+async fn api_voice_status_handler(State(gw): State<SharedGateway>) -> impl IntoResponse {
+    let gw = gw.lock().await;
+    let ts = match gw.toggle_state() {
+        Some(ts) => ts.clone(),
+        None => {
+            return axum::Json(serde_json::json!({"active": false, "available": false}));
+        }
+    };
+    drop(gw);
+
+    axum::Json(serde_json::json!({
+        "active": ts.voice_active().await,
+        "available": true,
+    }))
+}
+
+/// REST API: Start meeting recording.
+async fn api_meeting_start_handler(
+    State(gw): State<SharedGateway>,
+    axum::Json(body): axum::Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let gw_guard = gw.lock().await;
+    let ts = match gw_guard.toggle_state() {
+        Some(ts) => ts.clone(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                axum::Json(serde_json::json!({"error": "Toggle state not configured"})),
+            );
+        }
+    };
+    drop(gw_guard);
+
+    if ts.meeting_active().await {
+        return (
+            StatusCode::CONFLICT,
+            axum::Json(serde_json::json!({"error": "Meeting recording already active"})),
+        );
+    }
+
+    let title = body.get("title").and_then(|v| v.as_str()).map(String::from);
+    let config = crate::config::MeetingConfig::default();
+
+    match ts.meeting_start(config, title).await {
+        Ok(()) => (
+            StatusCode::OK,
+            axum::Json(serde_json::json!({"status": "recording"})),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            axum::Json(serde_json::json!({"error": e})),
+        ),
+    }
+}
+
+/// REST API: Stop meeting recording.
+async fn api_meeting_stop_handler(State(gw): State<SharedGateway>) -> impl IntoResponse {
+    let gw_guard = gw.lock().await;
+    let ts = match gw_guard.toggle_state() {
+        Some(ts) => ts.clone(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                axum::Json(serde_json::json!({"error": "Toggle state not configured"})),
+            );
+        }
+    };
+    drop(gw_guard);
+
+    match ts.meeting_stop().await {
+        Ok(result) => (
+            StatusCode::OK,
+            axum::Json(serde_json::json!({
+                "status": "stopped",
+                "duration_secs": result.duration_secs,
+                "transcript_length": result.transcript.len(),
+                "notes_saved": result.notes_saved,
+            })),
+        ),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({"error": e})),
+        ),
+    }
+}
+
+/// REST API: Get meeting recording status.
+async fn api_meeting_status_handler(State(gw): State<SharedGateway>) -> impl IntoResponse {
+    let gw_guard = gw.lock().await;
+    let ts = match gw_guard.toggle_state() {
+        Some(ts) => ts.clone(),
+        None => {
+            return axum::Json(serde_json::json!({
+                "active": false,
+                "available": false,
+            }));
+        }
+    };
+    drop(gw_guard);
+
+    match ts.meeting_status().await {
+        Some(status) => axum::Json(serde_json::json!({
+            "active": true,
+            "available": true,
+            "title": status.title,
+            "started_at": status.started_at,
+            "elapsed_secs": status.elapsed_secs,
+        })),
+        None => axum::Json(serde_json::json!({
+            "active": false,
+            "available": true,
+        })),
     }
 }
 

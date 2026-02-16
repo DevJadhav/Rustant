@@ -93,6 +93,10 @@ pub struct App {
     // Status bar metrics
     pub status_bar_data: StatusBarData,
 
+    // Voice & meeting toggle state
+    toggle_state: std::sync::Arc<rustant_core::ToggleState>,
+    config_snapshot: rustant_core::AgentConfig,
+
     // App state
     pub should_quit: bool,
     is_processing: bool,
@@ -173,6 +177,8 @@ impl App {
                 context_window: config.llm.context_window,
                 ..Default::default()
             },
+            toggle_state: rustant_core::ToggleState::new(),
+            config_snapshot: config.clone(),
             should_quit: false,
             is_processing: false,
             vim_mode,
@@ -485,6 +491,18 @@ impl App {
         // Ctrl+S: Show trust dashboard
         if key.code == KeyCode::Char('s') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.handle_command("/trust");
+            return;
+        }
+
+        // Ctrl+V: Toggle voice command mode
+        if key.code == KeyCode::Char('v') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.toggle_voice();
+            return;
+        }
+
+        // Ctrl+M: Toggle meeting recording
+        if key.code == KeyCode::Char('m') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.toggle_meeting();
             return;
         }
 
@@ -2161,6 +2179,79 @@ impl App {
     }
 
     /// Push a system-role message into the conversation panel.
+    /// Toggle voice command mode on/off.
+    fn toggle_voice(&mut self) {
+        let ts = self.toggle_state.clone();
+        let config = self.config_snapshot.clone();
+        let workspace = self.workspace.clone();
+
+        // Check synchronously via try_lock to avoid async in key handler.
+        let is_active = ts.voice_session_active_sync().unwrap_or_default();
+
+        if is_active {
+            // Stop voice
+            let ts = ts.clone();
+            tokio::spawn(async move {
+                if let Err(e) = ts.voice_stop().await {
+                    tracing::warn!(error = %e, "Failed to stop voice session");
+                }
+            });
+            self.status_bar_data.voice_active = false;
+            self.push_system_msg("Voice command mode OFF");
+        } else {
+            // Start voice
+            let on_text: std::sync::Arc<dyn Fn(String) + Send + Sync> =
+                std::sync::Arc::new(move |text: String| {
+                    tracing::info!(transcription = %text, "Voice command received");
+                });
+            let ts = ts.clone();
+            tokio::spawn(async move {
+                if let Err(e) = ts.voice_start(config, workspace, on_text).await {
+                    tracing::warn!(error = %e, "Failed to start voice session");
+                }
+            });
+            self.status_bar_data.voice_active = true;
+            self.push_system_msg("Voice command mode ON — listening...");
+        }
+    }
+
+    /// Toggle meeting recording on/off.
+    fn toggle_meeting(&mut self) {
+        let ts = self.toggle_state.clone();
+
+        let is_active = ts.meeting_session_active_sync().unwrap_or_default();
+
+        if is_active {
+            // Stop meeting
+            let ts = ts.clone();
+            tokio::spawn(async move {
+                match ts.meeting_stop().await {
+                    Ok(result) => {
+                        tracing::info!(
+                            duration = result.duration_secs,
+                            transcript_len = result.transcript.len(),
+                            "Meeting recording stopped"
+                        );
+                    }
+                    Err(e) => tracing::warn!(error = %e, "Failed to stop meeting recording"),
+                }
+            });
+            self.status_bar_data.meeting_active = false;
+            self.push_system_msg("Meeting recording stopped");
+        } else {
+            // Start meeting
+            let meeting_config = self.config_snapshot.meeting.clone().unwrap_or_default();
+            let ts = ts.clone();
+            tokio::spawn(async move {
+                if let Err(e) = ts.meeting_start(meeting_config, None).await {
+                    tracing::warn!(error = %e, "Failed to start meeting recording");
+                }
+            });
+            self.status_bar_data.meeting_active = true;
+            self.push_system_msg("Meeting recording started");
+        }
+    }
+
     fn push_system_msg(&mut self, text: &str) {
         self.conversation.push_message(DisplayMessage {
             role: Role::System,

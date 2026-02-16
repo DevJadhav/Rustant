@@ -33,7 +33,11 @@ pub async fn run(config: AgentConfig, workspace: PathBuf) -> anyhow::Result<()> 
 
     // Restore terminal
     crossterm::terminal::disable_raw_mode()?;
-    crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen)?;
+    crossterm::execute!(
+        std::io::stdout(),
+        crossterm::event::DisableMouseCapture,
+        crossterm::terminal::LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
 
     result

@@ -40,6 +40,13 @@ pub struct GatewayConfig {
     pub max_connections: usize,
     /// Session timeout in seconds (0 = no timeout).
     pub session_timeout_secs: u64,
+    /// Broadcast channel capacity for event distribution to WebSocket connections.
+    #[serde(default = "default_broadcast_capacity")]
+    pub broadcast_capacity: usize,
+}
+
+fn default_broadcast_capacity() -> usize {
+    256
 }
 
 impl Default for GatewayConfig {
@@ -51,6 +58,7 @@ impl Default for GatewayConfig {
             auth_tokens: Vec::new(),
             max_connections: 10,
             session_timeout_secs: 3600,
+            broadcast_capacity: 256,
         }
     }
 }
@@ -79,6 +87,7 @@ mod tests {
             auth_tokens: vec!["token1".into()],
             max_connections: 50,
             session_timeout_secs: 7200,
+            broadcast_capacity: 256,
         };
         let json = serde_json::to_string(&config).unwrap();
         let restored: GatewayConfig = serde_json::from_str(&json).unwrap();

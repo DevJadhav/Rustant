@@ -51,6 +51,19 @@ async fn get_metrics(state: tauri::State<'_, AppState>) -> Result<serde_json::Va
     Ok(rustant_ui::fetch_metrics(&state).await)
 }
 
+#[tauri::command]
+async fn get_toggle_status(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    Ok(rustant_ui::fetch_toggle_status(&state).await)
+}
+
+#[tauri::command]
+async fn toggle_meeting(
+    state: tauri::State<'_, AppState>,
+    title: Option<String>,
+) -> Result<String, String> {
+    rustant_ui::do_toggle_meeting(&state, title).await
+}
+
 /// Resolve the path to the `frontend/` directory containing static assets.
 ///
 /// Checks several locations in order:
@@ -110,6 +123,7 @@ fn main() {
         auth_tokens: Vec::new(),
         max_connections: 50,
         session_timeout_secs: 3600,
+        broadcast_capacity: 256,
     };
 
     let gw: SharedGateway = Arc::new(Mutex::new(GatewayServer::new(config.clone())));
@@ -166,6 +180,8 @@ fn main() {
             resolve_approval,
             get_config,
             get_metrics,
+            get_toggle_status,
+            toggle_meeting,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -120,6 +120,7 @@ const App = {
     switch (this.currentPage) {
       case 'dashboard':
         await DashboardPage.refresh();
+        DashboardPage.refreshToggles();
         break;
       case 'sessions':
         await SessionsPage.refresh();

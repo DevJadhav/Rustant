@@ -86,6 +86,52 @@ pub async fn fetch_metrics(state: &AppState) -> serde_json::Value {
     })
 }
 
+/// Get voice/meeting toggle status.
+pub async fn fetch_toggle_status(state: &AppState) -> serde_json::Value {
+    let gw = state.gateway.lock().await;
+    match gw.toggle_state() {
+        Some(ts) => {
+            let voice_active = ts.voice_active().await;
+            let meeting_active = ts.meeting_active().await;
+            let meeting_status = ts.meeting_status().await;
+            serde_json::json!({
+                "voice_active": voice_active,
+                "meeting_active": meeting_active,
+                "meeting_title": meeting_status.as_ref().and_then(|s| s.title.clone()),
+                "meeting_elapsed_secs": meeting_status.as_ref().map(|s| s.elapsed_secs),
+            })
+        }
+        None => serde_json::json!({
+            "voice_active": false,
+            "meeting_active": false,
+            "available": false,
+        }),
+    }
+}
+
+/// Toggle meeting recording via gateway.
+pub async fn do_toggle_meeting(state: &AppState, title: Option<String>) -> Result<String, String> {
+    let gw = state.gateway.lock().await;
+    let ts = gw
+        .toggle_state()
+        .cloned()
+        .ok_or_else(|| "Toggle state not configured".to_string())?;
+    drop(gw);
+
+    if ts.meeting_active().await {
+        let result = ts.meeting_stop().await?;
+        Ok(format!(
+            "Recording stopped. Duration: {}s, Transcript: {} chars",
+            result.duration_secs,
+            result.transcript.len()
+        ))
+    } else {
+        let config = rustant_core::config::MeetingConfig::default();
+        ts.meeting_start(config, title).await?;
+        Ok("Recording started".to_string())
+    }
+}
+
 /// Create a new shared gateway instance for the UI.
 pub fn create_gateway() -> SharedGateway {
     Arc::new(Mutex::new(GatewayServer::new(GatewayConfig::default())))

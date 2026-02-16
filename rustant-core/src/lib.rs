@@ -50,7 +50,6 @@ pub use agent::{
     RegisteredTool, TaskResult,
 };
 pub use brain::{Brain, LlmProvider, MockLlmProvider, TokenCounter};
-pub use tokio_util::sync::CancellationToken;
 #[cfg(feature = "browser")]
 pub use browser::ChromiumCdpClient;
 pub use browser::{
@@ -84,6 +83,7 @@ pub use council::{
 pub use plan::{
     ExecutionPlan, PlanAlternative, PlanConfig, PlanDecision, PlanStatus, PlanStep, StepStatus,
 };
+pub use tokio_util::sync::CancellationToken;
 
 pub use credentials::{
     CredentialError, CredentialStore, InMemoryCredentialStore, KeyringCredentialStore,
@@ -146,14 +146,15 @@ pub use skills::{
 pub use summarizer::{ContextSummarizer, ContextSummary, TokenAlert, TokenCostDisplay};
 pub use types::{
     AgentState, AgentStatus, Artifact, CompletionRequest, CompletionResponse, Content,
-    CostEstimate, Message, ProgressUpdate, RiskLevel, Role, StreamEvent, TokenUsage,
-    ToolDefinition, ToolOutput,
+    CostEstimate, Message, ProgressUpdate, RiskLevel, Role, StreamEvent, TaskClassification,
+    TokenUsage, ToolDefinition, ToolOutput,
 };
 pub use voice::{
-    audio_convert, AudioChunk, AudioFormat, MockSttProvider, MockTtsProvider, MockWakeDetector,
-    OpenAiSttProvider, OpenAiTtsProvider, SttProvider, SttWakeDetector, SynthesisRequest,
-    SynthesisResult, TranscriptionResult, TranscriptionSegment, TtsProvider, VadEvent,
-    VoiceActivityDetector, WakeWordDetector,
+    audio_convert, AudioChunk, AudioFormat, MeetingRecordingSession, MeetingResult, MeetingStatus,
+    MockSttProvider, MockTtsProvider, MockWakeDetector, OpenAiSttProvider, OpenAiTtsProvider,
+    SttProvider, SttWakeDetector, SynthesisRequest, SynthesisResult, ToggleState,
+    TranscriptionResult, TranscriptionSegment, TtsProvider, VadEvent, VoiceActivityDetector,
+    VoiceCommandSession, WakeWordDetector,
 };
 #[cfg(feature = "voice")]
 pub use voice::{

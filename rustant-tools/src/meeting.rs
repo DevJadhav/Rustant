@@ -115,7 +115,7 @@ end tell"#;
 }
 
 /// Start audio recording using macOS `afrecord` (AudioToolbox CLI).
-async fn start_recording(audio_path: &str, sample_rate: u32) -> Result<u32, String> {
+pub async fn start_recording(audio_path: &str, sample_rate: u32) -> Result<u32, String> {
     // Use afrecord for WAV recording from default input device
     let child = tokio::process::Command::new("afrecord")
         .args([
@@ -138,7 +138,7 @@ async fn start_recording(audio_path: &str, sample_rate: u32) -> Result<u32, Stri
 }
 
 /// Stop a recording by killing the afrecord process.
-async fn stop_recording(pid: u32) -> Result<(), String> {
+pub async fn stop_recording(pid: u32) -> Result<(), String> {
     run_command("kill", &["-SIGINT", &pid.to_string()])
         .await
         .ok();
@@ -148,7 +148,7 @@ async fn stop_recording(pid: u32) -> Result<(), String> {
 }
 
 /// Transcribe a WAV file, chunking if necessary for the Whisper API size limit.
-async fn transcribe_audio_file(audio_path: &str, api_key: &str) -> Result<String, String> {
+pub async fn transcribe_audio_file(audio_path: &str, api_key: &str) -> Result<String, String> {
     let wav_data = std::fs::read(audio_path)
         .map_err(|e| format!("Failed to read audio file '{}': {e}", audio_path))?;
 
@@ -219,7 +219,7 @@ end tell"#
 }
 
 /// Save a meeting transcript and summary to Notes.app.
-async fn save_to_notes(
+pub async fn save_to_notes(
     title: &str,
     summary: &str,
     action_items: &str,

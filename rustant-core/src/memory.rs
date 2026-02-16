@@ -156,10 +156,16 @@ impl ShortTermMemory {
         self.messages.drain(..to_remove);
         self.compressed_offset += to_remove;
 
-        // Re-insert pinned messages at the front of the window
+        // Re-insert pinned messages at the front of the window using batch operation.
+        // This avoids O(p^2) sequential insert() calls by building a new VecDeque.
         let preserved_count = preserved.len();
-        for (i, msg) in preserved.into_iter().enumerate() {
-            self.messages.insert(i, msg);
+        if !preserved.is_empty() {
+            let mut new_messages = VecDeque::with_capacity(preserved_count + self.messages.len());
+            for msg in preserved {
+                new_messages.push_back(msg);
+            }
+            new_messages.append(&mut self.messages);
+            self.messages = new_messages;
         }
 
         // Rebuild the pinned set with correct absolute indices.
@@ -591,9 +597,10 @@ impl ContextBreakdown {
         (self.total_tokens as f32 / self.context_window as f32).clamp(0.0, 1.0)
     }
 
-    /// Whether context is at warning level (>= 80%).
+    /// Whether context is at warning level (>= 70%).
+    /// Aligned with agent's `ContextHealthEvent::Warning` threshold.
     pub fn is_warning(&self) -> bool {
-        self.usage_ratio() >= 0.8
+        self.usage_ratio() >= 0.7
     }
 }
 

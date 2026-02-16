@@ -397,6 +397,88 @@ body {
   }
 }
 
+/* Toggle Controls */
+.toggle-controls {
+  padding: 16px 20px;
+}
+
+.toggle-group {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.toggle-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.toggle-label {
+  font-size: 14px;
+  color: var(--text-secondary);
+  min-width: 140px;
+}
+
+.toggle-status {
+  display: flex;
+  align-items: center;
+}
+
+.btn-toggle {
+  padding: 6px 18px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.btn-toggle:hover {
+  background: var(--border);
+}
+
+.btn-toggle.btn-active {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.btn-toggle.btn-active:hover {
+  background: rgba(63, 185, 80, 0.3);
+}
+
+.btn-toggle.btn-recording {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.btn-toggle.btn-recording:hover {
+  background: rgba(248, 81, 73, 0.3);
+}
+
+.dot.recording {
+  background: var(--danger);
+  animation: pulse-recording 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-recording {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.meeting-info {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

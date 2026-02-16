@@ -16,7 +16,7 @@ use crate::scheduler::{CronScheduler, HeartbeatManager, JobManager};
 use crate::summarizer::ContextSummarizer;
 use crate::types::{
     AgentState, AgentStatus, CompletionResponse, Content, CostEstimate, Message, ProgressUpdate,
-    RiskLevel, Role, StreamEvent, TokenUsage, ToolDefinition, ToolOutput,
+    RiskLevel, Role, StreamEvent, TaskClassification, TokenUsage, ToolDefinition, ToolOutput,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -366,11 +366,13 @@ impl Agent {
 
         self.memory.add_message(Message::user(task));
 
-        // Inject a tool-routing hint when the task matches known patterns.
+        // Inject a tool-routing hint based on the cached task classification.
         // This guides the LLM to call the correct dedicated tool instead of
         // generic tools like shell_exec or document_read.
-        if let Some(hint) = Self::tool_routing_hint(task) {
-            self.memory.add_message(Message::system(&hint));
+        if let Some(ref classification) = self.state.task_classification {
+            if let Some(hint) = Self::tool_routing_hint_from_classification(classification) {
+                self.memory.add_message(Message::system(&hint));
+            }
         }
 
         self.callback.on_status_change(AgentStatus::Thinking).await;
@@ -603,54 +605,7 @@ impl Agent {
                     }
 
                     // Check context compression
-                    if self.memory.short_term.needs_compression() {
-                        debug!("Triggering LLM-based context compression");
-                        let msgs_to_summarize: Vec<Message> = self
-                            .memory
-                            .short_term
-                            .messages_to_summarize()
-                            .into_iter()
-                            .cloned()
-                            .collect();
-                        let msgs_count = msgs_to_summarize.len();
-                        let pinned_count = self.memory.short_term.pinned_count();
-
-                        let (summary_text, was_llm) = match self
-                            .summarizer
-                            .summarize(&msgs_to_summarize)
-                            .await
-                        {
-                            Ok(result) => {
-                                info!(
-                                    messages_summarized = result.messages_summarized,
-                                    tokens_saved = result.tokens_saved,
-                                    "Context compression via LLM summarization"
-                                );
-                                (result.text, true)
-                            }
-                            Err(e) => {
-                                warn!(error = %e, "LLM summarization failed, falling back to truncation");
-                                // Fallback: smart structured summary preserving tool names
-                                // and first/last messages instead of naive truncation
-                                let text = crate::summarizer::smart_fallback_summary(
-                                    &msgs_to_summarize,
-                                    500,
-                                );
-                                (text, false)
-                            }
-                        };
-
-                        self.memory.short_term.compress(summary_text);
-
-                        // Notify about compression
-                        self.callback
-                            .on_context_health(&ContextHealthEvent::Compressed {
-                                messages_compressed: msgs_count,
-                                was_llm_summarized: was_llm,
-                                pinned_preserved: pinned_count,
-                            })
-                            .await;
-                    }
+                    self.check_and_compress().await;
 
                     // Continue loop — agent needs to observe and think again
                 }
@@ -741,51 +696,7 @@ impl Agent {
                     }
 
                     // Check context compression after multipart tool calls
-                    if self.memory.short_term.needs_compression() {
-                        debug!("Triggering LLM-based context compression (multipart)");
-                        let msgs_to_summarize: Vec<Message> = self
-                            .memory
-                            .short_term
-                            .messages_to_summarize()
-                            .into_iter()
-                            .cloned()
-                            .collect();
-                        let msgs_count = msgs_to_summarize.len();
-                        let pinned_count = self.memory.short_term.pinned_count();
-
-                        let (summary_text, was_llm) = match self
-                            .summarizer
-                            .summarize(&msgs_to_summarize)
-                            .await
-                        {
-                            Ok(result) => {
-                                info!(
-                                    messages_summarized = result.messages_summarized,
-                                    tokens_saved = result.tokens_saved,
-                                    "Context compression via LLM summarization (multipart)"
-                                );
-                                (result.text, true)
-                            }
-                            Err(e) => {
-                                warn!(error = %e, "LLM summarization failed, falling back to truncation");
-                                let text = crate::summarizer::smart_fallback_summary(
-                                    &msgs_to_summarize,
-                                    500,
-                                );
-                                (text, false)
-                            }
-                        };
-
-                        self.memory.short_term.compress(summary_text);
-
-                        self.callback
-                            .on_context_health(&ContextHealthEvent::Compressed {
-                                messages_compressed: msgs_count,
-                                was_llm_summarized: was_llm,
-                                pinned_preserved: pinned_count,
-                            })
-                            .await;
-                    }
+                    self.check_and_compress().await;
 
                     // Continue loop — agent needs to observe and think again
                 }
@@ -1883,85 +1794,20 @@ impl Agent {
         }
     }
 
-    /// Provide a tool-routing hint based on the user's task description.
-    /// Returns Some(hint) if the task matches a known pattern that maps to
-    /// a specific macOS or dedicated tool. This prevents the LLM from
-    /// choosing generic tools (shell_exec, document_read) for tasks that
-    /// have purpose-built tools.
-    /// Match a task to a known workflow template and return a routing hint.
+    /// Provide a tool-routing hint based on the cached task classification.
+    /// Returns Some(hint) if the classification maps to a specific tool or workflow.
+    /// This prevents the LLM from choosing generic tools (shell_exec, document_read)
+    /// for tasks that have purpose-built tools.
+    ///
+    /// Uses the pre-computed `TaskClassification` from `AgentState` instead of
+    /// running ~300 `.contains()` calls on every invocation.
+    ///
+    /// Match a cached task classification to a workflow template routing hint.
     /// This is platform-independent (workflows work on all platforms).
-    fn workflow_routing_hint(lower: &str) -> Option<String> {
-        let workflow = if lower.contains("security scan")
-            || lower.contains("security audit")
-            || lower.contains("vulnerability")
-        {
-            "security_scan"
-        } else if lower.contains("code review") {
-            "code_review"
-        } else if lower.contains("refactor") && !lower.contains("file") {
-            "refactor"
-        } else if lower.contains("generate test")
-            || lower.contains("write test")
-            || lower.contains("test generation")
-        {
-            "test_generation"
-        } else if lower.contains("generate doc") || lower.contains("write docs") {
-            "documentation"
-        } else if lower.contains("update dependenc") || lower.contains("dependency update") {
-            "dependency_update"
-        } else if lower.contains("deploy") {
-            "deployment"
-        } else if lower.contains("incident response") {
-            "incident_response"
-        } else if lower.contains("morning briefing") || lower.contains("daily briefing") {
-            "morning_briefing"
-        } else if lower.contains("pr review") || lower.contains("pull request review") {
-            "pr_review"
-        } else if lower.contains("dependency audit") || lower.contains("audit dependenc") {
-            "dependency_audit"
-        } else if lower.contains("changelog") || lower.contains("release notes") {
-            "changelog"
-        } else if lower.contains("end of day") || lower.contains("eod summary") {
-            "end_of_day_summary"
-        } else if lower.contains("email triage") || lower.contains("triage email") {
-            "email_triage"
-        } else if lower.contains("meeting record")
-            || lower.contains("record meeting")
-            || lower.contains("record the meeting")
-            || lower.contains("record my meeting")
-            || lower.contains("meeting transcri")
-        {
-            "meeting_recorder"
-        } else if lower.contains("app automation") || lower.contains("automate app") {
-            "app_automation"
-        } else if lower.contains("arxiv")
-            || lower.contains("research paper")
-            || lower.contains("academic paper")
-            || lower.contains("literature review")
-        {
-            "arxiv_research"
-        } else if lower.contains("knowledge graph") || lower.contains("concept map") {
-            "knowledge_graph"
-        } else if lower.contains("experiment") || lower.contains("hypothesis") {
-            "experiment_tracking"
-        } else if lower.contains("code analysis") || lower.contains("architecture review") {
-            "code_analysis"
-        } else if lower.contains("content strategy") || lower.contains("blog pipeline") {
-            "content_pipeline"
-        } else if lower.contains("skill assessment") || lower.contains("learning plan") {
-            "skill_development"
-        } else if lower.contains("career planning") || lower.contains("portfolio review") {
-            "career_planning"
-        } else if lower.contains("service monitoring") || lower.contains("health check") {
-            "system_monitoring"
-        } else if lower.contains("daily planning") || lower.contains("productivity review") {
-            "life_planning"
-        } else if lower.contains("privacy audit") || lower.contains("data management") {
-            "privacy_audit"
-        } else if lower.contains("self improvement") || lower.contains("performance analysis") {
-            "self_improvement_loop"
-        } else {
-            return None;
+    fn workflow_routing_hint(classification: &TaskClassification) -> Option<String> {
+        let workflow = match classification {
+            TaskClassification::Workflow(name) => name.as_str(),
+            _ => return None,
         };
 
         Some(format!(
@@ -1973,229 +1819,47 @@ impl Agent {
     }
 
     #[cfg(target_os = "macos")]
-    fn tool_routing_hint(task: &str) -> Option<String> {
-        let lower = task.to_lowercase();
-
+    fn tool_routing_hint_from_classification(
+        classification: &TaskClassification,
+    ) -> Option<String> {
         // Workflow routing (platform-independent, checked first)
-        if let Some(hint) = Self::workflow_routing_hint(&lower) {
+        if let Some(hint) = Self::workflow_routing_hint(classification) {
             return Some(hint);
         }
 
-        let tool_hint = if lower.contains("clipboard")
-            || lower.contains("paste")
-            || lower.contains("copy") && !lower.contains("file")
-        {
-            "For this task, call the 'macos_clipboard' tool with {\"action\":\"read\"} to read the clipboard or {\"action\":\"write\",\"content\":\"...\"} to write to it."
-        } else if lower.contains("battery")
-            || (lower.contains("system") && lower.contains("info"))
-            || lower.contains("disk space")
-            || lower.contains("cpu")
-            || lower.contains("ram")
-            || lower.contains("memory usage")
-        {
-            "For this task, call the 'macos_system_info' tool with the appropriate action: \"battery\", \"disk\", \"memory\", \"cpu\", \"network\", or \"version\"."
-        } else if lower.contains("running app")
-            || lower.contains("open app")
-            || lower.contains("launch")
-            || lower.contains("quit app")
-            || lower.contains("close app")
-        {
-            "For this task, call the 'macos_app_control' tool with the appropriate action: \"list_running\", \"open\", \"quit\", or \"activate\"."
-        } else if (lower.contains("record") && lower.contains("meeting"))
-            || lower.contains("start recording")
-            || lower.contains("stop recording")
-            || lower.contains("stop the recording")
-            || lower.contains("stop the meeting")
-            || lower.contains("transcribe meeting")
-            || lower.contains("meeting transcript")
-            || lower.contains("meeting status")
-            || lower.contains("recording status")
-        {
-            "For this task, call 'macos_meeting_recorder'. Use action 'record_and_transcribe' to start \
-             (announces via TTS, records with silence detection, auto-transcribes to Notes.app). \
-             Use 'stop' to stop manually. Use 'status' to check state."
-        } else if lower.contains("calendar")
-            || lower.contains("event")
-            || (lower.contains("meeting")
-                && !lower.contains("record")
-                && !lower.contains("transcrib")
-                && !lower.contains("stop"))
-        {
-            "For this task, call the 'macos_calendar' tool with the appropriate action."
-        } else if lower.contains("reminder") || lower.contains("todo") || lower.contains("to-do") {
-            "For this task, call the 'macos_reminders' tool with the appropriate action."
-        } else if lower.contains("note") && !lower.contains("notification") {
-            "For this task, call the 'macos_notes' tool with the appropriate action."
-        } else if lower.contains("screenshot")
-            || lower.contains("screen capture")
-            || lower.contains("screen shot")
-        {
-            "For this task, call the 'macos_screenshot' tool with the appropriate action."
-        } else if lower.contains("notification")
-            || lower.contains("notify")
-            || lower.contains("alert me")
-        {
-            "For this task, call the 'macos_notification' tool."
-        } else if lower.contains("spotlight")
-            || lower.contains("find file")
-            || lower.contains("search for file")
-            || lower.contains("locate file")
-        {
-            "For this task, call the 'macos_spotlight' tool to search files using Spotlight."
-        } else if lower.contains("do not disturb")
-            || lower.contains("focus mode")
-            || lower.contains("dnd")
-        {
-            "For this task, call the 'macos_focus_mode' tool."
-        } else if lower.contains("music")
-            || lower.contains("song")
-            || lower.contains("play ")
-            || lower.contains("pause")
-            || lower.contains("now playing")
-        {
-            "For this task, call the 'macos_music' tool with the appropriate action."
-        } else if lower.contains("mail") || lower.contains("email") || lower.contains("inbox") {
-            "For this task, call the 'macos_mail' tool with the appropriate action."
-        } else if lower.contains("finder") || lower.contains("trash") || lower.contains("reveal in")
-        {
-            "For this task, call the 'macos_finder' tool with the appropriate action."
-        } else if lower.contains("contact") && !lower.contains("file") {
-            "For this task, call the 'macos_contacts' tool with the appropriate action."
-        } else if lower.contains("search the web")
-            || lower.contains("web search")
-            || lower.contains("search online")
-            || lower.contains("look up")
-            || lower.contains("google")
-            || (lower.contains("search") && lower.contains("internet"))
-        {
-            "For this task, call the 'web_search' tool with {\"query\": \"your search terms\"}. Do NOT use macos_safari or shell_exec for web searches — use the dedicated web_search tool which queries DuckDuckGo."
-        } else if lower.contains("fetch")
-            && (lower.contains("url")
-                || lower.contains("http")
-                || lower.contains("page")
-                || lower.contains("website"))
-        {
-            "For this task, call the 'web_fetch' tool with {\"url\": \"https://...\"} to retrieve page content. Do NOT use macos_safari or shell_exec — use the dedicated web_fetch tool."
-        } else if lower.contains("safari") || lower.contains("browser") && lower.contains("tab") {
-            "For this task, call the 'macos_safari' tool with the appropriate action. Note: for simple web searches use 'web_search' instead, and for fetching page content use 'web_fetch' instead."
-        } else if lower.contains("slack")
-            || lower.contains("send slack")
-            || lower.contains("slack message")
-            || lower.contains("slack channel")
-            || lower.contains("post to slack")
-        {
-            "For this task, call the 'slack' tool with the appropriate action (send_message, read_messages, list_channels, reply_thread, list_users, add_reaction). Do NOT use macos_gui_scripting or macos_app_control to interact with Slack."
-        } else if lower.contains("imessage")
-            || lower.contains("text message")
-            || lower.contains("send message")
-            || lower.contains("sms")
-        {
-            "For this task, call the appropriate iMessage tool: 'imessage_read', 'imessage_send', or 'imessage_contacts'."
-        } else if lower.contains("arxiv")
-            || lower.contains("research paper")
-            || lower.contains("academic paper")
-            || lower.contains("scientific paper")
-            || lower.contains("paper search")
-            || lower.contains("literature review")
-            || lower.contains("paper summary")
-            || lower.contains("paper to code")
-            || lower.contains("paper to notebook")
-            || lower.contains("bibtex")
-            || lower.contains("preprint")
-            || (lower.contains("paper")
-                && (lower.contains("search")
-                    || lower.contains("find")
-                    || lower.contains("top")
-                    || lower.contains("latest")
-                    || lower.contains("recent")
-                    || lower.contains("trending")))
-            || (lower.contains("papers")
-                && (lower.contains("search")
-                    || lower.contains("find")
-                    || lower.contains("about")
-                    || lower.contains("top")
-                    || lower.contains("latest")
-                    || lower.contains("recent")
-                    || lower.contains("trending")))
-        {
-            "For this task, call the 'arxiv_research' tool with {\"action\": \"search\", \"query\": \"your search terms\", \"max_results\": 10}. This tool uses the arXiv API directly — do NOT use macos_safari, shell_exec, or curl. Other actions: fetch (get by ID), analyze (LLM summary), trending (recent papers), paper_to_code, paper_to_notebook, save/library/remove, export_bibtex."
-        } else if lower.contains("knowledge graph")
-            || lower.contains("concept")
-            || lower.contains("citation")
-            || lower.contains("paper relationship")
-        {
-            "For this task, call the 'knowledge_graph' tool. Actions: add_node, get_node, update_node, remove_node, add_edge, remove_edge, neighbors, search, list, path, stats, import_arxiv, export_dot."
-        } else if lower.contains("experiment")
-            || lower.contains("hypothesis")
-            || lower.contains("test result")
-            || lower.contains("lab ")
-        {
-            "For this task, call the 'experiment_tracker' tool. Actions: add_hypothesis, update_hypothesis, list_hypotheses, get_hypothesis, add_experiment, start_experiment, complete_experiment, fail_experiment, get_experiment, list_experiments, record_evidence, compare_experiments, summary, export_markdown."
-        } else if lower.contains("code architecture")
-            || lower.contains("tech debt")
-            || lower.contains("translate code")
-            || lower.contains("api surface")
-            || lower.contains("pattern detection")
-        {
-            "For this task, call the 'code_intelligence' tool. Actions: analyze_architecture, detect_patterns, translate_snippet, compare_implementations, tech_debt_report, api_surface, dependency_map."
-        } else if lower.contains("blog")
-            || lower.contains("content")
-            || lower.contains("article")
-            || lower.contains("publish")
-            || lower.contains("twitter")
-            || lower.contains("linkedin")
-            || lower.contains("newsletter")
-        {
-            "For this task, call the 'content_engine' tool. Actions: create, update, set_status, get, list, search, delete, schedule, calendar_add, calendar_list, calendar_remove, stats, adapt, export_markdown."
-        } else if lower.contains("skill")
-            || lower.contains("learning")
-            || lower.contains("practice")
-            || lower.contains("proficiency")
-            || lower.contains("knowledge gap")
-        {
-            "For this task, call the 'skill_tracker' tool. Actions: add_skill, log_practice, assess, list_skills, knowledge_gaps, learning_path, progress_report, daily_practice."
-        } else if lower.contains("career")
-            || lower.contains("achievement")
-            || lower.contains("portfolio")
-            || lower.contains("job")
-            || lower.contains("resume")
-            || lower.contains("networking")
-        {
-            "For this task, call the 'career_intel' tool. Actions: set_goal, log_achievement, add_portfolio, gap_analysis, market_scan, network_note, progress_report, strategy_review."
-        } else if lower.contains("service monitor")
-            || lower.contains("health check")
-            || lower.contains("incident")
-            || lower.contains("topology")
-            || lower.contains("runbook")
-        {
-            "For this task, call the 'system_monitor' tool. Actions: add_service, topology, health_check, log_incident, correlate, generate_runbook, impact_analysis, list_services."
-        } else if lower.contains("schedule")
-            || lower.contains("deadline")
-            || lower.contains("habit")
-            || lower.contains("energy")
-            || lower.contains("daily plan")
-            || lower.contains("weekly review")
-            || lower.contains("context switch")
-        {
-            "For this task, call the 'life_planner' tool. Actions: set_energy_profile, add_deadline, log_habit, daily_plan, weekly_review, context_switch_log, balance_report, optimize_schedule."
-        } else if lower.contains("privacy")
-            || lower.contains("data boundary")
-            || lower.contains("encrypt")
-            || lower.contains("delete data")
-            || lower.contains("compliance")
-            || lower.contains("audit access")
-        {
-            "For this task, call the 'privacy_manager' tool. Actions: set_boundary, list_boundaries, audit_access, compliance_check, export_data, delete_data, encrypt_store, privacy_report."
-        } else if lower.contains("usage pattern")
-            || lower.contains("performance")
-            || lower.contains("cognitive load")
-            || lower.contains("preference")
-            || lower.contains("feedback")
-            || lower.contains("self-improvement")
-        {
-            "For this task, call the 'self_improvement' tool. Actions: analyze_patterns, performance_report, suggest_improvements, set_preference, get_preferences, cognitive_load, feedback, reset_baseline."
-        } else {
-            return None;
+        let tool_hint = match classification {
+            TaskClassification::Clipboard => "For this task, call the 'macos_clipboard' tool with {\"action\":\"read\"} to read the clipboard or {\"action\":\"write\",\"content\":\"...\"} to write to it.",
+            TaskClassification::SystemInfo => "For this task, call the 'macos_system_info' tool with the appropriate action: \"battery\", \"disk\", \"memory\", \"cpu\", \"network\", or \"version\".",
+            TaskClassification::AppControl => "For this task, call the 'macos_app_control' tool with the appropriate action: \"list_running\", \"open\", \"quit\", or \"activate\".",
+            TaskClassification::Meeting => "For this task, call 'macos_meeting_recorder'. Use action 'record_and_transcribe' to start (announces via TTS, records with silence detection, auto-transcribes to Notes.app). Use 'stop' to stop manually. Use 'status' to check state.",
+            TaskClassification::Calendar => "For this task, call the 'macos_calendar' tool with the appropriate action.",
+            TaskClassification::Reminders => "For this task, call the 'macos_reminders' tool with the appropriate action.",
+            TaskClassification::Notes => "For this task, call the 'macos_notes' tool with the appropriate action.",
+            TaskClassification::Screenshot => "For this task, call the 'macos_screenshot' tool with the appropriate action.",
+            TaskClassification::Notification => "For this task, call the 'macos_notification' tool.",
+            TaskClassification::Spotlight => "For this task, call the 'macos_spotlight' tool to search files using Spotlight.",
+            TaskClassification::FocusMode => "For this task, call the 'macos_focus_mode' tool.",
+            TaskClassification::Music => "For this task, call the 'macos_music' tool with the appropriate action.",
+            TaskClassification::Email => "For this task, call the 'macos_mail' tool with the appropriate action.",
+            TaskClassification::Finder => "For this task, call the 'macos_finder' tool with the appropriate action.",
+            TaskClassification::Contacts => "For this task, call the 'macos_contacts' tool with the appropriate action.",
+            TaskClassification::WebSearch => "For this task, call the 'web_search' tool with {\"query\": \"your search terms\"}. Do NOT use macos_safari or shell_exec for web searches — use the dedicated web_search tool which queries DuckDuckGo.",
+            TaskClassification::WebFetch => "For this task, call the 'web_fetch' tool with {\"url\": \"https://...\"} to retrieve page content. Do NOT use macos_safari or shell_exec — use the dedicated web_fetch tool.",
+            TaskClassification::Safari => "For this task, call the 'macos_safari' tool with the appropriate action. Note: for simple web searches use 'web_search' instead, and for fetching page content use 'web_fetch' instead.",
+            TaskClassification::Slack => "For this task, call the 'slack' tool with the appropriate action (send_message, read_messages, list_channels, reply_thread, list_users, add_reaction). Do NOT use macos_gui_scripting or macos_app_control to interact with Slack.",
+            TaskClassification::Messaging => "For this task, call the appropriate iMessage tool: 'imessage_read', 'imessage_send', or 'imessage_contacts'.",
+            TaskClassification::ArxivResearch => "For this task, call the 'arxiv_research' tool with {\"action\": \"search\", \"query\": \"your search terms\", \"max_results\": 10}. This tool uses the arXiv API directly — do NOT use macos_safari, shell_exec, or curl. Other actions: fetch (get by ID), analyze (LLM summary), trending (recent papers), paper_to_code, paper_to_notebook, save/library/remove, export_bibtex.",
+            TaskClassification::KnowledgeGraph => "For this task, call the 'knowledge_graph' tool. Actions: add_node, get_node, update_node, remove_node, add_edge, remove_edge, neighbors, search, list, path, stats, import_arxiv, export_dot.",
+            TaskClassification::ExperimentTracking => "For this task, call the 'experiment_tracker' tool. Actions: add_hypothesis, update_hypothesis, list_hypotheses, get_hypothesis, add_experiment, start_experiment, complete_experiment, fail_experiment, get_experiment, list_experiments, record_evidence, compare_experiments, summary, export_markdown.",
+            TaskClassification::CodeIntelligence => "For this task, call the 'code_intelligence' tool. Actions: analyze_architecture, detect_patterns, translate_snippet, compare_implementations, tech_debt_report, api_surface, dependency_map.",
+            TaskClassification::ContentEngine => "For this task, call the 'content_engine' tool. Actions: create, update, set_status, get, list, search, delete, schedule, calendar_add, calendar_list, calendar_remove, stats, adapt, export_markdown.",
+            TaskClassification::SkillTracker => "For this task, call the 'skill_tracker' tool. Actions: add_skill, log_practice, assess, list_skills, knowledge_gaps, learning_path, progress_report, daily_practice.",
+            TaskClassification::CareerIntel => "For this task, call the 'career_intel' tool. Actions: set_goal, log_achievement, add_portfolio, gap_analysis, market_scan, network_note, progress_report, strategy_review.",
+            TaskClassification::SystemMonitor => "For this task, call the 'system_monitor' tool. Actions: add_service, topology, health_check, log_incident, correlate, generate_runbook, impact_analysis, list_services.",
+            TaskClassification::LifePlanner => "For this task, call the 'life_planner' tool. Actions: set_energy_profile, add_deadline, log_habit, daily_plan, weekly_review, context_switch_log, balance_report, optimize_schedule.",
+            TaskClassification::PrivacyManager => "For this task, call the 'privacy_manager' tool. Actions: set_boundary, list_boundaries, audit_access, compliance_check, export_data, delete_data, encrypt_store, privacy_report.",
+            TaskClassification::SelfImprovement => "For this task, call the 'self_improvement' tool. Actions: analyze_patterns, performance_report, suggest_improvements, set_preference, get_preferences, cognitive_load, feedback, reset_baseline.",
+            _ => return None,
         };
 
         Some(format!("TOOL ROUTING: {}", tool_hint))
@@ -2203,151 +1867,30 @@ impl Agent {
 
     /// Non-macOS fallback — workflow routing + cross-platform tool routing.
     #[cfg(not(target_os = "macos"))]
-    fn tool_routing_hint(task: &str) -> Option<String> {
-        let lower = task.to_lowercase();
-
+    fn tool_routing_hint_from_classification(
+        classification: &TaskClassification,
+    ) -> Option<String> {
         // Workflow routing (platform-independent, checked first)
-        if let Some(hint) = Self::workflow_routing_hint(&lower) {
+        if let Some(hint) = Self::workflow_routing_hint(classification) {
             return Some(hint);
         }
 
-        // Web tool routing (cross-platform, checked before other tools)
-        if lower.contains("search the web")
-            || lower.contains("web search")
-            || lower.contains("search online")
-            || lower.contains("look up")
-            || lower.contains("google")
-            || (lower.contains("search") && lower.contains("internet"))
-        {
-            return Some("TOOL ROUTING: For this task, call the 'web_search' tool with {\"query\": \"your search terms\"}. Do NOT use shell_exec for web searches — use the dedicated web_search tool which queries DuckDuckGo.".to_string());
-        }
-        if lower.contains("fetch")
-            && (lower.contains("url")
-                || lower.contains("http")
-                || lower.contains("page")
-                || lower.contains("website"))
-        {
-            return Some("TOOL ROUTING: For this task, call the 'web_fetch' tool with {\"url\": \"https://...\"} to retrieve page content. Do NOT use shell_exec — use the dedicated web_fetch tool.".to_string());
-        }
-
-        // Slack routing (cross-platform)
-        if lower.contains("slack")
-            || lower.contains("send slack")
-            || lower.contains("slack message")
-            || lower.contains("slack channel")
-            || lower.contains("post to slack")
-        {
-            return Some("TOOL ROUTING: For this task, call the 'slack' tool with the appropriate action (send_message, read_messages, list_channels, reply_thread, list_users, add_reaction). Do NOT use shell_exec to interact with Slack.".to_string());
-        }
-
-        // Cross-platform tool routing
-        if lower.contains("arxiv")
-            || lower.contains("research paper")
-            || lower.contains("academic paper")
-            || lower.contains("scientific paper")
-            || lower.contains("paper search")
-            || lower.contains("literature review")
-            || lower.contains("paper summary")
-            || lower.contains("paper to code")
-            || lower.contains("paper to notebook")
-            || lower.contains("bibtex")
-            || lower.contains("preprint")
-            || (lower.contains("paper")
-                && (lower.contains("search")
-                    || lower.contains("find")
-                    || lower.contains("top")
-                    || lower.contains("latest")
-                    || lower.contains("recent")
-                    || lower.contains("trending")))
-            || (lower.contains("papers")
-                && (lower.contains("search")
-                    || lower.contains("find")
-                    || lower.contains("about")
-                    || lower.contains("top")
-                    || lower.contains("latest")
-                    || lower.contains("recent")
-                    || lower.contains("trending")))
-        {
-            return Some("TOOL ROUTING: For this task, call the 'arxiv_research' tool with {\"action\": \"search\", \"query\": \"your search terms\", \"max_results\": 10}. This tool uses the arXiv API directly — do NOT use macos_safari, shell_exec, or curl. Other actions: fetch (get by ID), analyze (LLM summary), trending (recent papers), paper_to_code, paper_to_notebook, save/library/remove, export_bibtex.".to_string());
-        }
-
-        let tool_hint = if lower.contains("knowledge graph")
-            || lower.contains("concept")
-            || lower.contains("citation")
-            || lower.contains("paper relationship")
-        {
-            "For this task, call the 'knowledge_graph' tool. Actions: add_node, get_node, update_node, remove_node, add_edge, remove_edge, neighbors, search, list, path, stats, import_arxiv, export_dot."
-        } else if lower.contains("experiment")
-            || lower.contains("hypothesis")
-            || lower.contains("test result")
-            || lower.contains("lab ")
-        {
-            "For this task, call the 'experiment_tracker' tool. Actions: add_hypothesis, update_hypothesis, list_hypotheses, get_hypothesis, add_experiment, start_experiment, complete_experiment, fail_experiment, get_experiment, list_experiments, record_evidence, compare_experiments, summary, export_markdown."
-        } else if lower.contains("code architecture")
-            || lower.contains("tech debt")
-            || lower.contains("translate code")
-            || lower.contains("api surface")
-            || lower.contains("pattern detection")
-        {
-            "For this task, call the 'code_intelligence' tool. Actions: analyze_architecture, detect_patterns, translate_snippet, compare_implementations, tech_debt_report, api_surface, dependency_map."
-        } else if lower.contains("blog")
-            || lower.contains("content")
-            || lower.contains("article")
-            || lower.contains("publish")
-            || lower.contains("twitter")
-            || lower.contains("linkedin")
-            || lower.contains("newsletter")
-        {
-            "For this task, call the 'content_engine' tool. Actions: create, update, set_status, get, list, search, delete, schedule, calendar_add, calendar_list, calendar_remove, stats, adapt, export_markdown."
-        } else if lower.contains("skill")
-            || lower.contains("learning")
-            || lower.contains("practice")
-            || lower.contains("proficiency")
-            || lower.contains("knowledge gap")
-        {
-            "For this task, call the 'skill_tracker' tool. Actions: add_skill, log_practice, assess, list_skills, knowledge_gaps, learning_path, progress_report, daily_practice."
-        } else if lower.contains("career")
-            || lower.contains("achievement")
-            || lower.contains("portfolio")
-            || lower.contains("job")
-            || lower.contains("resume")
-            || lower.contains("networking")
-        {
-            "For this task, call the 'career_intel' tool. Actions: set_goal, log_achievement, add_portfolio, gap_analysis, market_scan, network_note, progress_report, strategy_review."
-        } else if lower.contains("service monitor")
-            || lower.contains("health check")
-            || lower.contains("incident")
-            || lower.contains("topology")
-            || lower.contains("runbook")
-        {
-            "For this task, call the 'system_monitor' tool. Actions: add_service, topology, health_check, log_incident, correlate, generate_runbook, impact_analysis, list_services."
-        } else if lower.contains("schedule")
-            || lower.contains("deadline")
-            || lower.contains("habit")
-            || lower.contains("energy")
-            || lower.contains("daily plan")
-            || lower.contains("weekly review")
-            || lower.contains("context switch")
-        {
-            "For this task, call the 'life_planner' tool. Actions: set_energy_profile, add_deadline, log_habit, daily_plan, weekly_review, context_switch_log, balance_report, optimize_schedule."
-        } else if lower.contains("privacy")
-            || lower.contains("data boundary")
-            || lower.contains("encrypt")
-            || lower.contains("delete data")
-            || lower.contains("compliance")
-            || lower.contains("audit access")
-        {
-            "For this task, call the 'privacy_manager' tool. Actions: set_boundary, list_boundaries, audit_access, compliance_check, export_data, delete_data, encrypt_store, privacy_report."
-        } else if lower.contains("usage pattern")
-            || lower.contains("performance")
-            || lower.contains("cognitive load")
-            || lower.contains("preference")
-            || lower.contains("feedback")
-            || lower.contains("self-improvement")
-        {
-            "For this task, call the 'self_improvement' tool. Actions: analyze_patterns, performance_report, suggest_improvements, set_preference, get_preferences, cognitive_load, feedback, reset_baseline."
-        } else {
-            return None;
+        let tool_hint = match classification {
+            TaskClassification::WebSearch => "For this task, call the 'web_search' tool with {\"query\": \"your search terms\"}. Do NOT use shell_exec for web searches — use the dedicated web_search tool which queries DuckDuckGo.",
+            TaskClassification::WebFetch => "For this task, call the 'web_fetch' tool with {\"url\": \"https://...\"} to retrieve page content. Do NOT use shell_exec — use the dedicated web_fetch tool.",
+            TaskClassification::Slack => "For this task, call the 'slack' tool with the appropriate action (send_message, read_messages, list_channels, reply_thread, list_users, add_reaction). Do NOT use shell_exec to interact with Slack.",
+            TaskClassification::ArxivResearch => "For this task, call the 'arxiv_research' tool with {\"action\": \"search\", \"query\": \"your search terms\", \"max_results\": 10}. This tool uses the arXiv API directly — do NOT use shell_exec, or curl. Other actions: fetch (get by ID), analyze (LLM summary), trending (recent papers), paper_to_code, paper_to_notebook, save/library/remove, export_bibtex.",
+            TaskClassification::KnowledgeGraph => "For this task, call the 'knowledge_graph' tool. Actions: add_node, get_node, update_node, remove_node, add_edge, remove_edge, neighbors, search, list, path, stats, import_arxiv, export_dot.",
+            TaskClassification::ExperimentTracking => "For this task, call the 'experiment_tracker' tool. Actions: add_hypothesis, update_hypothesis, list_hypotheses, get_hypothesis, add_experiment, start_experiment, complete_experiment, fail_experiment, get_experiment, list_experiments, record_evidence, compare_experiments, summary, export_markdown.",
+            TaskClassification::CodeIntelligence => "For this task, call the 'code_intelligence' tool. Actions: analyze_architecture, detect_patterns, translate_snippet, compare_implementations, tech_debt_report, api_surface, dependency_map.",
+            TaskClassification::ContentEngine => "For this task, call the 'content_engine' tool. Actions: create, update, set_status, get, list, search, delete, schedule, calendar_add, calendar_list, calendar_remove, stats, adapt, export_markdown.",
+            TaskClassification::SkillTracker => "For this task, call the 'skill_tracker' tool. Actions: add_skill, log_practice, assess, list_skills, knowledge_gaps, learning_path, progress_report, daily_practice.",
+            TaskClassification::CareerIntel => "For this task, call the 'career_intel' tool. Actions: set_goal, log_achievement, add_portfolio, gap_analysis, market_scan, network_note, progress_report, strategy_review.",
+            TaskClassification::SystemMonitor => "For this task, call the 'system_monitor' tool. Actions: add_service, topology, health_check, log_incident, correlate, generate_runbook, impact_analysis, list_services.",
+            TaskClassification::LifePlanner => "For this task, call the 'life_planner' tool. Actions: set_energy_profile, add_deadline, log_habit, daily_plan, weekly_review, context_switch_log, balance_report, optimize_schedule.",
+            TaskClassification::PrivacyManager => "For this task, call the 'privacy_manager' tool. Actions: set_boundary, list_boundaries, audit_access, compliance_check, export_data, delete_data, encrypt_store, privacy_report.",
+            TaskClassification::SelfImprovement => "For this task, call the 'self_improvement' tool. Actions: analyze_patterns, performance_report, suggest_improvements, set_preference, get_preferences, cognitive_load, feedback, reset_baseline.",
+            _ => return None,
         };
 
         Some(format!("TOOL ROUTING: {}", tool_hint))
@@ -2355,116 +1898,86 @@ impl Agent {
 
     /// Auto-correct a tool call when the LLM is stuck calling the wrong tool.
     /// Returns Some((corrected_name, corrected_args)) if a correction is possible.
-    /// Uses the current task from AgentState to determine the correct tool.
+    /// Uses the cached `TaskClassification` from `AgentState` for O(1) matching.
     #[cfg(target_os = "macos")]
     fn auto_correct_tool_call(
         failed_tool: &str,
         _args: &serde_json::Value,
         state: &AgentState,
     ) -> Option<(String, serde_json::Value)> {
+        let classification = state.task_classification.as_ref()?;
         let task = state.current_goal.as_deref().unwrap_or("");
-        let lower = task.to_lowercase();
 
-        // Check if the task is about research papers → redirect to arxiv_research
-        let is_paper_task = lower.contains("arxiv")
-            || lower.contains("research paper")
-            || lower.contains("academic paper")
-            || lower.contains("scientific paper")
-            || lower.contains("preprint")
-            || (lower.contains("paper")
-                && (lower.contains("search")
-                    || lower.contains("find")
-                    || lower.contains("top")
-                    || lower.contains("latest")))
-            || (lower.contains("papers")
-                && (lower.contains("search")
-                    || lower.contains("find")
-                    || lower.contains("about")
-                    || lower.contains("top")));
-
-        // Check if the task is a web search → redirect to web_search
-        let is_web_search = lower.contains("search the web")
-            || lower.contains("web search")
-            || lower.contains("search online")
-            || lower.contains("look up")
-            || lower.contains("google");
-
-        // Check if the task is Slack-related → redirect to slack tool
-        let is_slack_task = lower.contains("slack");
-
-        match failed_tool {
+        match classification {
             // Redirect GUI scripting / app control / shell to slack for Slack tasks
-            "macos_gui_scripting" | "macos_app_control" | "shell_exec" if is_slack_task => Some((
-                "slack".to_string(),
-                serde_json::json!({"action": "send_message"}),
-            )),
+            TaskClassification::Slack
+                if matches!(
+                    failed_tool,
+                    "macos_gui_scripting" | "macos_app_control" | "shell_exec"
+                ) =>
+            {
+                Some((
+                    "slack".to_string(),
+                    serde_json::json!({"action": "send_message"}),
+                ))
+            }
             // Redirect Safari/shell/curl to arxiv_research for paper tasks
-            "macos_safari" | "shell_exec" | "web_fetch" | "web_search" if is_paper_task => {
-                // Extract query from the task description
-                let query = task.to_string();
+            TaskClassification::ArxivResearch
+                if matches!(
+                    failed_tool,
+                    "macos_safari" | "shell_exec" | "web_fetch" | "web_search"
+                ) =>
+            {
                 Some((
                     "arxiv_research".to_string(),
-                    serde_json::json!({"action": "search", "query": query, "max_results": 10}),
+                    serde_json::json!({"action": "search", "query": task, "max_results": 10}),
                 ))
             }
             // Redirect Safari/shell to web_search for general web searches
-            "macos_safari" | "shell_exec" if is_web_search => {
-                let query = task.to_string();
+            TaskClassification::WebSearch
+                if matches!(failed_tool, "macos_safari" | "shell_exec") =>
+            {
+                Some(("web_search".to_string(), serde_json::json!({"query": task})))
+            }
+            // Redirect generic file/shell tools to clipboard
+            TaskClassification::Clipboard
+                if matches!(failed_tool, "document_read" | "file_read" | "shell_exec") =>
+            {
                 Some((
-                    "web_search".to_string(),
-                    serde_json::json!({"query": query}),
+                    "macos_clipboard".to_string(),
+                    serde_json::json!({"action": "read"}),
                 ))
             }
-            "document_read" | "file_read" | "shell_exec" => {
-                if lower.contains("clipboard")
-                    || lower.contains("paste")
-                    || lower.contains("pasteboard")
-                {
-                    Some((
-                        "macos_clipboard".to_string(),
-                        serde_json::json!({"action": "read"}),
-                    ))
-                } else if lower.contains("battery") {
-                    Some((
-                        "macos_system_info".to_string(),
-                        serde_json::json!({"action": "battery"}),
-                    ))
+            // Redirect to system_info based on classification
+            TaskClassification::SystemInfo
+                if matches!(failed_tool, "document_read" | "file_read" | "shell_exec") =>
+            {
+                // Use the task text to pick the right sub-action
+                let lower = task.to_lowercase();
+                let action = if lower.contains("battery") {
+                    "battery"
                 } else if lower.contains("disk") {
-                    Some((
-                        "macos_system_info".to_string(),
-                        serde_json::json!({"action": "disk"}),
-                    ))
+                    "disk"
                 } else if lower.contains("cpu") || lower.contains("processor") {
-                    Some((
-                        "macos_system_info".to_string(),
-                        serde_json::json!({"action": "cpu"}),
-                    ))
-                } else if (lower.contains("memory") || lower.contains("ram"))
-                    && lower.contains("usage")
-                {
-                    Some((
-                        "macos_system_info".to_string(),
-                        serde_json::json!({"action": "memory"}),
-                    ))
-                } else if lower.contains("running app")
-                    || lower.contains("what app")
-                    || lower.contains("list app")
-                {
-                    Some((
-                        "macos_app_control".to_string(),
-                        serde_json::json!({"action": "list_running"}),
-                    ))
-                } else if lower.contains("system info")
-                    || lower.contains("os version")
-                    || lower.contains("macos version")
-                {
-                    Some((
-                        "macos_system_info".to_string(),
-                        serde_json::json!({"action": "version"}),
-                    ))
+                    "cpu"
+                } else if lower.contains("memory") || lower.contains("ram") {
+                    "memory"
                 } else {
-                    None
-                }
+                    "version"
+                };
+                Some((
+                    "macos_system_info".to_string(),
+                    serde_json::json!({"action": action}),
+                ))
+            }
+            // Redirect to app_control
+            TaskClassification::AppControl
+                if matches!(failed_tool, "document_read" | "file_read" | "shell_exec") =>
+            {
+                Some((
+                    "macos_app_control".to_string(),
+                    serde_json::json!({"action": "list_running"}),
+                ))
             }
             _ => None,
         }
@@ -2477,10 +1990,14 @@ impl Agent {
         _args: &serde_json::Value,
         state: &AgentState,
     ) -> Option<(String, serde_json::Value)> {
-        let task = state.current_goal.as_deref().unwrap_or("");
-        let lower = task.to_lowercase();
+        let classification = match state.task_classification.as_ref() {
+            Some(c) => c,
+            None => return None,
+        };
 
-        if lower.contains("slack") && matches!(failed_tool, "shell_exec" | "web_fetch") {
+        if matches!(classification, TaskClassification::Slack)
+            && matches!(failed_tool, "shell_exec" | "web_fetch")
+        {
             return Some((
                 "slack".to_string(),
                 serde_json::json!({"action": "send_message"}),
@@ -3117,6 +2634,56 @@ impl Agent {
         self.callback.on_status_change(AgentStatus::Complete).await;
 
         Ok(result)
+    }
+
+    /// Check if context compression is needed and perform it.
+    ///
+    /// Extracted from the agent loop to avoid duplication between the single-ToolCall
+    /// and MultiPart code paths.
+    async fn check_and_compress(&mut self) {
+        if !self.memory.short_term.needs_compression() {
+            return;
+        }
+
+        debug!("Triggering LLM-based context compression");
+        let msgs_to_summarize: Vec<crate::types::Message> = self
+            .memory
+            .short_term
+            .messages_to_summarize()
+            .into_iter()
+            .cloned()
+            .collect();
+        let msgs_count = msgs_to_summarize.len();
+        let pinned_count = self.memory.short_term.pinned_count();
+
+        let (summary_text, was_llm) = match self.summarizer.summarize(&msgs_to_summarize).await {
+            Ok(result) => {
+                info!(
+                    messages_summarized = result.messages_summarized,
+                    tokens_saved = result.tokens_saved,
+                    "Context compression via LLM summarization"
+                );
+                (result.text, true)
+            }
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    "LLM summarization failed, falling back to truncation"
+                );
+                let text = crate::summarizer::smart_fallback_summary(&msgs_to_summarize, 500);
+                (text, false)
+            }
+        };
+
+        self.memory.short_term.compress(summary_text);
+
+        self.callback
+            .on_context_health(&ContextHealthEvent::Compressed {
+                messages_compressed: msgs_count,
+                was_llm_summarized: was_llm,
+                pinned_preserved: pinned_count,
+            })
+            .await;
     }
 
     /// Compact the conversation context by summarizing older messages.

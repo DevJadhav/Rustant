@@ -26,6 +26,7 @@ use error::McpError;
 use handlers::RequestHandler;
 use protocol::{IncomingMessage, JsonRpcResponse, RequestId};
 use resources::ResourceManager;
+use rustant_core::config::McpSafetyConfig;
 use rustant_tools::registry::ToolRegistry;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -39,9 +40,21 @@ pub struct McpServer {
 
 impl McpServer {
     /// Create a new MCP server with the given tool registry and workspace path.
+    /// Uses default safety configuration.
     pub fn new(tool_registry: Arc<ToolRegistry>, workspace: PathBuf) -> Self {
         let resource_manager = ResourceManager::new(workspace);
         let handler = RequestHandler::new(tool_registry, resource_manager);
+        Self { handler }
+    }
+
+    /// Create a new MCP server with explicit safety configuration.
+    pub fn with_config(
+        tool_registry: Arc<ToolRegistry>,
+        workspace: PathBuf,
+        mcp_safety: McpSafetyConfig,
+    ) -> Self {
+        let resource_manager = ResourceManager::new(workspace);
+        let handler = RequestHandler::with_safety(tool_registry, resource_manager, mcp_safety);
         Self { handler }
     }
 

@@ -88,6 +88,9 @@ pub struct AgentConfig {
     /// External MCP server configurations (e.g., Chrome DevTools MCP).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_servers: Vec<ExternalMcpServerConfig>,
+    /// Optional MCP safety policy configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_safety: Option<McpSafetyConfig>,
 }
 
 /// Meeting recording and transcription configuration.
@@ -157,6 +160,67 @@ pub struct ExternalMcpServerConfig {
     /// Whether to auto-connect on startup.
     #[serde(default = "default_true")]
     pub auto_connect: bool,
+}
+
+/// MCP safety policy configuration.
+///
+/// Controls security checks applied to tool calls received via MCP (Model Context Protocol).
+/// When enabled, tools called via MCP are gated by risk level, deny lists, injection scanning,
+/// rate limiting, and schema validation before execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpSafetyConfig {
+    /// Whether MCP safety checks are enabled.
+    pub enabled: bool,
+    /// Maximum risk level allowed for MCP tool calls.
+    /// Tools above this level are rejected unless explicitly in `allowed_tools`.
+    /// Uses string representation: "read_only", "write", "execute", "network", "destructive".
+    pub max_risk_level: String,
+    /// Tools explicitly allowed regardless of risk level.
+    #[serde(default)]
+    pub allowed_tools: Vec<String>,
+    /// Tools explicitly denied via MCP (always rejected).
+    #[serde(default)]
+    pub denied_tools: Vec<String>,
+    /// Whether to scan tool arguments and outputs for injection patterns.
+    pub scan_inputs: bool,
+    /// Whether to scan tool outputs for injection patterns (warn-prefix, not block).
+    pub scan_outputs: bool,
+    /// Whether to log MCP tool calls to the audit trail.
+    pub audit_enabled: bool,
+    /// Maximum tool calls per minute (0 = unlimited).
+    pub max_calls_per_minute: usize,
+}
+
+impl McpSafetyConfig {
+    /// Parse the `max_risk_level` string into a `RiskLevel`.
+    ///
+    /// Returns `Write` as the default if the string is unrecognized.
+    pub fn parsed_max_risk_level(&self) -> crate::types::RiskLevel {
+        use crate::types::RiskLevel;
+        match self.max_risk_level.to_lowercase().as_str() {
+            "read_only" | "readonly" => RiskLevel::ReadOnly,
+            "write" => RiskLevel::Write,
+            "execute" => RiskLevel::Execute,
+            "network" => RiskLevel::Network,
+            "destructive" => RiskLevel::Destructive,
+            _ => RiskLevel::Write,
+        }
+    }
+}
+
+impl Default for McpSafetyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_risk_level: "write".to_string(),
+            allowed_tools: Vec::new(),
+            denied_tools: vec!["shell_exec".to_string(), "macos_gui_scripting".to_string()],
+            scan_inputs: true,
+            scan_outputs: true,
+            audit_enabled: true,
+            max_calls_per_minute: 60,
+        }
+    }
 }
 
 /// Configuration for the workflow engine.

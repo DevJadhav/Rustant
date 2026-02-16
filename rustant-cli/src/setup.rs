@@ -197,20 +197,14 @@ pub async fn run_setup(workspace: &Path) -> anyhow::Result<()> {
                     println!("\n  Validating existing credentials...");
                     let base_url: Option<String> = if chosen_provider.name == "custom" {
                         let url: String = Input::new()
-                            .with_prompt(
-                                "Enter the base URL (e.g., http://localhost:11434/v1)",
-                            )
+                            .with_prompt("Enter the base URL (e.g., http://localhost:11434/v1)")
                             .interact_text()?;
                         Some(url)
                     } else {
                         None
                     };
-                    match list_models(
-                        &chosen_provider.name,
-                        &existing_key,
-                        base_url.as_deref(),
-                    )
-                    .await
+                    match list_models(&chosen_provider.name, &existing_key, base_url.as_deref())
+                        .await
                     {
                         Ok(models) if !models.is_empty() => {
                             println!("  Credentials valid! Found {} model(s).\n", models.len());
@@ -252,9 +246,7 @@ pub async fn run_setup(workspace: &Path) -> anyhow::Result<()> {
                             return Ok(());
                         }
                         _ => {
-                            println!(
-                                "  Existing key validation failed. Please enter a new key.\n"
-                            );
+                            println!("  Existing key validation failed. Please enter a new key.\n");
                             // Fall through to normal flow
                         }
                     }
