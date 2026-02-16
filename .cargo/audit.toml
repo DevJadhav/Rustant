@@ -1,0 +1,48 @@
+# cargo-audit configuration
+# See: https://github.com/rustsec/rustsec/tree/main/cargo-audit
+
+[advisories]
+# Advisories to ignore — transitive dependencies we cannot directly update.
+# Review periodically and remove once upstream fixes are available.
+ignore = [
+    # ── Tauri / GTK3 bindings (unmaintained) ──────────────────────────
+    # These are all pulled in by tauri → wry → gtk/gdk/webkit2gtk.
+    # No action possible until Tauri migrates to GTK4.
+    "RUSTSEC-2024-0370",  # proc-macro-error (via glib-macros → gtk)
+    "RUSTSEC-2024-0411",  # gdkwayland-sys
+    "RUSTSEC-2024-0412",  # gdk
+    "RUSTSEC-2024-0413",  # atk
+    "RUSTSEC-2024-0414",  # gdkx11-sys
+    "RUSTSEC-2024-0415",  # gtk
+    "RUSTSEC-2024-0416",  # atk-sys
+    "RUSTSEC-2024-0417",  # gdkx11
+    "RUSTSEC-2024-0418",  # gdk-sys
+    "RUSTSEC-2024-0419",  # gtk3-macros
+    "RUSTSEC-2024-0420",  # gtk-sys
+    "RUSTSEC-2024-0429",  # glib unsound VariantStrIter (via tauri)
+    "RUSTSEC-2025-0057",  # fxhash (via selectors → tauri-utils)
+    "RUSTSEC-2025-0075",  # unic-char-range (via urlpattern → tauri-utils)
+    "RUSTSEC-2025-0080",  # unic-common (via urlpattern → tauri-utils)
+    "RUSTSEC-2025-0081",  # unic-char-property (via urlpattern → tauri-utils)
+    "RUSTSEC-2025-0098",  # unic-ucd-version (via urlpattern → tauri-utils)
+    "RUSTSEC-2025-0100",  # unic-ucd-ident (via urlpattern → tauri-utils)
+
+    # ── genpdf / printpdf / lopdf (unmaintained transitive deps) ──────
+    "RUSTSEC-2020-0020",  # stb_truetype (via rusttype → genpdf)
+    "RUSTSEC-2020-0056",  # stdweb (via time 0.2 → lopdf → genpdf)
+    "RUSTSEC-2020-0144",  # lzw (via lopdf → genpdf)
+    "RUSTSEC-2021-0140",  # rusttype (via genpdf)
+    "RUSTSEC-2021-0153",  # encoding (via lopdf → genpdf)
+
+    # ── tantivy transitive deps ───────────────────────────────────────
+    "RUSTSEC-2024-0384",  # instant (via measure_time → tantivy)
+    "RUSTSEC-2026-0002",  # lru unsound IterMut (via tantivy + ratatui)
+
+    # ── Other transitive deps ─────────────────────────────────────────
+    "RUSTSEC-2024-0320",  # yaml-rust (via syntect)
+    "RUSTSEC-2024-0436",  # paste (via ratatui)
+    "RUSTSEC-2025-0119",  # number_prefix (via indicatif → self_update)
+    "RUSTSEC-2025-0134",  # rustls-pemfile (via axum-server)
+    "RUSTSEC-2025-0141",  # bincode (via syntect)
+    "RUSTSEC-2026-0008",  # git2 unsound Buf deref (no fix available yet)
+]
