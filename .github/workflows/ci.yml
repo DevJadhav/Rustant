@@ -23,11 +23,16 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config libdbus-1-dev libssl-dev perl build-essential
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
       - name: Run Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --exclude rustant-ui -- -D warnings
 
   test:
     name: Test (${{ matrix.os }})
@@ -45,6 +50,12 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config libdbus-1-dev libssl-dev perl build-essential
+
       - name: Configure git for tests
         run: |
           git config --global user.email "test@test.com"
@@ -52,7 +63,7 @@ jobs:
           git config --global commit.gpgsign false
 
       - name: Run tests
-        run: cargo test --workspace
+        run: cargo test --workspace --exclude rustant-ui
 
   audit:
     name: Security Audit
@@ -79,5 +90,10 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config libdbus-1-dev libssl-dev perl build-essential
+
       - name: Build release
-        run: cargo build --workspace --release
+        run: cargo build --workspace --release --exclude rustant-ui

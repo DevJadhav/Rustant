@@ -813,6 +813,7 @@ fn validate_imessage_access() -> anyhow::Result<String> {
 }
 
 #[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
 fn validate_imessage_access() -> anyhow::Result<String> {
     anyhow::bail!("iMessage is only available on macOS")
 }
