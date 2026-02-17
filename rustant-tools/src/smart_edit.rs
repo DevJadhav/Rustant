@@ -116,9 +116,10 @@ fn parse_line_pattern(pattern: &str) -> Option<(usize, usize)> {
 
     // "line 42"
     if let Some(rest) = lower.strip_prefix("line ")
-        && let Ok(n) = rest.trim().parse::<usize>() {
-            return Some((n, n));
-        }
+        && let Ok(n) = rest.trim().parse::<usize>()
+    {
+        return Some((n, n));
+    }
 
     // "lines 10-20"
     if let Some(rest) = lower.strip_prefix("lines ") {
@@ -127,9 +128,10 @@ fn parse_line_pattern(pattern: &str) -> Option<(usize, usize)> {
             && let (Ok(a), Ok(b)) = (
                 parts[0].trim().parse::<usize>(),
                 parts[1].trim().parse::<usize>(),
-            ) {
-                return Some((a, b));
-            }
+            )
+        {
+            return Some((a, b));
+        }
     }
 
     None

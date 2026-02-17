@@ -239,14 +239,15 @@ impl MatrixHttpClient for RealMatrixHttp {
                 if let Some(timeline) = room_data["timeline"]["events"].as_array() {
                     for event in timeline {
                         if event["type"].as_str() == Some("m.room.message")
-                            && let Some(event_body) = event["content"]["body"].as_str() {
-                                events.push(MatrixEvent {
-                                    event_id: event["event_id"].as_str().unwrap_or("").to_string(),
-                                    room_id: room_id.clone(),
-                                    sender: event["sender"].as_str().unwrap_or("").to_string(),
-                                    body: event_body.to_string(),
-                                });
-                            }
+                            && let Some(event_body) = event["content"]["body"].as_str()
+                        {
+                            events.push(MatrixEvent {
+                                event_id: event["event_id"].as_str().unwrap_or("").to_string(),
+                                room_id: room_id.clone(),
+                                sender: event["sender"].as_str().unwrap_or("").to_string(),
+                                body: event_body.to_string(),
+                            });
+                        }
                     }
                 }
             }

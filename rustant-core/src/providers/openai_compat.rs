@@ -340,9 +340,10 @@ impl OpenAiCompatibleProvider {
                 // Optionally include text if present
                 let mut parts = Vec::new();
                 if let Some(text) = message.get("content").and_then(|c| c.as_str())
-                    && !text.is_empty() {
-                        parts.push(Content::text(text));
-                    }
+                    && !text.is_empty()
+                {
+                    parts.push(Content::text(text));
+                }
                 parts.extend(calls);
                 Content::MultiPart { parts }
             }
@@ -410,13 +411,14 @@ impl OpenAiCompatibleProvider {
         let mut tool_call_ids: HashSet<String> = HashSet::new();
         for msg in &messages {
             if msg["role"].as_str() == Some("assistant")
-                && let Some(calls) = msg["tool_calls"].as_array() {
-                    for call in calls {
-                        if let Some(id) = call["id"].as_str() {
-                            tool_call_ids.insert(id.to_string());
-                        }
+                && let Some(calls) = msg["tool_calls"].as_array()
+            {
+                for call in calls {
+                    if let Some(id) = call["id"].as_str() {
+                        tool_call_ids.insert(id.to_string());
                     }
                 }
+            }
         }
 
         // --- Pass 2: Remove orphaned tool messages ---
@@ -551,9 +553,10 @@ impl LlmProvider for OpenAiCompatibleProvider {
             body["stop"] = json!(request.stop_sequences);
         }
         if let Some(tools) = &request.tools
-            && !tools.is_empty() {
-                body["tools"] = json!(Self::tools_to_json(tools));
-            }
+            && !tools.is_empty()
+        {
+            body["tools"] = json!(Self::tools_to_json(tools));
+        }
 
         debug!(url = %url, model = %self.model, "Sending OpenAI completion request");
 
@@ -609,9 +612,10 @@ impl LlmProvider for OpenAiCompatibleProvider {
             body["stop"] = json!(request.stop_sequences);
         }
         if let Some(tools) = &request.tools
-            && !tools.is_empty() {
-                body["tools"] = json!(Self::tools_to_json(tools));
-            }
+            && !tools.is_empty()
+        {
+            body["tools"] = json!(Self::tools_to_json(tools));
+        }
 
         let response = self
             .client
@@ -669,9 +673,10 @@ impl LlmProvider for OpenAiCompatibleProvider {
 
                     // Content token
                     if let Some(content) = delta.get("content").and_then(|c| c.as_str())
-                        && !content.is_empty() {
-                            let _ = tx.send(StreamEvent::Token(content.to_string())).await;
-                        }
+                        && !content.is_empty()
+                    {
+                        let _ = tx.send(StreamEvent::Token(content.to_string())).await;
+                    }
 
                     // Tool calls
                     if let Some(tool_calls) = delta.get("tool_calls").and_then(|t| t.as_array()) {
@@ -699,26 +704,28 @@ impl LlmProvider for OpenAiCompatibleProvider {
                                 // Arguments delta
                                 if let Some(args) = func.get("arguments").and_then(|a| a.as_str())
                                     && !args.is_empty()
-                                        && let Some((id, _)) = active_tool_calls.get(&index) {
-                                            let _ = tx
-                                                .send(StreamEvent::ToolCallDelta {
-                                                    id: id.clone(),
-                                                    arguments_delta: args.to_string(),
-                                                })
-                                                .await;
-                                        }
+                                    && let Some((id, _)) = active_tool_calls.get(&index)
+                                {
+                                    let _ = tx
+                                        .send(StreamEvent::ToolCallDelta {
+                                            id: id.clone(),
+                                            arguments_delta: args.to_string(),
+                                        })
+                                        .await;
+                                }
                             }
                         }
                     }
 
                     // Finish reason
                     if let Some(finish) = choice.get("finish_reason").and_then(|f| f.as_str())
-                        && finish == "tool_calls" {
-                            // Send ToolCallEnd for all active calls
-                            for (_, (id, _)) in active_tool_calls.drain() {
-                                let _ = tx.send(StreamEvent::ToolCallEnd { id }).await;
-                            }
+                        && finish == "tool_calls"
+                    {
+                        // Send ToolCallEnd for all active calls
+                        for (_, (id, _)) in active_tool_calls.drain() {
+                            let _ = tx.send(StreamEvent::ToolCallEnd { id }).await;
                         }
+                    }
                 }
             }
         }

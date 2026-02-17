@@ -342,15 +342,17 @@ impl ReplInput {
         write!(stdout, "{}", buffer)?;
         // Print ghost completion text if available
         if let Some(hint) = completion_hint
-            && hint.len() > buffer.len() && hint.starts_with(buffer) {
-                let suffix = &hint[buffer.len()..];
-                write!(stdout, "\x1b[90m{}\x1b[0m", suffix)?;
-                // Move cursor back to actual position
-                let hint_len = suffix.len();
-                if hint_len > 0 {
-                    write!(stdout, "{}", cursor::MoveLeft(hint_len as u16))?;
-                }
+            && hint.len() > buffer.len()
+            && hint.starts_with(buffer)
+        {
+            let suffix = &hint[buffer.len()..];
+            write!(stdout, "\x1b[90m{}\x1b[0m", suffix)?;
+            // Move cursor back to actual position
+            let hint_len = suffix.len();
+            if hint_len > 0 {
+                write!(stdout, "{}", cursor::MoveLeft(hint_len as u16))?;
             }
+        }
         // Position cursor correctly within the buffer
         let chars_after_cursor = buffer.len() - cursor_pos;
         if chars_after_cursor > 0 {

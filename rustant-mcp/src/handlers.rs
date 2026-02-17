@@ -225,15 +225,16 @@ impl RequestHandler {
         if self.mcp_safety.enabled {
             // 1. Rate limiting
             if let Some(ref mut limiter) = self.rate_limiter
-                && !limiter.check_and_record() {
-                    warn!(tool = %tool_name, "MCP rate limit exceeded");
-                    return Err(McpError::RateLimited {
-                        message: format!(
-                            "Rate limit exceeded: max {} calls/minute",
-                            self.mcp_safety.max_calls_per_minute
-                        ),
-                    });
-                }
+                && !limiter.check_and_record()
+            {
+                warn!(tool = %tool_name, "MCP rate limit exceeded");
+                return Err(McpError::RateLimited {
+                    message: format!(
+                        "Rate limit exceeded: max {} calls/minute",
+                        self.mcp_safety.max_calls_per_minute
+                    ),
+                });
+            }
 
             // 2. Denied tools list
             if self.mcp_safety.denied_tools.iter().any(|d| d == tool_name) {
@@ -247,44 +248,46 @@ impl RequestHandler {
             let is_explicitly_allowed =
                 self.mcp_safety.allowed_tools.iter().any(|a| a == tool_name);
             if !is_explicitly_allowed
-                && let Some(tool_risk) = self.tool_registry.get_risk_level(tool_name) {
-                    let max_risk = self.mcp_safety.parsed_max_risk_level();
-                    if tool_risk > max_risk {
-                        warn!(
-                            tool = %tool_name,
-                            tool_risk = ?tool_risk,
-                            max_risk = ?max_risk,
-                            "MCP tool exceeds max risk level"
-                        );
-                        return Err(McpError::ToolDenied {
-                            message: format!(
-                                "Tool '{}' risk level ({:?}) exceeds max allowed ({:?})",
-                                tool_name, tool_risk, max_risk
-                            ),
-                        });
-                    }
+                && let Some(tool_risk) = self.tool_registry.get_risk_level(tool_name)
+            {
+                let max_risk = self.mcp_safety.parsed_max_risk_level();
+                if tool_risk > max_risk {
+                    warn!(
+                        tool = %tool_name,
+                        tool_risk = ?tool_risk,
+                        max_risk = ?max_risk,
+                        "MCP tool exceeds max risk level"
+                    );
+                    return Err(McpError::ToolDenied {
+                        message: format!(
+                            "Tool '{}' risk level ({:?}) exceeds max allowed ({:?})",
+                            tool_name, tool_risk, max_risk
+                        ),
+                    });
                 }
+            }
 
             // 4. Input injection scan
             if self.mcp_safety.scan_inputs
-                && let Some(ref detector) = self.injection_detector {
-                    let args_str = arguments.to_string();
-                    let scan = detector.scan_input(&args_str);
-                    if scan.is_suspicious {
-                        warn!(
-                            tool = %tool_name,
-                            risk_score = scan.risk_score,
-                            patterns = scan.detected_patterns.len(),
-                            "Injection detected in MCP tool arguments"
-                        );
-                        return Err(McpError::ToolDenied {
-                            message: format!(
-                                "Injection pattern detected in arguments for '{}' (risk: {:.2})",
-                                tool_name, scan.risk_score
-                            ),
-                        });
-                    }
+                && let Some(ref detector) = self.injection_detector
+            {
+                let args_str = arguments.to_string();
+                let scan = detector.scan_input(&args_str);
+                if scan.is_suspicious {
+                    warn!(
+                        tool = %tool_name,
+                        risk_score = scan.risk_score,
+                        patterns = scan.detected_patterns.len(),
+                        "Injection detected in MCP tool arguments"
+                    );
+                    return Err(McpError::ToolDenied {
+                        message: format!(
+                            "Injection pattern detected in arguments for '{}' (risk: {:.2})",
+                            tool_name, scan.risk_score
+                        ),
+                    });
                 }
+            }
 
             // 5. JSON schema validation
             if let Some(schema) = self.tool_registry.get_parameters_schema(tool_name) {
@@ -327,21 +330,23 @@ impl RequestHandler {
                 };
 
                 // Output injection scan (warn-prefix, don't block)
-                if self.mcp_safety.enabled && self.mcp_safety.scan_outputs
-                    && let Some(ref detector) = self.injection_detector {
-                        let scan = detector.scan_tool_output(&text);
-                        if scan.is_suspicious {
-                            warn!(
-                                tool = %tool_name,
-                                risk_score = scan.risk_score,
-                                "Injection pattern detected in tool output"
-                            );
-                            text = format!(
-                                "[WARNING: Output may contain injection patterns (risk: {:.2})]\n\n{}",
-                                scan.risk_score, text
-                            );
-                        }
+                if self.mcp_safety.enabled
+                    && self.mcp_safety.scan_outputs
+                    && let Some(ref detector) = self.injection_detector
+                {
+                    let scan = detector.scan_tool_output(&text);
+                    if scan.is_suspicious {
+                        warn!(
+                            tool = %tool_name,
+                            risk_score = scan.risk_score,
+                            "Injection pattern detected in tool output"
+                        );
+                        text = format!(
+                            "[WARNING: Output may contain injection patterns (risk: {:.2})]\n\n{}",
+                            scan.risk_score, text
+                        );
                     }
+                }
 
                 // 8. Audit log
                 if self.mcp_safety.enabled && self.mcp_safety.audit_enabled {

@@ -144,10 +144,11 @@ impl PrivacyManagerTool {
                     total_size += s;
                     file_count += c;
                 } else if entry_path.is_file()
-                    && let Ok(meta) = entry_path.metadata() {
-                        total_size += meta.len();
-                        file_count += 1;
-                    }
+                    && let Ok(meta) = entry_path.metadata()
+                {
+                    total_size += meta.len();
+                    file_count += 1;
+                }
             }
         }
         (total_size, file_count)
@@ -160,9 +161,10 @@ impl PrivacyManagerTool {
         if let Ok(entries) = std::fs::read_dir(&rustant_dir) {
             for entry in entries.flatten() {
                 if entry.path().is_dir()
-                    && let Some(name) = entry.file_name().to_str() {
-                        domains.push(name.to_string());
-                    }
+                    && let Some(name) = entry.file_name().to_str()
+                {
+                    domains.push(name.to_string());
+                }
             }
         }
         domains.sort();
@@ -363,13 +365,15 @@ impl PrivacyManagerTool {
             .rev()
             .filter(|e| {
                 if let Some(tn) = tool_filter
-                    && e.tool_name != tn {
-                        return false;
-                    }
+                    && e.tool_name != tn
+                {
+                    return false;
+                }
                 if let Some(bid) = boundary_filter
-                    && e.boundary_id != Some(bid) {
-                        return false;
-                    }
+                    && e.boundary_id != Some(bid)
+                {
+                    return false;
+                }
                 true
             })
             .take(limit)
@@ -485,25 +489,25 @@ impl PrivacyManagerTool {
                 for entry in entries.flatten() {
                     let entry_path = entry.path();
                     if entry_path.is_file()
-                        && let Some(fname) = entry_path.file_name().and_then(|f| f.to_str()) {
-                            match std::fs::read_to_string(&entry_path) {
-                                Ok(content) => {
-                                    // Try to parse as JSON; if it fails, store as string
-                                    if let Ok(val) = serde_json::from_str::<Value>(&content) {
-                                        domain_files.insert(fname.to_string(), val);
-                                    } else {
-                                        domain_files
-                                            .insert(fname.to_string(), Value::String(content));
-                                    }
-                                }
-                                Err(_) => {
-                                    domain_files.insert(
-                                        fname.to_string(),
-                                        Value::String("[binary or unreadable]".to_string()),
-                                    );
+                        && let Some(fname) = entry_path.file_name().and_then(|f| f.to_str())
+                    {
+                        match std::fs::read_to_string(&entry_path) {
+                            Ok(content) => {
+                                // Try to parse as JSON; if it fails, store as string
+                                if let Ok(val) = serde_json::from_str::<Value>(&content) {
+                                    domain_files.insert(fname.to_string(), val);
+                                } else {
+                                    domain_files.insert(fname.to_string(), Value::String(content));
                                 }
                             }
+                            Err(_) => {
+                                domain_files.insert(
+                                    fname.to_string(),
+                                    Value::String("[binary or unreadable]".to_string()),
+                                );
+                            }
                         }
+                    }
                 }
             }
             export.insert(domain.clone(), Value::Object(domain_files));

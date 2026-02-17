@@ -125,10 +125,12 @@ impl MerkleChain {
         });
 
         // Auto-checkpoint if interval is configured
-        if self.checkpoint_interval > 0 && (sequence + 1).is_multiple_of(self.checkpoint_interval)
-            && let Some(hash) = self.root_hash() {
-                self.checkpoints.push((sequence, hash.to_string()));
-            }
+        if self.checkpoint_interval > 0
+            && (sequence + 1).is_multiple_of(self.checkpoint_interval)
+            && let Some(hash) = self.root_hash()
+        {
+            self.checkpoints.push((sequence, hash.to_string()));
+        }
 
         self.nodes.last().unwrap()
     }

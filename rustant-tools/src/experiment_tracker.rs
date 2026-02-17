@@ -213,16 +213,18 @@ impl ExperimentTrackerTool {
                     h.title = title.to_string();
                 }
                 if let Some(status_str) = args.get("status").and_then(|v| v.as_str())
-                    && let Some(status) = parse_hypothesis_status(status_str) {
-                        h.status = status;
-                    }
+                    && let Some(status) = parse_hypothesis_status(status_str)
+                {
+                    h.status = status;
+                }
                 if let Some(tags_val) = args.get("tags")
-                    && let Some(arr) = tags_val.as_array() {
-                        h.tags = arr
-                            .iter()
-                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                            .collect();
-                    }
+                    && let Some(arr) = tags_val.as_array()
+                {
+                    h.tags = arr
+                        .iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect();
+                }
                 let title = h.title.clone();
                 let status = h.status.clone();
                 self.save_state(&state)?;
@@ -246,13 +248,15 @@ impl ExperimentTrackerTool {
             .filter(|h| {
                 if let Some(sf) = status_filter
                     && let Some(parsed) = parse_hypothesis_status(sf)
-                        && h.status != parsed {
-                            return false;
-                        }
+                    && h.status != parsed
+                {
+                    return false;
+                }
                 if let Some(tf) = tag_filter
-                    && !h.tags.iter().any(|t| t == tf) {
-                        return false;
-                    }
+                    && !h.tags.iter().any(|t| t == tf)
+                {
+                    return false;
+                }
                 true
             })
             .collect();
@@ -371,9 +375,10 @@ impl ExperimentTrackerTool {
 
         // Validate hypothesis_id if provided
         if let Some(ref hid) = hypothesis_id
-            && !state.hypotheses.iter().any(|h| h.id == *hid) {
-                return Ok(ToolOutput::text(format!("Hypothesis {} not found.", hid)));
-            }
+            && !state.hypotheses.iter().any(|h| h.id == *hid)
+        {
+            return Ok(ToolOutput::text(format!("Hypothesis {} not found.", hid)));
+        }
 
         let id = format!("e{}", state.next_experiment_id);
         state.next_experiment_id += 1;
@@ -534,25 +539,26 @@ impl ExperimentTrackerTool {
 
                 // Show related evidence if linked to a hypothesis
                 if let Some(ref hid) = e.hypothesis_id
-                    && let Some(hyp) = state.hypotheses.iter().find(|h| h.id == *hid) {
-                        let related: Vec<&Evidence> = hyp
-                            .evidence
-                            .iter()
-                            .filter(|ev| ev.experiment_id == e.id)
-                            .collect();
-                        if !related.is_empty() {
+                    && let Some(hyp) = state.hypotheses.iter().find(|h| h.id == *hid)
+                {
+                    let related: Vec<&Evidence> = hyp
+                        .evidence
+                        .iter()
+                        .filter(|ev| ev.experiment_id == e.id)
+                        .collect();
+                    if !related.is_empty() {
+                        out.push_str(&format!(
+                            "\nEvidence from this experiment ({}):\n",
+                            related.len()
+                        ));
+                        for ev in &related {
                             out.push_str(&format!(
-                                "\nEvidence from this experiment ({}):\n",
-                                related.len()
+                                "  {} (confidence: {:.2}, supports: {})\n",
+                                ev.finding, ev.confidence, ev.supports
                             ));
-                            for ev in &related {
-                                out.push_str(&format!(
-                                    "  {} (confidence: {:.2}, supports: {})\n",
-                                    ev.finding, ev.confidence, ev.supports
-                                ));
-                            }
                         }
                     }
+                }
 
                 Ok(ToolOutput::text(out))
             }
@@ -571,18 +577,21 @@ impl ExperimentTrackerTool {
             .iter()
             .filter(|e| {
                 if let Some(hid) = hypothesis_id_filter
-                    && e.hypothesis_id.as_deref() != Some(hid) {
-                        return false;
-                    }
+                    && e.hypothesis_id.as_deref() != Some(hid)
+                {
+                    return false;
+                }
                 if let Some(sf) = status_filter
                     && let Some(parsed) = parse_experiment_status(sf)
-                        && e.status != parsed {
-                            return false;
-                        }
+                    && e.status != parsed
+                {
+                    return false;
+                }
                 if let Some(tf) = tag_filter
-                    && !e.tags.iter().any(|t| t == tf) {
-                        return false;
-                    }
+                    && !e.tags.iter().any(|t| t == tf)
+                {
+                    return false;
+                }
                 true
             })
             .collect();

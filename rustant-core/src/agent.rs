@@ -522,10 +522,11 @@ impl Agent {
         // in memory, so it never gets displaced by compression and can't end up
         // between tool_call and tool_result messages.
         if let Some(ref classification) = self.state.task_classification
-            && let Some(hint) = Self::tool_routing_hint_from_classification(classification) {
-                knowledge_addendum.push_str("\n\n");
-                knowledge_addendum.push_str(&hint);
-            }
+            && let Some(hint) = Self::tool_routing_hint_from_classification(classification)
+        {
+            knowledge_addendum.push_str("\n\n");
+            knowledge_addendum.push_str(&hint);
+        }
         self.brain.set_knowledge_addendum(knowledge_addendum);
 
         self.memory.add_message(Message::user(task));
@@ -2443,9 +2444,10 @@ impl Agent {
                 .collect();
             for name in &due_jobs {
                 if let Some(ref scheduler) = self.cron_scheduler
-                    && let Some(job) = scheduler.get_job(name) {
-                        due_tasks.push(job.config.task.clone());
-                    }
+                    && let Some(job) = scheduler.get_job(name)
+                {
+                    due_tasks.push(job.config.task.clone());
+                }
             }
             // Mark them executed
             if let Some(ref mut scheduler) = self.cron_scheduler {
@@ -2860,9 +2862,10 @@ impl Agent {
                         Message::user(&question),
                     ];
                     if let Ok(resp) = self.brain.think_with_retry(&messages, None, 1).await
-                        && let Some(answer) = resp.message.content.as_text() {
-                            self.callback.on_assistant_message(answer).await;
-                        }
+                        && let Some(answer) = resp.message.content.as_text()
+                    {
+                        self.callback.on_assistant_message(answer).await;
+                    }
                 }
             }
         }

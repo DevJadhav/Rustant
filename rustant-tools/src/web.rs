@@ -118,17 +118,18 @@ impl Tool for WebSearchTool {
 
         // Extract abstract (main answer)
         if let Some(abstract_text) = body.get("AbstractText").and_then(|v| v.as_str())
-            && !abstract_text.is_empty() {
-                let source = body
-                    .get("AbstractSource")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Unknown");
-                let url = body
-                    .get("AbstractURL")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                results.push(format!("[{}] {}\n  URL: {}", source, abstract_text, url));
-            }
+            && !abstract_text.is_empty()
+        {
+            let source = body
+                .get("AbstractSource")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown");
+            let url = body
+                .get("AbstractURL")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            results.push(format!("[{}] {}\n  URL: {}", source, abstract_text, url));
+        }
 
         // Extract related topics
         if let Some(topics) = body.get("RelatedTopics").and_then(|v| v.as_array()) {

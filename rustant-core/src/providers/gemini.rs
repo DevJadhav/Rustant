@@ -208,12 +208,13 @@ impl GeminiProvider {
         // For assistant messages with stored raw Gemini parts (preserving
         // thought_signature), use them verbatim instead of reconstructing.
         if msg.role == Role::Assistant
-            && let Some(raw_parts) = msg.metadata.get("gemini_raw_parts") {
-                return serde_json::json!({
-                    "role": role,
-                    "parts": raw_parts,
-                });
-            }
+            && let Some(raw_parts) = msg.metadata.get("gemini_raw_parts")
+        {
+            return serde_json::json!({
+                "role": role,
+                "parts": raw_parts,
+            });
+        }
 
         let parts = Self::content_to_gemini_parts(&msg.content);
 
@@ -348,15 +349,16 @@ impl GeminiProvider {
                 std::collections::HashSet::new();
             for entry in &merged {
                 if entry["role"].as_str() == Some("model")
-                    && let Some(parts) = entry["parts"].as_array() {
-                        for part in parts {
-                            if let Some(name) =
-                                part.get("functionCall").and_then(|fc| fc["name"].as_str())
-                            {
-                                function_call_names.insert(name.to_string());
-                            }
+                    && let Some(parts) = entry["parts"].as_array()
+                {
+                    for part in parts {
+                        if let Some(name) =
+                            part.get("functionCall").and_then(|fc| fc["name"].as_str())
+                        {
+                            function_call_names.insert(name.to_string());
                         }
                     }
+                }
             }
 
             // Filter out functionResponse parts whose names don't match any functionCall.
@@ -810,27 +812,28 @@ impl LlmProvider for GeminiProvider {
         // Process any remaining data in the buffer.
         let remaining = line_buffer.trim().to_string();
         if !remaining.is_empty()
-            && let Some(data_str) = remaining.strip_prefix("data: ") {
-                match serde_json::from_str::<Value>(data_str) {
-                    Ok(data_json) => {
-                        if let Ok(Some(usage)) = Self::process_stream_chunk(&data_json, &tx).await {
-                            total_usage = usage;
-                        }
-                    }
-                    Err(e) => {
-                        let preview = if data_str.len() > 200 {
-                            &data_str[..200]
-                        } else {
-                            data_str
-                        };
-                        warn!(
-                            error = %e,
-                            data_preview = preview,
-                            "Failed to parse final Gemini SSE JSON chunk"
-                        );
+            && let Some(data_str) = remaining.strip_prefix("data: ")
+        {
+            match serde_json::from_str::<Value>(data_str) {
+                Ok(data_json) => {
+                    if let Ok(Some(usage)) = Self::process_stream_chunk(&data_json, &tx).await {
+                        total_usage = usage;
                     }
                 }
+                Err(e) => {
+                    let preview = if data_str.len() > 200 {
+                        &data_str[..200]
+                    } else {
+                        data_str
+                    };
+                    warn!(
+                        error = %e,
+                        data_preview = preview,
+                        "Failed to parse final Gemini SSE JSON chunk"
+                    );
+                }
             }
+        }
 
         let _ = tx.send(StreamEvent::Done { usage: total_usage }).await;
 

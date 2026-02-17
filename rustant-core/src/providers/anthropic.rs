@@ -291,14 +291,16 @@ impl AnthropicProvider {
         let mut tool_use_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
         for msg in &merged {
             if msg["role"].as_str() == Some("assistant")
-                && let Some(content) = msg["content"].as_array() {
-                    for block in content {
-                        if block["type"].as_str() == Some("tool_use")
-                            && let Some(id) = block["id"].as_str() {
-                                tool_use_ids.insert(id.to_string());
-                            }
+                && let Some(content) = msg["content"].as_array()
+            {
+                for block in content {
+                    if block["type"].as_str() == Some("tool_use")
+                        && let Some(id) = block["id"].as_str()
+                    {
+                        tool_use_ids.insert(id.to_string());
                     }
                 }
+            }
         }
 
         // Filter out orphaned tool_result blocks from user messages
@@ -534,9 +536,10 @@ impl AnthropicProvider {
             "content_block_stop" => {
                 // If this was a tool_use block, emit ToolCallEnd.
                 if current_block_type.as_deref() == Some("tool_use")
-                    && let Some(id) = current_block_id.take() {
-                        let _ = tx.send(StreamEvent::ToolCallEnd { id }).await;
-                    }
+                    && let Some(id) = current_block_id.take()
+                {
+                    let _ = tx.send(StreamEvent::ToolCallEnd { id }).await;
+                }
                 *current_block_type = None;
 
                 Ok(None)
@@ -710,9 +713,9 @@ impl LlmProvider for AnthropicProvider {
                     if event_type == "message_start"
                         && let Some(input_tokens) =
                             data_json["message"]["usage"]["input_tokens"].as_u64()
-                        {
-                            total_usage.input_tokens = input_tokens as usize;
-                        }
+                    {
+                        total_usage.input_tokens = input_tokens as usize;
+                    }
                 }
 
                 current_event_type.clear();

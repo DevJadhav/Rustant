@@ -72,9 +72,10 @@ impl NodeManager {
         // Find first consented healthy node
         for node_id in &capable {
             if self.consent.is_granted(node_id, &task.capability)
-                && let Some(node) = self.nodes.get(node_id) {
-                    return node.execute(task).await;
-                }
+                && let Some(node) = self.nodes.get(node_id)
+            {
+                return node.execute(task).await;
+            }
         }
 
         Err(RustantError::Node(NodeError::ConsentDenied {

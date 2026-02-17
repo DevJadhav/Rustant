@@ -119,9 +119,10 @@ pub fn resolve_api_key(
 ) -> Result<String, LlmError> {
     // 1. Try credential store first
     if let Some(ref cs_key) = config.credential_store_key
-        && let Ok(key) = cred_store.get_key(cs_key) {
-            return Ok(key);
-        }
+        && let Ok(key) = cred_store.get_key(cs_key)
+    {
+        return Ok(key);
+    }
     // 2. Fall back to env var
     std::env::var(&config.api_key_env).map_err(|_| LlmError::AuthFailed {
         provider: format!(

@@ -171,10 +171,11 @@ impl ProjectIndexer {
 
             // Skip files that are too large
             if let Ok(meta) = path.metadata()
-                && meta.len() > self.config.max_file_size {
-                    files_skipped += 1;
-                    continue;
-                }
+                && meta.len() > self.config.max_file_size
+            {
+                files_skipped += 1;
+                continue;
+            }
 
             // Check file extension
             if !is_indexable(path) {
@@ -198,27 +199,28 @@ impl ProjectIndexer {
 
             // Optionally index file content
             if self.config.index_content
-                && let Ok(content) = std::fs::read_to_string(path) {
-                    // Index a content summary (first N lines + function signatures)
-                    let summary = self.summarize_file(&rel_path, &content);
-                    if !summary.is_empty() {
-                        let content_id = format!("content:{}", rel_path);
-                        if self.engine.index_fact(&content_id, &summary).is_ok() {
+                && let Ok(content) = std::fs::read_to_string(path)
+            {
+                // Index a content summary (first N lines + function signatures)
+                let summary = self.summarize_file(&rel_path, &content);
+                if !summary.is_empty() {
+                    let content_id = format!("content:{}", rel_path);
+                    if self.engine.index_fact(&content_id, &summary).is_ok() {
+                        entries_indexed += 1;
+                    }
+                }
+
+                // Extract and index function signatures
+                if self.config.index_signatures {
+                    let signatures = extract_signatures(&content, &rel_path);
+                    for (i, sig) in signatures.iter().enumerate() {
+                        let sig_id = format!("sig:{}:{}", rel_path, i);
+                        if self.engine.index_fact(&sig_id, sig).is_ok() {
                             entries_indexed += 1;
                         }
                     }
-
-                    // Extract and index function signatures
-                    if self.config.index_signatures {
-                        let signatures = extract_signatures(&content, &rel_path);
-                        for (i, sig) in signatures.iter().enumerate() {
-                            let sig_id = format!("sig:{}:{}", rel_path, i);
-                            if self.engine.index_fact(&sig_id, sig).is_ok() {
-                                entries_indexed += 1;
-                            }
-                        }
-                    }
                 }
+            }
 
             files_indexed += 1;
         }

@@ -639,9 +639,10 @@ impl Tool for SkillTrackerTool {
                         // Check if proficiency improved during this period
                         if let (Some(first), Some(last)) =
                             (relevant_entries.first(), relevant_entries.last())
-                            && last.proficiency_after > first.proficiency_before {
-                                skills_improved += 1;
-                            }
+                            && last.proficiency_after > first.proficiency_before
+                        {
+                            skills_improved += 1;
+                        }
                     }
                 }
 
@@ -731,41 +732,42 @@ impl Tool for SkillTrackerTool {
                 let flashcards_path = self.flashcards_path();
                 if flashcards_path.exists()
                     && let Ok(fc_data) = std::fs::read_to_string(&flashcards_path)
-                        && let Ok(fc_state) = serde_json::from_str::<Value>(&fc_data)
-                            && let Some(cards) = fc_state.get("cards").and_then(|v| v.as_array()) {
-                                let decks: std::collections::HashSet<String> = cards
-                                    .iter()
-                                    .filter_map(|c| {
-                                        c.get("deck")
-                                            .and_then(|d| d.as_str())
-                                            .map(|s| s.to_lowercase())
-                                    })
-                                    .collect();
-                                if !decks.is_empty() {
-                                    let mut relevant_decks = Vec::new();
-                                    for (skill, _) in &top3 {
-                                        let name_lower = skill.name.to_lowercase();
-                                        let cat_lower = skill.category.to_lowercase();
-                                        for deck in &decks {
-                                            if deck.contains(&name_lower)
-                                                || name_lower.contains(deck.as_str())
-                                                || deck.contains(&cat_lower)
-                                                || cat_lower.contains(deck.as_str())
-                                            {
-                                                relevant_decks.push(deck.clone());
-                                            }
-                                        }
-                                    }
-                                    relevant_decks.sort();
-                                    relevant_decks.dedup();
-                                    if !relevant_decks.is_empty() {
-                                        output.push_str(&format!(
-                                            "\nRelated flashcard decks: {}",
-                                            relevant_decks.join(", ")
-                                        ));
-                                    }
+                    && let Ok(fc_state) = serde_json::from_str::<Value>(&fc_data)
+                    && let Some(cards) = fc_state.get("cards").and_then(|v| v.as_array())
+                {
+                    let decks: std::collections::HashSet<String> = cards
+                        .iter()
+                        .filter_map(|c| {
+                            c.get("deck")
+                                .and_then(|d| d.as_str())
+                                .map(|s| s.to_lowercase())
+                        })
+                        .collect();
+                    if !decks.is_empty() {
+                        let mut relevant_decks = Vec::new();
+                        for (skill, _) in &top3 {
+                            let name_lower = skill.name.to_lowercase();
+                            let cat_lower = skill.category.to_lowercase();
+                            for deck in &decks {
+                                if deck.contains(&name_lower)
+                                    || name_lower.contains(deck.as_str())
+                                    || deck.contains(&cat_lower)
+                                    || cat_lower.contains(deck.as_str())
+                                {
+                                    relevant_decks.push(deck.clone());
                                 }
                             }
+                        }
+                        relevant_decks.sort();
+                        relevant_decks.dedup();
+                        if !relevant_decks.is_empty() {
+                            output.push_str(&format!(
+                                "\nRelated flashcard decks: {}",
+                                relevant_decks.join(", ")
+                            ));
+                        }
+                    }
+                }
 
                 Ok(ToolOutput::text(output))
             }

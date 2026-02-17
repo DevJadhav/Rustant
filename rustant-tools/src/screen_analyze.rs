@@ -221,12 +221,13 @@ async fn extract_text_via_shortcuts(image_path: &str) -> Result<String, ToolErro
     // Check if a "Rustant OCR" shortcut exists
     let check = run_command("shortcuts", &["list"]).await;
     if let Ok(list) = &check
-        && list.contains("Rustant OCR") {
-            let result = run_command("shortcuts", &["run", "Rustant OCR", "-i", image_path]).await;
-            if let Ok(text) = result {
-                return Ok(text);
-            }
+        && list.contains("Rustant OCR")
+    {
+        let result = run_command("shortcuts", &["run", "Rustant OCR", "-i", image_path]).await;
+        if let Ok(text) = result {
+            return Ok(text);
         }
+    }
 
     // Final fallback — use basic screencapture text extraction via textutil
     Err(ToolError::ExecutionFailed {

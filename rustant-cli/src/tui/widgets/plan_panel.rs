@@ -51,21 +51,23 @@ impl PlanPanel {
     /// Update the plan display (e.g., after step progress).
     pub fn update_step(&mut self, index: usize, success: bool) {
         if let Some(ref mut plan) = self.plan
-            && let Some(step) = plan.steps.get_mut(index) {
-                step.status = if success {
-                    StepStatus::Completed
-                } else {
-                    StepStatus::Failed
-                };
-            }
+            && let Some(step) = plan.steps.get_mut(index)
+        {
+            step.status = if success {
+                StepStatus::Completed
+            } else {
+                StepStatus::Failed
+            };
+        }
     }
 
     /// Mark a step as in-progress.
     pub fn mark_step_in_progress(&mut self, index: usize) {
         if let Some(ref mut plan) = self.plan
-            && let Some(step) = plan.steps.get_mut(index) {
-                step.status = StepStatus::InProgress;
-            }
+            && let Some(step) = plan.steps.get_mut(index)
+        {
+            step.status = StepStatus::InProgress;
+        }
     }
 
     /// Whether the panel is in review mode (waiting for user decision).
@@ -90,9 +92,10 @@ impl PlanPanel {
     /// Move selection down.
     pub fn select_next(&mut self) {
         if let Some(ref plan) = self.plan
-            && self.selected_step + 1 < plan.steps.len() {
-                self.selected_step += 1;
-            }
+            && self.selected_step + 1 < plan.steps.len()
+        {
+            self.selected_step += 1;
+        }
     }
 }
 

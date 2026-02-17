@@ -183,9 +183,10 @@ impl MdnsDiscovery {
         for record in records {
             // Skip our own advertisement.
             if let Some(lid) = local_id
-                && record.node_id == lid {
-                    continue;
-                }
+                && record.node_id == lid
+            {
+                continue;
+            }
 
             let already_known = self.found.iter().any(|n| n.node_id.0 == record.node_id);
             let discovered = record.to_discovered_node();
@@ -321,9 +322,10 @@ impl MdnsTransport for UdpMdnsTransport {
             match tokio::time::timeout(remaining, socket.recv_from(&mut buf)).await {
                 Ok(Ok((len, _addr))) => {
                     if let Ok(record) = serde_json::from_slice::<MdnsServiceRecord>(&buf[..len])
-                        && record.service_name == RUSTANT_SERVICE_NAME {
-                            records.push(record);
-                        }
+                        && record.service_name == RUSTANT_SERVICE_NAME
+                    {
+                        records.push(record);
+                    }
                 }
                 Ok(Err(_)) => break,
                 Err(_) => break, // timeout

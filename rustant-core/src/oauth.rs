@@ -422,26 +422,28 @@ pub async fn authorize_browser_flow(
     // ChatGPT-only accounts it may fail — in that case we fall back to using the
     // OAuth access token directly as a Bearer token (same as Codex CLI).
     if config.provider_name == "openai"
-        && let Some(ref id_tok) = token.id_token {
-            if let Some(payload) = id_tok.split('.').nth(1)
-                && let Ok(bytes) = URL_SAFE_NO_PAD.decode(payload)
-                    && let Ok(claims) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-                        debug!(claims = %claims, "ID token claims");
-                    }
-            debug!("Exchanging ID token for OpenAI API key...");
-            match obtain_openai_api_key(config, id_tok).await {
-                Ok(api_key) => {
-                    info!("Obtained OpenAI Platform API key via token exchange");
-                    token.access_token = api_key;
-                }
-                Err(e) => {
-                    // The token exchange typically fails for accounts without a
-                    // Platform API organization. The standard Chat Completions
-                    // endpoint requires a Platform API key — the raw OAuth
-                    // access token won't work.
-                    return Err(LlmError::OAuthFailed {
-                        message: format!(
-                            "Failed to exchange OAuth token for an OpenAI API key: {}\n\n\
+        && let Some(ref id_tok) = token.id_token
+    {
+        if let Some(payload) = id_tok.split('.').nth(1)
+            && let Ok(bytes) = URL_SAFE_NO_PAD.decode(payload)
+            && let Ok(claims) = serde_json::from_slice::<serde_json::Value>(&bytes)
+        {
+            debug!(claims = %claims, "ID token claims");
+        }
+        debug!("Exchanging ID token for OpenAI API key...");
+        match obtain_openai_api_key(config, id_tok).await {
+            Ok(api_key) => {
+                info!("Obtained OpenAI Platform API key via token exchange");
+                token.access_token = api_key;
+            }
+            Err(e) => {
+                // The token exchange typically fails for accounts without a
+                // Platform API organization. The standard Chat Completions
+                // endpoint requires a Platform API key — the raw OAuth
+                // access token won't work.
+                return Err(LlmError::OAuthFailed {
+                    message: format!(
+                        "Failed to exchange OAuth token for an OpenAI API key: {}\n\n\
                              This usually means your OpenAI account does not have \
                              Platform API access set up.\n\n\
                              To fix this:\n\
@@ -452,12 +454,12 @@ pub async fn authorize_browser_flow(
                              1. Get your key from https://platform.openai.com/api-keys\n\
                              2. Set the OPENAI_API_KEY environment variable\n\
                              3. Set auth_method to empty in .rustant/config.toml",
-                            e
-                        ),
-                    });
-                }
+                        e
+                    ),
+                });
             }
         }
+    }
 
     Ok(token)
 }

@@ -2695,9 +2695,10 @@ impl App {
         if let Some(dir) = history_dir {
             let path = dir.join("input_history.json");
             if let Ok(json) = std::fs::read_to_string(path)
-                && let Ok(entries) = serde_json::from_str::<Vec<String>>(&json) {
-                    self.input.load_history(entries);
-                }
+                && let Ok(entries) = serde_json::from_str::<Vec<String>>(&json)
+            {
+                self.input.load_history(entries);
+            }
         }
     }
 

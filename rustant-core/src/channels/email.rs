@@ -55,9 +55,10 @@ impl EmailConfig {
     /// Resolve the effective password, preferring the environment variable.
     pub fn resolve_password(&self) -> String {
         if let Some(ref env_var) = self.password_env
-            && let Ok(val) = std::env::var(env_var) {
-                return val;
-            }
+            && let Ok(val) = std::env::var(env_var)
+        {
+            return val;
+        }
         self.password.clone()
     }
 }

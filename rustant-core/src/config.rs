@@ -1316,41 +1316,43 @@ pub fn resolve_credentials(config: &mut AgentConfig) {
     // 1. Resolve "keychain:" prefix in api_key field
     let key_value = config.llm.api_key.clone();
     if let Some(key) = key_value
-        && let Some(service) = key.strip_prefix("keychain:") {
-            let store = crate::credentials::KeyringCredentialStore::new();
-            match crate::credentials::CredentialStore::get_key(&store, service) {
-                Ok(resolved_key) => {
-                    config.llm.api_key = Some(resolved_key);
-                    tracing::info!("Resolved API key from keyring service: {}", service);
-                    return; // Already resolved, no need to check credential_store_key
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to resolve keyring credential '{}': {}", service, e);
-                }
+        && let Some(service) = key.strip_prefix("keychain:")
+    {
+        let store = crate::credentials::KeyringCredentialStore::new();
+        match crate::credentials::CredentialStore::get_key(&store, service) {
+            Ok(resolved_key) => {
+                config.llm.api_key = Some(resolved_key);
+                tracing::info!("Resolved API key from keyring service: {}", service);
+                return; // Already resolved, no need to check credential_store_key
+            }
+            Err(e) => {
+                tracing::warn!("Failed to resolve keyring credential '{}': {}", service, e);
             }
         }
+    }
 
     // 2. Resolve from credential_store_key (set by `rustant setup`)
     if config.llm.api_key.is_none()
-        && let Some(ref cs_key) = config.llm.credential_store_key {
-            let store = crate::credentials::KeyringCredentialStore::new();
-            match crate::credentials::CredentialStore::get_key(&store, cs_key) {
-                Ok(resolved_key) => {
-                    config.llm.api_key = Some(resolved_key);
-                    tracing::info!(
-                        "Resolved API key from credential store for provider: {}",
-                        cs_key
-                    );
-                }
-                Err(e) => {
-                    tracing::debug!(
-                        "No credential in keyring for '{}': {} (will try env var)",
-                        cs_key,
-                        e
-                    );
-                }
+        && let Some(ref cs_key) = config.llm.credential_store_key
+    {
+        let store = crate::credentials::KeyringCredentialStore::new();
+        match crate::credentials::CredentialStore::get_key(&store, cs_key) {
+            Ok(resolved_key) => {
+                config.llm.api_key = Some(resolved_key);
+                tracing::info!(
+                    "Resolved API key from credential store for provider: {}",
+                    cs_key
+                );
+            }
+            Err(e) => {
+                tracing::debug!(
+                    "No credential in keyring for '{}': {} (will try env var)",
+                    cs_key,
+                    e
+                );
             }
         }
+    }
 }
 
 /// Auto-migrate plaintext channel secrets to the OS keychain.
@@ -1395,18 +1397,20 @@ fn auto_migrate_channel_secrets(config: &mut AgentConfig, workspace: Option<&Pat
 
     // Update in-memory config
     if let Some(channels) = config.channels.as_mut()
-        && let Some(slack) = channels.slack.as_mut() {
-            slack.bot_token = SecretRef::keychain("channel:slack:bot_token");
-        }
+        && let Some(slack) = channels.slack.as_mut()
+    {
+        slack.bot_token = SecretRef::keychain("channel:slack:bot_token");
+    }
 
     // Best-effort: rewrite config file with keychain reference
     if let Some(ws) = workspace {
         let config_path = ws.join(".rustant").join("config.toml");
         if config_path.exists()
             && let Ok(toml_str) = toml::to_string_pretty(config)
-                && let Err(e) = std::fs::write(&config_path, &toml_str) {
-                    tracing::warn!("Failed to rewrite config after migration: {}", e);
-                }
+            && let Err(e) = std::fs::write(&config_path, &toml_str)
+        {
+            tracing::warn!("Failed to rewrite config after migration: {}", e);
+        }
     }
 }
 
@@ -1418,15 +1422,17 @@ fn auto_migrate_channel_secrets(config: &mut AgentConfig, workspace: Option<&Pat
 pub fn config_exists(workspace: Option<&Path>) -> bool {
     // Check user-level config
     if let Some(config_dir) = directories::ProjectDirs::from("dev", "rustant", "rustant")
-        && config_dir.config_dir().join("config.toml").exists() {
-            return true;
-        }
+        && config_dir.config_dir().join("config.toml").exists()
+    {
+        return true;
+    }
 
     // Check workspace-level config
     if let Some(ws) = workspace
-        && ws.join(".rustant").join("config.toml").exists() {
-            return true;
-        }
+        && ws.join(".rustant").join("config.toml").exists()
+    {
+        return true;
+    }
 
     false
 }

@@ -54,33 +54,36 @@ impl SessionManager {
     /// Pause an active session.
     pub fn pause_session(&mut self, session_id: &Uuid) -> bool {
         if let Some(session) = self.sessions.get_mut(session_id)
-            && session.state == SessionState::Active {
-                session.state = SessionState::Paused;
-                session.updated_at = Utc::now();
-                return true;
-            }
+            && session.state == SessionState::Active
+        {
+            session.state = SessionState::Paused;
+            session.updated_at = Utc::now();
+            return true;
+        }
         false
     }
 
     /// Resume a paused session.
     pub fn resume_session(&mut self, session_id: &Uuid) -> bool {
         if let Some(session) = self.sessions.get_mut(session_id)
-            && session.state == SessionState::Paused {
-                session.state = SessionState::Active;
-                session.updated_at = Utc::now();
-                return true;
-            }
+            && session.state == SessionState::Paused
+        {
+            session.state = SessionState::Active;
+            session.updated_at = Utc::now();
+            return true;
+        }
         false
     }
 
     /// End a session.
     pub fn end_session(&mut self, session_id: &Uuid) -> bool {
         if let Some(session) = self.sessions.get_mut(session_id)
-            && session.state != SessionState::Ended {
-                session.state = SessionState::Ended;
-                session.updated_at = Utc::now();
-                return true;
-            }
+            && session.state != SessionState::Ended
+        {
+            session.state = SessionState::Ended;
+            session.updated_at = Utc::now();
+            return true;
+        }
         false
     }
 

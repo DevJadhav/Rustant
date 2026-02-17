@@ -356,21 +356,23 @@ impl Tool for SlackTool {
 fn get_bot_token(workspace: &Path) -> Result<String, ToolError> {
     // Fast path: env var
     if let Ok(token) = std::env::var("SLACK_BOT_TOKEN")
-        && !token.is_empty() {
-            return Ok(token);
-        }
+        && !token.is_empty()
+    {
+        return Ok(token);
+    }
 
     // Fallback: load from config
     if let Ok(config) = rustant_core::config::load_config(Some(workspace), None)
         && let Some(channels) = &config.channels
-            && let Some(slack) = &channels.slack
-                && !slack.bot_token.is_empty() {
-                    match slack.resolve_bot_token() {
-                        Ok(token) if !token.is_empty() => return Ok(token),
-                        Ok(_) => {}
-                        Err(e) => tracing::warn!("Failed to resolve Slack bot token: {}", e),
-                    }
-                }
+        && let Some(slack) = &channels.slack
+        && !slack.bot_token.is_empty()
+    {
+        match slack.resolve_bot_token() {
+            Ok(token) if !token.is_empty() => return Ok(token),
+            Ok(_) => {}
+            Err(e) => tracing::warn!("Failed to resolve Slack bot token: {}", e),
+        }
+    }
 
     Err(ToolError::ExecutionFailed {
         name: "slack".to_string(),

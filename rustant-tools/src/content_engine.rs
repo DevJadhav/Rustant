@@ -423,9 +423,10 @@ impl Tool for ContentEngineTool {
                     state.pieces[idx].word_count = count_words(body);
                 }
                 if let Some(platform_str) = args.get("platform").and_then(|v| v.as_str())
-                    && let Some(p) = ContentPlatform::from_str_loose(platform_str) {
-                        state.pieces[idx].platform = p;
-                    }
+                    && let Some(p) = ContentPlatform::from_str_loose(platform_str)
+                {
+                    state.pieces[idx].platform = p;
+                }
                 if let Some(audience) = args.get("audience").and_then(|v| v.as_str()) {
                     state.pieces[idx].audience = audience.to_string();
                 }

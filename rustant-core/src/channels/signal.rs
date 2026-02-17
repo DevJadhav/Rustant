@@ -210,16 +210,15 @@ impl SignalCliBridge for RealSignalCliBridge {
         for line in stdout.lines() {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(line)
                 && let Some(data_msg) = v["envelope"]["dataMessage"].as_object()
-                    && let Some(text) = data_msg.get("message").and_then(|m| m.as_str()) {
-                        messages.push(SignalIncoming {
-                            sender: v["envelope"]["source"].as_str().unwrap_or("").to_string(),
-                            sender_name: v["envelope"]["sourceName"]
-                                .as_str()
-                                .map(|s| s.to_string()),
-                            text: text.to_string(),
-                            timestamp: v["envelope"]["timestamp"].as_u64().unwrap_or(0),
-                        });
-                    }
+                && let Some(text) = data_msg.get("message").and_then(|m| m.as_str())
+            {
+                messages.push(SignalIncoming {
+                    sender: v["envelope"]["source"].as_str().unwrap_or("").to_string(),
+                    sender_name: v["envelope"]["sourceName"].as_str().map(|s| s.to_string()),
+                    text: text.to_string(),
+                    timestamp: v["envelope"]["timestamp"].as_u64().unwrap_or(0),
+                });
+            }
         }
 
         Ok(messages)

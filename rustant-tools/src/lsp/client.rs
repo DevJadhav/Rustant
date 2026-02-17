@@ -319,15 +319,15 @@ impl LspClient {
                 if let Some(params) = msg.get("params")
                     && let Ok(diag_params) =
                         serde_json::from_value::<PublishDiagnosticsNotification>(params.clone())
-                    {
-                        tracing::debug!(
-                            uri = %diag_params.uri,
-                            count = diag_params.diagnostics.len(),
-                            "Received diagnostics"
-                        );
-                        self.cached_diagnostics
-                            .insert(diag_params.uri, diag_params.diagnostics);
-                    }
+                {
+                    tracing::debug!(
+                        uri = %diag_params.uri,
+                        count = diag_params.diagnostics.len(),
+                        "Received diagnostics"
+                    );
+                    self.cached_diagnostics
+                        .insert(diag_params.uri, diag_params.diagnostics);
+                }
             }
             other => {
                 tracing::debug!(method = other, "Received unhandled notification");

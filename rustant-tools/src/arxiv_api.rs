@@ -549,12 +549,12 @@ fn parse_entry(entry: &str) -> Option<ArxivPaper> {
         && let Some(pc_end) = entry[pc_start..]
             .find("/>")
             .or_else(|| entry[pc_start..].find(">"))
-        {
-            let pc_tag = &entry[pc_start..pc_start + pc_end + 2];
-            if let Some(term) = extract_attribute(pc_tag, "term") {
-                primary_category = term;
-            }
+    {
+        let pc_tag = &entry[pc_start..pc_start + pc_end + 2];
+        if let Some(term) = extract_attribute(pc_tag, "term") {
+            primary_category = term;
         }
+    }
     if primary_category.is_empty() {
         primary_category = categories.first().cloned().unwrap_or_default();
     }

@@ -235,26 +235,27 @@ impl WorkflowExecutor {
 
             // Check gate
             if let Some(ref gate) = step.gate
-                && gate.gate_type == GateType::ApprovalRequired {
-                    let message = step.gate_message.as_deref().unwrap_or(&gate.message);
-                    let preview = step.gate_preview.as_deref().or(gate.preview.as_deref());
+                && gate.gate_type == GateType::ApprovalRequired
+            {
+                let message = step.gate_message.as_deref().unwrap_or(&gate.message);
+                let preview = step.gate_preview.as_deref().or(gate.preview.as_deref());
 
-                    let decision = self
-                        .approval_handler
-                        .request_approval(&state.workflow_name, &step.id, message, preview)
-                        .await;
+                let decision = self
+                    .approval_handler
+                    .request_approval(&state.workflow_name, &step.id, message, preview)
+                    .await;
 
-                    match decision {
-                        ApprovalDecision::Denied => {
-                            state.status = WorkflowStatus::WaitingApproval;
-                            state.updated_at = chrono::Utc::now();
-                            return Ok(state);
-                        }
-                        ApprovalDecision::Approved => {
-                            // Continue to execute the step
-                        }
+                match decision {
+                    ApprovalDecision::Denied => {
+                        state.status = WorkflowStatus::WaitingApproval;
+                        state.updated_at = chrono::Utc::now();
+                        return Ok(state);
+                    }
+                    ApprovalDecision::Approved => {
+                        // Continue to execute the step
                     }
                 }
+            }
 
             // Render params
             let params_value =

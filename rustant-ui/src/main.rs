@@ -81,12 +81,13 @@ fn resolve_frontend_dir() -> PathBuf {
 
     // 2. Next to the executable
     if let Ok(exe) = std::env::current_exe()
-        && let Some(exe_dir) = exe.parent() {
-            let p = exe_dir.join("frontend");
-            if p.join("index.html").exists() {
-                return p;
-            }
+        && let Some(exe_dir) = exe.parent()
+    {
+        let p = exe_dir.join("frontend");
+        if p.join("index.html").exists() {
+            return p;
         }
+    }
 
     // 3. Workspace development layout
     let workspace_candidates = ["rustant-ui/frontend", "frontend"];

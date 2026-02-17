@@ -239,9 +239,10 @@ impl WasmRuntime {
                     let data = mem.data(&caller);
                     if let Some(end) = ptr.checked_add(len)
                         && end <= data.len()
-                            && let Ok(msg) = std::str::from_utf8(&data[ptr..end]) {
-                                tracing::debug!(target: "wasm_guest", "{}", msg);
-                            }
+                        && let Ok(msg) = std::str::from_utf8(&data[ptr..end])
+                    {
+                        tracing::debug!(target: "wasm_guest", "{}", msg);
+                    }
                 },
             )
             .map_err(|e| SandboxError::InstantiationFailed(e.to_string()))?;

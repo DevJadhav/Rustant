@@ -192,9 +192,10 @@ impl Tool for FileOrganizerTool {
                     if entry.file_type().is_file() {
                         let name = entry.file_name().to_string_lossy();
                         if let Some(ref glob) = glob
-                            && glob.is_match(name.as_ref()) {
-                                matches.push(entry.path().to_path_buf());
-                            }
+                            && glob.is_match(name.as_ref())
+                        {
+                            matches.push(entry.path().to_path_buf());
+                        }
                     }
                 }
                 if matches.is_empty() {

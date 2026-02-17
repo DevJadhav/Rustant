@@ -754,28 +754,31 @@ impl AgentCallback for CliCallback {
             // e <n> <new description>
             let parts: Vec<&str> = input.splitn(3, ' ').collect();
             if parts.len() >= 3
-                && let Ok(idx) = parts[1].parse::<usize>() {
-                    let idx = idx.saturating_sub(1); // 1-based to 0-based
-                    return PlanDecision::EditStep(idx, parts[2].to_string());
-                }
+                && let Ok(idx) = parts[1].parse::<usize>()
+            {
+                let idx = idx.saturating_sub(1); // 1-based to 0-based
+                return PlanDecision::EditStep(idx, parts[2].to_string());
+            }
             println!("\x1b[31mUsage: e <step_number> <new description>\x1b[0m");
             PlanDecision::Approve // re-review
         } else if input.starts_with('r') {
             // r <n>
             let parts: Vec<&str> = input.splitn(2, ' ').collect();
             if parts.len() >= 2
-                && let Ok(idx) = parts[1].parse::<usize>() {
-                    return PlanDecision::RemoveStep(idx.saturating_sub(1));
-                }
+                && let Ok(idx) = parts[1].parse::<usize>()
+            {
+                return PlanDecision::RemoveStep(idx.saturating_sub(1));
+            }
             println!("\x1b[31mUsage: r <step_number>\x1b[0m");
             PlanDecision::Approve
         } else if input.starts_with('+') {
             // + <n> <description>
             let parts: Vec<&str> = input.splitn(3, ' ').collect();
             if parts.len() >= 3
-                && let Ok(idx) = parts[1].parse::<usize>() {
-                    return PlanDecision::AddStep(idx.saturating_sub(1), parts[2].to_string());
-                }
+                && let Ok(idx) = parts[1].parse::<usize>()
+            {
+                return PlanDecision::AddStep(idx.saturating_sub(1), parts[2].to_string());
+            }
             println!("\x1b[31mUsage: + <position> <description>\x1b[0m");
             PlanDecision::Approve
         } else if let Some(rest) = input.strip_prefix('?') {
@@ -1696,13 +1699,14 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                 _ => {
                     // Check if this is a TUI-only command
                     if let Some(info) = cmd_registry.lookup(cmd)
-                        && info.tui_only {
-                            println!(
-                                "The {} command is only available in TUI mode. Launch with: rustant --tui",
-                                cmd
-                            );
-                            continue;
-                        }
+                        && info.tui_only
+                    {
+                        println!(
+                            "The {} command is only available in TUI mode. Launch with: rustant --tui",
+                            cmd
+                        );
+                        continue;
+                    }
                     // Use registry for unknown command suggestions
                     if let Some(suggestion) = cmd_registry.suggest(cmd) {
                         println!("Unknown command: {}. Did you mean {}?", cmd, suggestion);
@@ -3229,10 +3233,11 @@ fn handle_review_command(workspace: &Path) {
 
     // Show current diff
     if let Ok(diff) = mgr.diff_from_last()
-        && !diff.is_empty() {
-            println!("\nCurrent uncommitted changes:");
-            println!("{}", diff);
-        }
+        && !diff.is_empty()
+    {
+        println!("\nCurrent uncommitted changes:");
+        println!("{}", diff);
+    }
 }
 
 /// Handle `/digest` command to show or generate channel digests.

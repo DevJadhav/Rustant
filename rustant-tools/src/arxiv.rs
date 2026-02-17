@@ -457,9 +457,10 @@ impl ArxivResearchTool {
 
         // Add collection if new
         if let Some(ref col) = collection
-            && !state.collections.contains(col) {
-                state.collections.push(col.clone());
-            }
+            && !state.collections.contains(col)
+        {
+            state.collections.push(col.clone());
+        }
 
         let title = paper.title.clone();
         let id = paper.arxiv_id.clone();
@@ -506,13 +507,15 @@ impl ArxivResearchTool {
             .iter()
             .filter(|e| {
                 if let Some(tag) = filter_tag
-                    && !e.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
-                        return false;
-                    }
+                    && !e.tags.iter().any(|t| t.eq_ignore_ascii_case(tag))
+                {
+                    return false;
+                }
                 if let Some(col) = filter_collection
-                    && e.collection.as_deref() != Some(col) {
-                        return false;
-                    }
+                    && e.collection.as_deref() != Some(col)
+                {
+                    return false;
+                }
                 true
             })
             .collect();

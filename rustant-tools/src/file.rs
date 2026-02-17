@@ -533,28 +533,29 @@ impl FileSearchTool {
         let mut chars = pattern.chars().peekable();
         while let Some(ch) = chars.next() {
             if ch == '\\'
-                && let Some(&next) = chars.peek() {
-                    // Strip backslash before common regex metacharacters.
-                    if matches!(
-                        next,
-                        '[' | ']'
-                            | '('
-                            | ')'
-                            | '{'
-                            | '}'
-                            | '.'
-                            | '*'
-                            | '+'
-                            | '?'
-                            | '^'
-                            | '$'
-                            | '|'
-                            | '\\'
-                    ) {
-                        result.push(chars.next().unwrap());
-                        continue;
-                    }
+                && let Some(&next) = chars.peek()
+            {
+                // Strip backslash before common regex metacharacters.
+                if matches!(
+                    next,
+                    '[' | ']'
+                        | '('
+                        | ')'
+                        | '{'
+                        | '}'
+                        | '.'
+                        | '*'
+                        | '+'
+                        | '?'
+                        | '^'
+                        | '$'
+                        | '|'
+                        | '\\'
+                ) {
+                    result.push(chars.next().unwrap());
+                    continue;
                 }
+            }
             result.push(ch);
         }
         result

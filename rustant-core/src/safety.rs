@@ -539,15 +539,15 @@ impl ContractEnforcer {
     pub fn check_cost_bound(&self) -> ContractCheckResult {
         if let Some(ref contract) = self.contract
             && contract.resource_bounds.max_cost_usd > 0.0
-                && self.total_cost > contract.resource_bounds.max_cost_usd
-            {
-                return ContractCheckResult::ResourceBoundExceeded {
-                    bound: format!(
-                        "Max cost ${:.4} exceeded (current: ${:.4})",
-                        contract.resource_bounds.max_cost_usd, self.total_cost
-                    ),
-                };
-            }
+            && self.total_cost > contract.resource_bounds.max_cost_usd
+        {
+            return ContractCheckResult::ResourceBoundExceeded {
+                bound: format!(
+                    "Max cost ${:.4} exceeded (current: ${:.4})",
+                    contract.resource_bounds.max_cost_usd, self.total_cost
+                ),
+            };
+        }
         ContractCheckResult::Satisfied
     }
 
@@ -994,12 +994,13 @@ impl SafetyGuardian {
     /// or `None` if it is clean (or scanning is disabled).
     pub fn scan_tool_output(&self, _tool_name: &str, output: &str) -> Option<InjectionScanResult> {
         if let Some(ref detector) = self.injection_detector
-            && self.config.injection_detection.scan_tool_outputs {
-                let result = detector.scan_tool_output(output);
-                if result.is_suspicious {
-                    return Some(result);
-                }
+            && self.config.injection_detection.scan_tool_outputs
+        {
+            let result = detector.scan_tool_output(output);
+            if result.is_suspicious {
+                return Some(result);
             }
+        }
         None
     }
 
