@@ -2,7 +2,7 @@
 
 use crate::tui::theme::Theme;
 use ratatui::layout::{Alignment, Rect};
-use ratatui::style::Modifier;
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
@@ -122,11 +122,10 @@ pub fn render_status_bar(
     // Voice/meeting indicators
     if data.voice_active {
         left_spans.push(Span::styled(
-            " MIC ON ",
-            theme
-                .status_bar_style()
-                .fg(ratatui::style::Color::Black)
-                .bg(ratatui::style::Color::Green)
+            " MIC ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Green)
                 .add_modifier(Modifier::BOLD),
         ));
         left_spans.push(Span::styled(" ", theme.status_bar_style()));
@@ -134,10 +133,9 @@ pub fn render_status_bar(
     if data.meeting_active {
         left_spans.push(Span::styled(
             " REC ",
-            theme
-                .status_bar_style()
-                .fg(ratatui::style::Color::White)
-                .bg(ratatui::style::Color::Red)
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::Red)
                 .add_modifier(Modifier::BOLD),
         ));
         left_spans.push(Span::styled(" ", theme.status_bar_style()));

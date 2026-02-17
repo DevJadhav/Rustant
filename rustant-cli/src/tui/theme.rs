@@ -47,15 +47,15 @@ pub struct Theme {
 }
 
 impl Theme {
-    /// Create the default dark theme.
+    /// Create the default dark theme (Catppuccin Mocha).
     pub fn dark() -> Self {
         Self {
             name: "dark".to_string(),
             bg: Color::Rgb(30, 30, 46),
             fg: Color::Rgb(205, 214, 244),
-            accent: Color::Rgb(78, 205, 126),
+            accent: Color::Rgb(137, 180, 250),
 
-            user_msg_fg: Color::Rgb(78, 205, 126),
+            user_msg_fg: Color::Rgb(137, 180, 250),
             assistant_msg_fg: Color::Rgb(166, 227, 161),
             system_msg_fg: Color::Rgb(127, 132, 156),
             tool_call_fg: Color::Rgb(249, 226, 175),
@@ -64,7 +64,7 @@ impl Theme {
             error_fg: Color::Rgb(243, 139, 168),
             warning_fg: Color::Rgb(250, 179, 135),
             success_fg: Color::Rgb(166, 227, 161),
-            info_fg: Color::Rgb(78, 205, 126),
+            info_fg: Color::Rgb(137, 180, 250),
 
             header_bg: Color::Rgb(24, 24, 37),
             header_fg: Color::Rgb(205, 214, 244),

@@ -276,7 +276,9 @@ impl GeminiProvider {
     /// Post-process Gemini contents to fix API sequencing requirements:
     /// 1. Merge consecutive same-role turns (e.g., multiple tool results)
     /// 2. Fix `functionResponse.name` to match the preceding `functionCall.name`
-    /// 3. Ensure the first message has `"user"` role
+    /// 3. Remove orphaned `functionResponse` parts (no matching `functionCall`)
+    /// 4. Filter out turns with empty parts arrays
+    /// 5. Ensure the first message has `"user"` role
     fn fix_gemini_turns(contents: Vec<Value>) -> Vec<Value> {
         if contents.is_empty() {
             return contents;
@@ -340,7 +342,53 @@ impl GeminiProvider {
             }
         }
 
-        // Pass 3: Filter out turns with empty parts arrays.
+        // Pass 3: Remove orphaned functionResponse parts (no matching functionCall).
+        {
+            // Collect all functionCall names from "model" role turns.
+            let mut function_call_names: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            for entry in &merged {
+                if entry["role"].as_str() == Some("model") {
+                    if let Some(parts) = entry["parts"].as_array() {
+                        for part in parts {
+                            if let Some(name) =
+                                part.get("functionCall").and_then(|fc| fc["name"].as_str())
+                            {
+                                function_call_names.insert(name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Filter out functionResponse parts whose names don't match any functionCall.
+            for entry in &mut merged {
+                if entry["role"].as_str() != Some("user") {
+                    continue;
+                }
+                if let Some(parts) = entry["parts"].as_array() {
+                    let filtered: Vec<Value> = parts
+                        .iter()
+                        .filter(|part| {
+                            if let Some(name) = part
+                                .get("functionResponse")
+                                .and_then(|fr| fr["name"].as_str())
+                            {
+                                function_call_names.contains(name)
+                            } else {
+                                true // keep non-functionResponse parts
+                            }
+                        })
+                        .cloned()
+                        .collect();
+                    if filtered.len() != parts.len() {
+                        entry["parts"] = Value::Array(filtered);
+                    }
+                }
+            }
+        }
+
+        // Pass 4: Filter out turns with empty parts arrays.
         merged.retain(|entry| {
             entry["parts"]
                 .as_array()
@@ -353,7 +401,7 @@ impl GeminiProvider {
             return merged;
         }
 
-        // Pass 4: Ensure the first message is "user" role.
+        // Pass 5: Ensure the first message is "user" role.
         if merged
             .first()
             .and_then(|m| m["role"].as_str())
@@ -1609,6 +1657,67 @@ mod tests {
         let fixed = GeminiProvider::fix_gemini_turns(contents);
         // All turns have empty parts — result should be empty
         assert!(fixed.is_empty());
+    }
+
+    #[test]
+    fn test_fix_gemini_turns_removes_orphaned_function_response() {
+        let contents = vec![
+            serde_json::json!({
+                "role": "user",
+                "parts": [{"text": "Hello"}]
+            }),
+            serde_json::json!({
+                "role": "model",
+                "parts": [{"text": "Hi there"}]
+            }),
+            // Orphaned functionResponse — no matching functionCall in model turn
+            serde_json::json!({
+                "role": "user",
+                "parts": [{
+                    "functionResponse": {
+                        "name": "nonexistent_tool",
+                        "response": {"result": "orphan"}
+                    }
+                }]
+            }),
+        ];
+        let fixed = GeminiProvider::fix_gemini_turns(contents);
+        // The orphaned functionResponse turn should be removed (empty parts → filtered)
+        assert_eq!(fixed.len(), 2);
+        assert_eq!(fixed[0]["role"], "user");
+        assert_eq!(fixed[1]["role"], "model");
+    }
+
+    #[test]
+    fn test_fix_gemini_turns_preserves_valid_function_response() {
+        let contents = vec![
+            serde_json::json!({
+                "role": "user",
+                "parts": [{"text": "Read file"}]
+            }),
+            serde_json::json!({
+                "role": "model",
+                "parts": [{
+                    "functionCall": {
+                        "name": "file_read",
+                        "args": {"path": "main.rs"}
+                    }
+                }]
+            }),
+            serde_json::json!({
+                "role": "user",
+                "parts": [{
+                    "functionResponse": {
+                        "name": "file_read",
+                        "response": {"result": "fn main(){}"}
+                    }
+                }]
+            }),
+        ];
+        let fixed = GeminiProvider::fix_gemini_turns(contents);
+        assert_eq!(fixed.len(), 3);
+        // functionResponse should still be present
+        assert!(fixed[2]["parts"][0].get("functionResponse").is_some());
     }
 
     #[test]

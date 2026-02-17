@@ -855,7 +855,12 @@ impl App {
     /// Execute a high-level action.
     fn execute_action(&mut self, action: Action) {
         match action {
-            Action::Quit => {
+            Action::Quit | Action::Interrupt => {
+                if self.is_processing {
+                    self.agent.cancel();
+                    self.is_processing = false;
+                    self.header.is_streaming = false;
+                }
                 self.should_quit = true;
             }
             Action::Cancel => {
@@ -3174,7 +3179,7 @@ mod tests {
     #[test]
     fn test_handle_command_sidebar_toggle() {
         let mut app = App::new(test_config(), std::env::temp_dir());
-        assert!(app.show_sidebar);
+        assert!(app.show_sidebar); // default: visible
         app.handle_command("/sidebar");
         assert!(!app.show_sidebar);
         app.handle_command("/sidebar");

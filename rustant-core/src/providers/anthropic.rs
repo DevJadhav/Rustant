@@ -95,7 +95,7 @@ impl AnthropicProvider {
     ///
     /// Extracts any system messages from the messages list and places them
     /// as the top-level `system` field. All other messages are converted to
-    /// Anthropic's message format.
+    /// Anthropic's message format, then sanitized via [`fix_anthropic_turns`].
     fn build_request_body(&self, request: &CompletionRequest, stream: bool) -> Value {
         let model = request.model.as_deref().unwrap_or(&self.model);
 
@@ -109,6 +109,10 @@ impl AnthropicProvider {
             .iter()
             .map(|msg| Self::message_to_anthropic_json(msg))
             .collect();
+
+        // Sanitize: merge consecutive same-role, remove orphaned tool_results,
+        // ensure strict user/assistant alternation.
+        let messages_json = Self::fix_anthropic_turns(messages_json);
 
         let mut body = serde_json::json!({
             "model": model,
@@ -246,6 +250,120 @@ impl AnthropicProvider {
             "description": tool.description,
             "input_schema": tool.parameters,
         })
+    }
+
+    /// Fix Anthropic message turn ordering issues.
+    ///
+    /// Anthropic requires strict user/assistant alternation. This method:
+    /// 1. Merges consecutive same-role messages (e.g., two "user" messages → one with combined content)
+    /// 2. Removes orphaned tool_result blocks (no preceding tool_use in assistant message)
+    /// 3. Ensures alternating user/assistant pattern by merging or inserting placeholder messages
+    fn fix_anthropic_turns(messages: Vec<Value>) -> Vec<Value> {
+        if messages.is_empty() {
+            return messages;
+        }
+
+        // --- Pass 1: Merge consecutive same-role messages ---
+        let mut merged: Vec<Value> = Vec::with_capacity(messages.len());
+        for msg in messages {
+            let role = msg["role"].as_str().unwrap_or("").to_string();
+            let should_merge = if let Some(last) = merged.last() {
+                last["role"].as_str().unwrap_or("") == role
+            } else {
+                false
+            };
+
+            if should_merge {
+                // Merge content arrays
+                let last = merged.last_mut().unwrap();
+                if let (Some(existing), Some(new)) =
+                    (last["content"].as_array_mut(), msg["content"].as_array())
+                {
+                    existing.extend(new.iter().cloned());
+                }
+            } else {
+                merged.push(msg);
+            }
+        }
+
+        // --- Pass 2: Remove orphaned tool_result blocks ---
+        // Collect all tool_use IDs from assistant messages
+        let mut tool_use_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for msg in &merged {
+            if msg["role"].as_str() == Some("assistant") {
+                if let Some(content) = msg["content"].as_array() {
+                    for block in content {
+                        if block["type"].as_str() == Some("tool_use") {
+                            if let Some(id) = block["id"].as_str() {
+                                tool_use_ids.insert(id.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Filter out orphaned tool_result blocks from user messages
+        for msg in &mut merged {
+            if msg["role"].as_str() != Some("user") {
+                continue;
+            }
+            if let Some(content) = msg["content"].as_array() {
+                let filtered: Vec<Value> = content
+                    .iter()
+                    .filter(|block| {
+                        if block["type"].as_str() == Some("tool_result") {
+                            if let Some(id) = block["tool_use_id"].as_str() {
+                                return tool_use_ids.contains(id);
+                            }
+                            return false;
+                        }
+                        true
+                    })
+                    .cloned()
+                    .collect();
+                if filtered.len() != content.len() {
+                    msg["content"] = Value::Array(filtered);
+                }
+            }
+        }
+
+        // Remove messages with empty content arrays after filtering
+        merged.retain(|msg| {
+            if let Some(content) = msg["content"].as_array() {
+                !content.is_empty()
+            } else {
+                true
+            }
+        });
+
+        // --- Pass 3: Ensure alternating user/assistant pattern ---
+        // Anthropic requires the first message to be "user" and strict alternation after.
+        let mut result: Vec<Value> = Vec::with_capacity(merged.len());
+        for msg in merged {
+            let role = msg["role"].as_str().unwrap_or("user").to_string();
+            let last_role = result.last().and_then(|m| m["role"].as_str()).unwrap_or("");
+
+            if result.is_empty() && role != "user" {
+                // Insert a placeholder user message before the first non-user message
+                result.push(serde_json::json!({
+                    "role": "user",
+                    "content": [{"type": "text", "text": "Continue."}]
+                }));
+            } else if !result.is_empty() && last_role == role {
+                // Same role as previous — merge content
+                let last = result.last_mut().unwrap();
+                if let (Some(existing), Some(new)) =
+                    (last["content"].as_array_mut(), msg["content"].as_array())
+                {
+                    existing.extend(new.iter().cloned());
+                }
+                continue;
+            }
+            result.push(msg);
+        }
+
+        result
     }
 
     /// Parse an Anthropic API response JSON into a `CompletionResponse`.
@@ -1454,5 +1572,164 @@ mod tests {
         assert_eq!(blocks[0]["text"], "Here is the file:");
         assert_eq!(blocks[1]["type"], "tool_use");
         assert_eq!(blocks[1]["id"], "toolu_01multi");
+    }
+
+    // --- fix_anthropic_turns tests ---
+
+    #[test]
+    fn test_fix_anthropic_turns_merges_consecutive_user() {
+        let messages = vec![
+            serde_json::json!({
+                "role": "user",
+                "content": [{"type": "text", "text": "Hello"}]
+            }),
+            serde_json::json!({
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "t1",
+                    "name": "file_read",
+                    "input": {"path": "x.rs"}
+                }]
+            }),
+            // Two consecutive user messages (text + tool_result) should be merged
+            serde_json::json!({
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "result"}]
+            }),
+            serde_json::json!({
+                "role": "user",
+                "content": [{"type": "text", "text": "Thanks"}]
+            }),
+        ];
+
+        let result = AnthropicProvider::fix_anthropic_turns(messages);
+
+        // The two consecutive user messages should merge into one
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0]["role"], "user");
+        assert_eq!(result[1]["role"], "assistant");
+        assert_eq!(result[2]["role"], "user");
+        let content = result[2]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2); // tool_result + text merged
+    }
+
+    #[test]
+    fn test_fix_anthropic_turns_removes_orphaned_tool_result() {
+        let messages = vec![
+            serde_json::json!({
+                "role": "user",
+                "content": [{"type": "text", "text": "Hello"}]
+            }),
+            serde_json::json!({
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Hi"}]
+            }),
+            serde_json::json!({
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "nonexistent", "content": "orphan"}]
+            }),
+        ];
+
+        let result = AnthropicProvider::fix_anthropic_turns(messages);
+
+        // The orphaned tool_result message should be removed (empty content after filter)
+        // Only user + assistant should remain
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0]["role"], "user");
+        assert_eq!(result[1]["role"], "assistant");
+    }
+
+    #[test]
+    fn test_fix_anthropic_turns_preserves_valid_sequence() {
+        let messages = vec![
+            serde_json::json!({
+                "role": "user",
+                "content": [{"type": "text", "text": "Read file"}]
+            }),
+            serde_json::json!({
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "toolu_01",
+                    "name": "file_read",
+                    "input": {"path": "main.rs"}
+                }]
+            }),
+            serde_json::json!({
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "toolu_01", "content": "fn main(){}"}]
+            }),
+            serde_json::json!({
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Here is the file."}]
+            }),
+        ];
+
+        let result = AnthropicProvider::fix_anthropic_turns(messages);
+
+        assert_eq!(result.len(), 4);
+        assert_eq!(result[0]["role"], "user");
+        assert_eq!(result[1]["role"], "assistant");
+        assert_eq!(result[2]["role"], "user");
+        assert_eq!(result[3]["role"], "assistant");
+    }
+
+    #[test]
+    fn test_fix_anthropic_turns_handles_empty() {
+        let messages: Vec<Value> = vec![];
+        let result = AnthropicProvider::fix_anthropic_turns(messages);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_fix_anthropic_turns_ensures_user_first() {
+        let messages = vec![serde_json::json!({
+            "role": "assistant",
+            "content": [{"type": "text", "text": "I'll help."}]
+        })];
+
+        let result = AnthropicProvider::fix_anthropic_turns(messages);
+
+        // Should insert a placeholder user message first
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0]["role"], "user");
+        assert_eq!(result[1]["role"], "assistant");
+    }
+
+    #[test]
+    fn test_fix_anthropic_turns_handles_multipart_tool_result() {
+        let messages = vec![
+            serde_json::json!({
+                "role": "user",
+                "content": [{"type": "text", "text": "Do two things"}]
+            }),
+            serde_json::json!({
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "t1", "name": "file_read", "input": {"path": "a.rs"}},
+                    {"type": "tool_use", "id": "t2", "name": "file_read", "input": {"path": "b.rs"}}
+                ]
+            }),
+            // Two separate user messages with tool results (should merge)
+            serde_json::json!({
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "a contents"}]
+            }),
+            serde_json::json!({
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "t2", "content": "b contents"}]
+            }),
+        ];
+
+        let result = AnthropicProvider::fix_anthropic_turns(messages);
+
+        // The two user tool_result messages should be merged
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0]["role"], "user");
+        assert_eq!(result[1]["role"], "assistant");
+        assert_eq!(result[2]["role"], "user");
+        let content = result[2]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2); // Both tool_results merged
     }
 }

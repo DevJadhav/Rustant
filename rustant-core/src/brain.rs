@@ -9,9 +9,10 @@ use crate::types::{
     TokenUsage, ToolDefinition,
 };
 use async_trait::async_trait;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Trait for LLM providers, supporting both full and streaming completions.
 #[async_trait]
@@ -103,6 +104,134 @@ impl TokenCounter {
     }
 }
 
+/// Sanitize tool_call → tool_result ordering in a message sequence.
+///
+/// This runs provider-agnostically *before* messages are sent to any LLM provider,
+/// ensuring that:
+/// 1. Every tool_result has a matching tool_call earlier in the sequence.
+/// 2. No non-tool messages (system hints, summaries) appear between an assistant's
+///    tool_call message and its corresponding user/tool tool_result message.
+/// 3. Orphaned tool_results (no matching tool_call) are removed.
+///
+/// This fixes issues caused by compression moving pinned tool_results out of order,
+/// system routing hints persisting between call/result, and summary injection.
+pub fn sanitize_tool_sequence(messages: &mut Vec<Message>) {
+    // --- Pass 1: Collect all tool_call IDs from assistant messages ---
+    let mut tool_call_ids: HashSet<String> = HashSet::new();
+    for msg in messages.iter() {
+        if msg.role != Role::Assistant {
+            continue;
+        }
+        collect_tool_call_ids(&msg.content, &mut tool_call_ids);
+    }
+
+    // --- Pass 2: Remove orphaned tool_results (no matching tool_call) ---
+    messages.retain(|msg| {
+        if msg.role != Role::Tool {
+            // Check user messages too — Anthropic sends tool_result as user role
+            if msg.role == Role::User {
+                if let Content::ToolResult { call_id, .. } = &msg.content {
+                    if !tool_call_ids.contains(call_id) {
+                        warn!(
+                            call_id = call_id.as_str(),
+                            "Removing orphaned tool_result (no matching tool_call)"
+                        );
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+        match &msg.content {
+            Content::ToolResult { call_id, .. } => {
+                if tool_call_ids.contains(call_id) {
+                    true
+                } else {
+                    warn!(
+                        call_id = call_id.as_str(),
+                        "Removing orphaned tool_result (no matching tool_call)"
+                    );
+                    false
+                }
+            }
+            Content::MultiPart { parts } => {
+                // Keep the message if at least one tool_result has a matching call
+                let has_valid = parts.iter().any(|p| {
+                    if let Content::ToolResult { call_id, .. } = p {
+                        tool_call_ids.contains(call_id)
+                    } else {
+                        true
+                    }
+                });
+                if !has_valid {
+                    warn!("Removing multipart tool message with all orphaned tool_results");
+                }
+                has_valid
+            }
+            _ => true,
+        }
+    });
+
+    // --- Pass 3: Relocate system messages that appear between tool_call and tool_result ---
+    // Strategy: find each assistant message with tool_call(s), then check if the
+    // immediately following message is a system message. If so, move the system message
+    // before the assistant message.
+    let mut i = 0;
+    while i + 1 < messages.len() {
+        let has_tool_call =
+            messages[i].role == Role::Assistant && content_has_tool_call(&messages[i].content);
+
+        if has_tool_call {
+            // Check if next message is a system message (should be tool_result instead)
+            let mut j = i + 1;
+            let mut system_messages_to_relocate = Vec::new();
+            while j < messages.len() && messages[j].role == Role::System {
+                system_messages_to_relocate.push(j);
+                j += 1;
+            }
+            // Move system messages before the assistant tool_call message
+            if !system_messages_to_relocate.is_empty() {
+                // Extract system messages in reverse order to maintain relative order
+                let mut extracted: Vec<Message> = Vec::new();
+                for &idx in system_messages_to_relocate.iter().rev() {
+                    extracted.push(messages.remove(idx));
+                }
+                extracted.reverse();
+                // Insert them before position i
+                for (offset, msg) in extracted.into_iter().enumerate() {
+                    messages.insert(i + offset, msg);
+                    i += 1; // adjust i to still point to the assistant message
+                }
+            }
+        }
+        i += 1;
+    }
+}
+
+/// Extract all tool_call IDs from a Content value into the given set.
+fn collect_tool_call_ids(content: &Content, ids: &mut HashSet<String>) {
+    match content {
+        Content::ToolCall { id, .. } => {
+            ids.insert(id.clone());
+        }
+        Content::MultiPart { parts } => {
+            for part in parts {
+                collect_tool_call_ids(part, ids);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Check whether a Content value contains at least one tool_call.
+fn content_has_tool_call(content: &Content) -> bool {
+    match content {
+        Content::ToolCall { .. } => true,
+        Content::MultiPart { parts } => parts.iter().any(content_has_tool_call),
+        _ => false,
+    }
+}
+
 /// The Brain wraps an LLM provider and adds higher-level logic:
 /// prompt construction, cost tracking, and model selection.
 pub struct Brain {
@@ -142,6 +271,9 @@ impl Brain {
     ///
     /// If a knowledge addendum has been set via `set_knowledge_addendum()`,
     /// it is automatically appended to the system prompt.
+    ///
+    /// After assembly, [`sanitize_tool_sequence`] runs to ensure tool_call→tool_result
+    /// ordering is never broken regardless of compression, pinning, or system message injection.
     pub fn build_messages(&self, conversation: &[Message]) -> Vec<Message> {
         let mut messages = Vec::with_capacity(conversation.len() + 1);
         if self.knowledge_addendum.is_empty() {
@@ -151,6 +283,7 @@ impl Brain {
             messages.push(Message::system(&augmented));
         }
         messages.extend_from_slice(conversation);
+        sanitize_tool_sequence(&mut messages);
         messages
     }
 
@@ -1022,5 +1155,136 @@ mod tests {
         let messages = vec![Message::user("Hello, this is a test.")];
         let estimate = brain.estimate_tokens(&messages);
         assert!(estimate > 0);
+    }
+
+    // --- sanitize_tool_sequence tests ---
+
+    #[test]
+    fn test_sanitize_removes_orphaned_tool_results() {
+        let mut messages = vec![
+            Message::system("You are a helper."),
+            Message::user("do something"),
+            // Orphaned tool_result — no matching tool_call
+            Message::tool_result("call_orphan_123", "some result", false),
+            Message::assistant("Done!"),
+        ];
+
+        super::sanitize_tool_sequence(&mut messages);
+
+        // The orphaned tool_result should be removed
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].role, Role::System);
+        assert_eq!(messages[1].role, Role::User);
+        assert_eq!(messages[2].role, Role::Assistant);
+    }
+
+    #[test]
+    fn test_sanitize_preserves_valid_sequence() {
+        let mut messages = vec![
+            Message::system("system prompt"),
+            Message::user("read main.rs"),
+            Message::new(
+                Role::Assistant,
+                Content::tool_call(
+                    "call_1",
+                    "file_read",
+                    serde_json::json!({"path": "main.rs"}),
+                ),
+            ),
+            Message::tool_result("call_1", "fn main() {}", false),
+            Message::assistant("Here is the file content."),
+        ];
+
+        super::sanitize_tool_sequence(&mut messages);
+
+        // All messages should be preserved
+        assert_eq!(messages.len(), 5);
+    }
+
+    #[test]
+    fn test_sanitize_handles_system_between_call_and_result() {
+        let mut messages = vec![
+            Message::system("system prompt"),
+            Message::user("do something"),
+            Message::new(
+                Role::Assistant,
+                Content::tool_call("call_1", "file_read", serde_json::json!({"path": "x.rs"})),
+            ),
+            // System message injected between tool_call and tool_result
+            Message::system("routing hint: use file_read"),
+            Message::tool_result("call_1", "file contents", false),
+            Message::assistant("Done"),
+        ];
+
+        super::sanitize_tool_sequence(&mut messages);
+
+        // System message should be moved before the assistant tool_call
+        // Find the assistant tool_call message
+        let assistant_idx = messages
+            .iter()
+            .position(|m| m.role == Role::Assistant && super::content_has_tool_call(&m.content))
+            .unwrap();
+
+        // The message right after the assistant tool_call should be the tool_result
+        let next = &messages[assistant_idx + 1];
+        assert!(
+            matches!(&next.content, Content::ToolResult { .. })
+                || next.role == Role::Tool
+                || next.role == Role::User,
+            "Expected tool_result after tool_call, got {:?}",
+            next.role
+        );
+    }
+
+    #[test]
+    fn test_sanitize_multipart_tool_call() {
+        let mut messages = vec![
+            Message::user("do two things"),
+            Message::new(
+                Role::Assistant,
+                Content::MultiPart {
+                    parts: vec![
+                        Content::text("I'll read both files."),
+                        Content::tool_call(
+                            "call_a",
+                            "file_read",
+                            serde_json::json!({"path": "a.rs"}),
+                        ),
+                        Content::tool_call(
+                            "call_b",
+                            "file_read",
+                            serde_json::json!({"path": "b.rs"}),
+                        ),
+                    ],
+                },
+            ),
+            Message::tool_result("call_a", "contents of a", false),
+            Message::tool_result("call_b", "contents of b", false),
+            // Orphaned tool_result
+            Message::tool_result("call_nonexistent", "orphan", false),
+        ];
+
+        super::sanitize_tool_sequence(&mut messages);
+
+        // Orphaned result removed, valid ones preserved
+        assert_eq!(messages.len(), 4);
+    }
+
+    #[test]
+    fn test_sanitize_empty_messages() {
+        let mut messages: Vec<Message> = vec![];
+        super::sanitize_tool_sequence(&mut messages);
+        assert!(messages.is_empty());
+    }
+
+    #[test]
+    fn test_sanitize_no_tool_messages() {
+        let mut messages = vec![
+            Message::system("prompt"),
+            Message::user("hello"),
+            Message::assistant("hi"),
+        ];
+        super::sanitize_tool_sequence(&mut messages);
+        assert_eq!(messages.len(), 3);
     }
 }

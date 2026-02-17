@@ -13,8 +13,9 @@ use crate::types::{
 use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use tokio::sync::mpsc;
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// Metadata for a known model.
 struct ModelMeta {
@@ -391,6 +392,107 @@ impl OpenAiCompatibleProvider {
         serde_json::from_str(data).ok()
     }
 
+    /// Fix OpenAI-format message turn ordering issues.
+    ///
+    /// OpenAI requires that every "tool" role message has a matching tool_call in a
+    /// preceding "assistant" message, and that no system/user messages appear between
+    /// an assistant's tool_calls and their corresponding tool results.
+    ///
+    /// This method:
+    /// 1. Collects all tool_call IDs from assistant messages
+    /// 2. Removes orphaned "tool" messages (no matching tool_call)
+    /// 3. Relocates system/user messages that appear between tool_call and tool_result
+    fn fix_openai_turns(messages: Vec<Value>) -> Vec<Value> {
+        if messages.is_empty() {
+            return messages;
+        }
+
+        // --- Pass 1: Collect all tool_call IDs ---
+        let mut tool_call_ids: HashSet<String> = HashSet::new();
+        for msg in &messages {
+            if msg["role"].as_str() == Some("assistant") {
+                if let Some(calls) = msg["tool_calls"].as_array() {
+                    for call in calls {
+                        if let Some(id) = call["id"].as_str() {
+                            tool_call_ids.insert(id.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- Pass 2: Remove orphaned tool messages ---
+        let mut result: Vec<Value> = Vec::with_capacity(messages.len());
+        for msg in messages {
+            if msg["role"].as_str() == Some("tool") {
+                if let Some(call_id) = msg["tool_call_id"].as_str() {
+                    if tool_call_ids.contains(call_id) {
+                        result.push(msg);
+                    } else {
+                        warn!(
+                            call_id = call_id,
+                            "Removing orphaned tool message (no matching tool_call)"
+                        );
+                    }
+                } else {
+                    warn!("Removing tool message without tool_call_id");
+                }
+            } else {
+                result.push(msg);
+            }
+        }
+
+        // --- Pass 3: Relocate non-tool messages between assistant[tool_calls] and tool results ---
+        let mut i = 0;
+        while i + 1 < result.len() {
+            let has_tool_calls = result[i]["role"].as_str() == Some("assistant")
+                && result[i]["tool_calls"].is_array()
+                && !result[i]["tool_calls"]
+                    .as_array()
+                    .map(|a| a.is_empty())
+                    .unwrap_or(true);
+
+            if has_tool_calls {
+                // Move any non-tool messages that appear between this assistant and
+                // its tool results to before the assistant message
+                let mut j = i + 1;
+                let mut to_relocate = Vec::new();
+                while j < result.len() {
+                    let role = result[j]["role"].as_str().unwrap_or("");
+                    if role == "tool" {
+                        j += 1;
+                        continue;
+                    }
+                    // Check if there are still tool results after this non-tool message
+                    let has_tool_after =
+                        (j + 1..result.len()).any(|k| result[k]["role"].as_str() == Some("tool"));
+                    if has_tool_after && (role == "system" || role == "user") {
+                        to_relocate.push(j);
+                        j += 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                // Move them before the assistant message
+                if !to_relocate.is_empty() {
+                    let mut extracted: Vec<Value> = Vec::new();
+                    for &idx in to_relocate.iter().rev() {
+                        extracted.push(result.remove(idx));
+                    }
+                    extracted.reverse();
+                    for (offset, msg) in extracted.into_iter().enumerate() {
+                        result.insert(i + offset, msg);
+                        i += 1;
+                    }
+                }
+            }
+            i += 1;
+        }
+
+        result
+    }
+
     /// Map an HTTP status code to the appropriate LlmError.
     fn map_http_error(status: reqwest::StatusCode, body: &str) -> LlmError {
         match status.as_u16() {
@@ -436,9 +538,10 @@ impl LlmProvider for OpenAiCompatibleProvider {
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, LlmError> {
         let url = format!("{}/chat/completions", self.base_url);
 
+        let messages_json = Self::fix_openai_turns(Self::messages_to_json(&request.messages));
         let mut body = json!({
             "model": request.model.as_deref().unwrap_or(&self.model),
-            "messages": Self::messages_to_json(&request.messages),
+            "messages": messages_json,
             "temperature": request.temperature,
             "stream": false,
         });
@@ -493,9 +596,10 @@ impl LlmProvider for OpenAiCompatibleProvider {
     ) -> Result<(), LlmError> {
         let url = format!("{}/chat/completions", self.base_url);
 
+        let messages_json = Self::fix_openai_turns(Self::messages_to_json(&request.messages));
         let mut body = json!({
             "model": request.model.as_deref().unwrap_or(&self.model),
-            "messages": Self::messages_to_json(&request.messages),
+            "messages": messages_json,
             "temperature": request.temperature,
             "stream": true,
             "stream_options": { "include_usage": true },
@@ -991,5 +1095,85 @@ mod tests {
         let (input_cost, output_cost) = provider.cost_per_token();
         assert_eq!(input_cost, 0.0);
         assert_eq!(output_cost, 0.0);
+    }
+
+    // --- fix_openai_turns tests ---
+
+    #[test]
+    fn test_fix_openai_turns_removes_orphaned_tool() {
+        let messages = vec![
+            json!({"role": "user", "content": "Hello"}),
+            json!({"role": "assistant", "content": "Hi"}),
+            json!({"role": "tool", "tool_call_id": "nonexistent_call", "content": "orphan"}),
+        ];
+
+        let result = OpenAiCompatibleProvider::fix_openai_turns(messages);
+
+        // Orphaned tool message should be removed
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0]["role"], "user");
+        assert_eq!(result[1]["role"], "assistant");
+    }
+
+    #[test]
+    fn test_fix_openai_turns_preserves_valid_sequence() {
+        let messages = vec![
+            json!({"role": "user", "content": "Read file"}),
+            json!({
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "file_read", "arguments": "{\"path\":\"x.rs\"}"}
+                }]
+            }),
+            json!({"role": "tool", "tool_call_id": "call_1", "content": "fn main(){}"}),
+            json!({"role": "assistant", "content": "Here is the file."}),
+        ];
+
+        let result = OpenAiCompatibleProvider::fix_openai_turns(messages);
+
+        assert_eq!(result.len(), 4);
+        assert_eq!(result[0]["role"], "user");
+        assert_eq!(result[1]["role"], "assistant");
+        assert_eq!(result[2]["role"], "tool");
+        assert_eq!(result[3]["role"], "assistant");
+    }
+
+    #[test]
+    fn test_fix_openai_turns_relocates_system_between_call_and_result() {
+        let messages = vec![
+            json!({"role": "user", "content": "do something"}),
+            json!({
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "file_read", "arguments": "{}"}
+                }]
+            }),
+            json!({"role": "system", "content": "routing hint"}),
+            json!({"role": "tool", "tool_call_id": "call_1", "content": "result"}),
+        ];
+
+        let result = OpenAiCompatibleProvider::fix_openai_turns(messages);
+
+        // System message should be moved before the assistant tool_call
+        assert_eq!(result.len(), 4);
+        // The tool message should immediately follow the assistant
+        let assistant_idx = result
+            .iter()
+            .position(|m| m["role"] == "assistant" && m["tool_calls"].is_array())
+            .unwrap();
+        assert_eq!(result[assistant_idx + 1]["role"], "tool");
+    }
+
+    #[test]
+    fn test_fix_openai_turns_empty() {
+        let messages: Vec<Value> = vec![];
+        let result = OpenAiCompatibleProvider::fix_openai_turns(messages);
+        assert!(result.is_empty());
     }
 }

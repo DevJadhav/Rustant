@@ -6,7 +6,7 @@
 
 use crate::error::MemoryError;
 use crate::search::{HybridSearchEngine, SearchConfig};
-use crate::types::Message;
+use crate::types::{Content, Message, Role};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -118,6 +118,8 @@ impl ShortTermMemory {
 
     /// Compress older messages by replacing them with a summary.
     /// Pinned messages are preserved and moved to the front of the window.
+    /// When a pinned message is a tool_result, its corresponding tool_call
+    /// message is also preserved (and vice versa) to maintain valid sequences.
     /// Returns the number of messages that were compressed.
     pub fn compress(&mut self, summary: String) -> usize {
         if self.messages.len() <= self.window_size {
@@ -126,14 +128,84 @@ impl ShortTermMemory {
 
         let to_remove = self.messages.len() - self.window_size;
 
-        // Separate pinned messages from those to be removed, and collect
-        // the absolute indices of messages that survive the window (not removed).
+        // First pass: find indices that are pinned
+        let mut preserve_indices: HashSet<usize> = HashSet::new();
+        for i in 0..to_remove {
+            let abs_idx = self.compressed_offset + i;
+            if self.pinned.contains(&abs_idx) {
+                preserve_indices.insert(i);
+            }
+        }
+
+        // Second pass: for each preserved message, also preserve its tool pair
+        let mut extra_preserves: Vec<usize> = Vec::new();
+        for &i in &preserve_indices {
+            if let Some(msg) = self.messages.get(i) {
+                match &msg.content {
+                    // If pinned message is a tool_result, find its tool_call
+                    Content::ToolResult { call_id, .. } => {
+                        if let Some(pair_idx) =
+                            Self::find_tool_call_for_result(call_id, &self.messages, to_remove)
+                        {
+                            if !preserve_indices.contains(&pair_idx) {
+                                extra_preserves.push(pair_idx);
+                            }
+                        }
+                    }
+                    // If pinned message is a tool_call, find its tool_result
+                    Content::ToolCall { id, .. } => {
+                        if let Some(pair_idx) =
+                            Self::find_tool_result_for_call(id, &self.messages, to_remove)
+                        {
+                            if !preserve_indices.contains(&pair_idx) {
+                                extra_preserves.push(pair_idx);
+                            }
+                        }
+                    }
+                    // MultiPart: check both tool_calls and tool_results
+                    Content::MultiPart { parts } => {
+                        for part in parts {
+                            match part {
+                                Content::ToolCall { id, .. } => {
+                                    if let Some(pair_idx) = Self::find_tool_result_for_call(
+                                        id,
+                                        &self.messages,
+                                        to_remove,
+                                    ) {
+                                        if !preserve_indices.contains(&pair_idx) {
+                                            extra_preserves.push(pair_idx);
+                                        }
+                                    }
+                                }
+                                Content::ToolResult { call_id, .. } => {
+                                    if let Some(pair_idx) = Self::find_tool_call_for_result(
+                                        call_id,
+                                        &self.messages,
+                                        to_remove,
+                                    ) {
+                                        if !preserve_indices.contains(&pair_idx) {
+                                            extra_preserves.push(pair_idx);
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for idx in extra_preserves {
+            preserve_indices.insert(idx);
+        }
+
+        // Collect preserved messages in order, count removed
         let mut preserved = Vec::new();
         let mut removed_count = 0;
 
         for i in 0..to_remove {
-            let abs_idx = self.compressed_offset + i;
-            if self.pinned.contains(&abs_idx) {
+            if preserve_indices.contains(&i) {
                 if let Some(msg) = self.messages.get(i) {
                     preserved.push(msg.clone());
                 }
@@ -188,6 +260,64 @@ impl ShortTermMemory {
         }
 
         removed_count
+    }
+
+    /// Find the index (within `range 0..limit`) of an assistant message containing
+    /// a tool_call with the given ID, paired with a tool_result's `call_id`.
+    fn find_tool_call_for_result(
+        call_id: &str,
+        messages: &VecDeque<Message>,
+        limit: usize,
+    ) -> Option<usize> {
+        messages
+            .iter()
+            .enumerate()
+            .take(limit)
+            .find(|(_, msg)| {
+                msg.role == Role::Assistant
+                    && Self::content_contains_tool_call_id(&msg.content, call_id)
+            })
+            .map(|(i, _)| i)
+    }
+
+    /// Find the index (within `range 0..limit`) of a tool/user message containing
+    /// a tool_result with the given `call_id`, paired with a tool_call's ID.
+    fn find_tool_result_for_call(
+        tool_call_id: &str,
+        messages: &VecDeque<Message>,
+        limit: usize,
+    ) -> Option<usize> {
+        messages
+            .iter()
+            .enumerate()
+            .take(limit)
+            .find(|(_, msg)| {
+                (msg.role == Role::Tool || msg.role == Role::User)
+                    && Self::content_contains_tool_result_id(&msg.content, tool_call_id)
+            })
+            .map(|(i, _)| i)
+    }
+
+    /// Check if a Content contains a tool_call with the given ID.
+    fn content_contains_tool_call_id(content: &Content, target_id: &str) -> bool {
+        match content {
+            Content::ToolCall { id, .. } => id == target_id,
+            Content::MultiPart { parts } => parts
+                .iter()
+                .any(|p| Self::content_contains_tool_call_id(p, target_id)),
+            _ => false,
+        }
+    }
+
+    /// Check if a Content contains a tool_result with the given call_id.
+    fn content_contains_tool_result_id(content: &Content, target_id: &str) -> bool {
+        match content {
+            Content::ToolResult { call_id, .. } => call_id == target_id,
+            Content::MultiPart { parts } => parts
+                .iter()
+                .any(|p| Self::content_contains_tool_result_id(p, target_id)),
+            _ => false,
+        }
     }
 
     /// Pin a message by its position in the current message list (0-based).
@@ -2022,5 +2152,101 @@ mod tests {
         assert!(stm.pin(1));
         assert!(stm.unpin(1));
         assert!(!stm.is_pinned(1));
+    }
+
+    // --- Tool chain pair preservation tests ---
+
+    #[test]
+    fn test_compress_preserves_tool_chain_pairs() {
+        let mut stm = ShortTermMemory::new(3);
+
+        // Build a conversation with tool_call → tool_result pair in the compression zone
+        stm.add(Message::user("read the file")); // idx 0
+        stm.add(Message::new(
+            // idx 1 — tool_call
+            Role::Assistant,
+            Content::tool_call("call_abc", "file_read", serde_json::json!({"path": "x.rs"})),
+        ));
+        stm.add(Message::tool_result("call_abc", "fn main() {}", false)); // idx 2 — tool_result
+        stm.add(Message::assistant("Here is the content.")); // idx 3
+        stm.add(Message::user("thanks")); // idx 4
+        stm.add(Message::assistant("You're welcome.")); // idx 5
+
+        // Pin the tool_result at index 2
+        stm.pin(2);
+        assert!(stm.needs_compression());
+
+        let removed = stm.compress("Summary of earlier conversation".to_string());
+
+        // The tool_result (pinned) should be preserved, AND its paired
+        // tool_call should ALSO be preserved
+        let msgs = stm.to_messages();
+        let has_tool_call = msgs.iter().any(|m| {
+            matches!(
+                &m.content,
+                Content::ToolCall { name, .. } if name == "file_read"
+            )
+        });
+        let has_tool_result = msgs.iter().any(|m| {
+            matches!(
+                &m.content,
+                Content::ToolResult { call_id, .. } if call_id == "call_abc"
+            )
+        });
+
+        assert!(
+            has_tool_result,
+            "Pinned tool_result should survive compression"
+        );
+        assert!(
+            has_tool_call,
+            "Paired tool_call should also survive compression"
+        );
+
+        // The user message at idx 0 should have been compressed away
+        // (it was not pinned and not a tool pair)
+        assert!(removed >= 1, "At least one message should be compressed");
+    }
+
+    #[test]
+    fn test_compress_preserves_tool_call_paired_with_result() {
+        let mut stm = ShortTermMemory::new(3);
+
+        stm.add(Message::user("do something")); // idx 0
+        stm.add(Message::new(
+            // idx 1 — tool_call
+            Role::Assistant,
+            Content::tool_call("call_xyz", "shell_exec", serde_json::json!({"cmd": "ls"})),
+        ));
+        stm.add(Message::tool_result("call_xyz", "file1\nfile2", false)); // idx 2
+        stm.add(Message::assistant("Listed files.")); // idx 3
+        stm.add(Message::user("ok")); // idx 4
+        stm.add(Message::assistant("Done.")); // idx 5
+
+        // Pin the tool_call at index 1
+        stm.pin(1);
+        assert!(stm.needs_compression());
+
+        stm.compress("Summary".to_string());
+
+        let msgs = stm.to_messages();
+        let has_tool_call = msgs.iter().any(|m| {
+            matches!(
+                &m.content,
+                Content::ToolCall { id, .. } if id == "call_xyz"
+            )
+        });
+        let has_tool_result = msgs.iter().any(|m| {
+            matches!(
+                &m.content,
+                Content::ToolResult { call_id, .. } if call_id == "call_xyz"
+            )
+        });
+
+        assert!(has_tool_call, "Pinned tool_call should survive compression");
+        assert!(
+            has_tool_result,
+            "Paired tool_result should also survive compression"
+        );
     }
 }

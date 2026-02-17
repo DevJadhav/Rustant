@@ -361,19 +361,21 @@ impl Agent {
 
         // Run knowledge distillation from long-term memory and inject into brain
         self.knowledge.distill(&self.memory.long_term);
-        let knowledge_addendum = self.knowledge.rules_for_prompt();
+        let mut knowledge_addendum = self.knowledge.rules_for_prompt();
+
+        // Inject a tool-routing hint based on the cached task classification.
+        // Appended to the knowledge addendum (system prompt) instead of persisted
+        // in memory, so it never gets displaced by compression and can't end up
+        // between tool_call and tool_result messages.
+        if let Some(ref classification) = self.state.task_classification {
+            if let Some(hint) = Self::tool_routing_hint_from_classification(classification) {
+                knowledge_addendum.push_str("\n\n");
+                knowledge_addendum.push_str(&hint);
+            }
+        }
         self.brain.set_knowledge_addendum(knowledge_addendum);
 
         self.memory.add_message(Message::user(task));
-
-        // Inject a tool-routing hint based on the cached task classification.
-        // This guides the LLM to call the correct dedicated tool instead of
-        // generic tools like shell_exec or document_read.
-        if let Some(ref classification) = self.state.task_classification {
-            if let Some(hint) = Self::tool_routing_hint_from_classification(classification) {
-                self.memory.add_message(Message::system(&hint));
-            }
-        }
 
         self.callback.on_status_change(AgentStatus::Thinking).await;
 
