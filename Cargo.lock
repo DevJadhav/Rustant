@@ -5729,7 +5729,7 @@ dependencies = [
 
 [[package]]
 name = "rustant"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "arboard",
@@ -5774,7 +5774,7 @@ dependencies = [
 
 [[package]]
 name = "rustant-core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -5839,7 +5839,7 @@ dependencies = [
 
 [[package]]
 name = "rustant-mcp"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -5859,7 +5859,7 @@ dependencies = [
 
 [[package]]
 name = "rustant-plugins"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -5877,7 +5877,7 @@ dependencies = [
 
 [[package]]
 name = "rustant-tools"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5911,7 +5911,7 @@ dependencies = [
 
 [[package]]
 name = "rustant-ui"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "axum",

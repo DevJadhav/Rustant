@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -168,10 +168,10 @@ genpdf = "0.2"
 chrono-tz = "0.10"
 
 # Internal crates
-rustant-core = { path = "rustant-core", version = "1.0.0" }
-rustant-tools = { path = "rustant-tools", version = "1.0.0" }
-rustant-mcp = { path = "rustant-mcp", version = "1.0.0" }
-rustant-plugins = { path = "rustant-plugins", version = "1.0.0" }
+rustant-core = { path = "rustant-core", version = "1.0.1" }
+rustant-tools = { path = "rustant-tools", version = "1.0.1" }
+rustant-mcp = { path = "rustant-mcp", version = "1.0.1" }
+rustant-plugins = { path = "rustant-plugins", version = "1.0.1" }
 
 [profile.release]
 lto = "thin"
