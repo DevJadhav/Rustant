@@ -157,22 +157,38 @@ jobs:
             local retries=3
             local delay=30
 
+            # Pre-check: query crates.io to see if this exact version is already published
+            local local_version
+            local_version=$(cargo metadata --no-deps --format-version=1 \
+              | jq -r --arg c "$crate" '.packages[] | select(.name == $c) | .version')
+            echo "Local version of $crate: $local_version"
+
+            local published_versions
+            published_versions=$(curl -sSf "https://crates.io/api/v1/crates/$crate" \
+              -H "User-Agent: rustant-ci (https://github.com/DevJadhav/Rustant)" 2>/dev/null \
+              | jq -r '.versions[]?.num // empty' 2>/dev/null || echo "")
+
+            if echo "$published_versions" | grep -qxF "$local_version"; then
+              echo "$crate@$local_version is already on crates.io, skipping."
+              return 0
+            fi
+
             for i in $(seq 1 $retries); do
-              echo "Publishing $crate (attempt $i/$retries)..."
-              if cargo publish -p "$crate" --allow-dirty 2>&1; then
+              echo "Publishing $crate@$local_version (attempt $i/$retries)..."
+              local output
+              output=$(cargo publish -p "$crate" --allow-dirty 2>&1) && {
                 echo "$crate published successfully."
                 return 0
-              else
-                local exit_code=$?
-                # If already published, treat as success
-                if cargo publish -p "$crate" --allow-dirty 2>&1 | grep -q "already uploaded"; then
-                  echo "$crate is already published, skipping."
-                  return 0
-                fi
-                if [ $i -lt $retries ]; then
-                  echo "Retrying $crate in ${delay}s..."
-                  sleep $delay
-                fi
+              }
+              # If already published, treat as success (fallback detection)
+              if echo "$output" | grep -qiE "already (uploaded|exists|published)"; then
+                echo "$crate@$local_version is already published, skipping."
+                return 0
+              fi
+              echo "$output"
+              if [ $i -lt $retries ]; then
+                echo "Retrying $crate in ${delay}s..."
+                sleep $delay
               fi
             done
             echo "ERROR: Failed to publish $crate after $retries attempts."
