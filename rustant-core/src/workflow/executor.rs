@@ -234,8 +234,8 @@ impl WorkflowExecutor {
             }
 
             // Check gate
-            if let Some(ref gate) = step.gate {
-                if gate.gate_type == GateType::ApprovalRequired {
+            if let Some(ref gate) = step.gate
+                && gate.gate_type == GateType::ApprovalRequired {
                     let message = step.gate_message.as_deref().unwrap_or(&gate.message);
                     let preview = step.gate_preview.as_deref().or(gate.preview.as_deref());
 
@@ -255,7 +255,6 @@ impl WorkflowExecutor {
                         }
                     }
                 }
-            }
 
             // Render params
             let params_value =

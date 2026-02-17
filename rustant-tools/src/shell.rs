@@ -410,10 +410,10 @@ mod tests {
 
         let mut has_stderr = false;
         while let Ok(update) = rx.try_recv() {
-            if let ProgressUpdate::ShellOutput { is_stderr, .. } = update {
-                if is_stderr {
-                    has_stderr = true;
-                }
+            if let ProgressUpdate::ShellOutput { is_stderr, .. } = update
+                && is_stderr
+            {
+                has_stderr = true;
             }
         }
         assert!(has_stderr, "Expected at least one stderr progress update");

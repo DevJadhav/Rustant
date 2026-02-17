@@ -35,11 +35,10 @@ impl NodeBridge {
                 .cloned()
                 .unwrap_or_else(|| task_name.to_string());
             let mut task = NodeTask::new(cap, command);
-            if let Some(timeout) = args.get("timeout") {
-                if let Ok(secs) = timeout.parse() {
+            if let Some(timeout) = args.get("timeout")
+                && let Ok(secs) = timeout.parse() {
                     task = task.with_timeout(secs);
                 }
-            }
             if let Some(task_args) = args.get("args") {
                 task = task.with_args(task_args.split_whitespace().map(String::from).collect());
             }

@@ -238,8 +238,8 @@ impl MatrixHttpClient for RealMatrixHttp {
             for (room_id, room_data) in rooms {
                 if let Some(timeline) = room_data["timeline"]["events"].as_array() {
                     for event in timeline {
-                        if event["type"].as_str() == Some("m.room.message") {
-                            if let Some(event_body) = event["content"]["body"].as_str() {
+                        if event["type"].as_str() == Some("m.room.message")
+                            && let Some(event_body) = event["content"]["body"].as_str() {
                                 events.push(MatrixEvent {
                                     event_id: event["event_id"].as_str().unwrap_or("").to_string(),
                                     room_id: room_id.clone(),
@@ -247,7 +247,6 @@ impl MatrixHttpClient for RealMatrixHttp {
                                     body: event_body.to_string(),
                                 });
                             }
-                        }
                     }
                 }
             }

@@ -1069,8 +1069,8 @@ impl CodeIntelligenceTool {
 
                 if is_fn_start && trimmed.contains('(') {
                     // If already tracking a function, check its length before starting a new one.
-                    if in_function {
-                        if let Some(start) = fn_start_line {
+                    if in_function
+                        && let Some(start) = fn_start_line {
                             let length = line_num - start;
                             if length > 100 {
                                 let item = TechDebtItem {
@@ -1088,7 +1088,6 @@ impl CodeIntelligenceTool {
                                 }
                             }
                         }
-                    }
 
                     fn_start_line = Some(line_num);
                     fn_name = Self::extract_fn_name(trimmed);
@@ -1184,14 +1183,13 @@ impl CodeIntelligenceTool {
             "def ",
         ];
         for prefix in &prefixes {
-            if let Some(rest) = line.trim().strip_prefix(prefix) {
-                if let Some(paren_pos) = rest.find('(') {
+            if let Some(rest) = line.trim().strip_prefix(prefix)
+                && let Some(paren_pos) = rest.find('(') {
                     let name = rest[..paren_pos].trim();
                     if !name.is_empty() {
                         return name.to_string();
                     }
                 }
-            }
         }
         "<anonymous>".to_string()
     }
@@ -1530,11 +1528,10 @@ impl CodeIntelligenceTool {
                 continue;
             }
 
-            if entry.file_name().to_string_lossy() == filename {
-                if let Ok(content) = std::fs::read_to_string(entry.path()) {
+            if entry.file_name().to_string_lossy() == filename
+                && let Ok(content) = std::fs::read_to_string(entry.path()) {
                     handler(entry.path(), content);
                 }
-            }
         }
     }
 
@@ -1607,11 +1604,10 @@ impl CodeIntelligenceTool {
             let after_key = &inline[ver_pos + 7..];
             if let Some(eq_pos) = after_key.find('=') {
                 let after_eq = after_key[eq_pos + 1..].trim();
-                if let Some(stripped) = after_eq.strip_prefix('"') {
-                    if let Some(end_quote) = stripped.find('"') {
+                if let Some(stripped) = after_eq.strip_prefix('"')
+                    && let Some(end_quote) = stripped.find('"') {
                         return stripped[..end_quote].to_string();
                     }
-                }
             }
         }
         // Fallback: look for `workspace = true`.

@@ -130,11 +130,10 @@ pub fn detect_env_api_keys() -> Vec<(String, String)> {
     let providers = available_providers();
     let mut found = Vec::new();
     for p in &providers {
-        if let Ok(key) = std::env::var(&p.api_key_env) {
-            if !key.trim().is_empty() {
+        if let Ok(key) = std::env::var(&p.api_key_env)
+            && !key.trim().is_empty() {
                 found.push((p.name.clone(), p.display_name.clone()));
             }
-        }
     }
     found
 }
@@ -179,9 +178,9 @@ pub async fn run_setup(workspace: &Path) -> anyhow::Result<()> {
     let api_key: String;
 
     // Check for existing API key in the credential store
-    if !use_oauth {
-        if let Ok(existing_key) = cred_store.get_key(&chosen_provider.name) {
-            if !existing_key.trim().is_empty() {
+    if !use_oauth
+        && let Ok(existing_key) = cred_store.get_key(&chosen_provider.name)
+            && !existing_key.trim().is_empty() {
                 println!(
                     "  An API key for {} is already stored in the OS credential store.",
                     chosen_provider.display_name
@@ -253,8 +252,6 @@ pub async fn run_setup(workspace: &Path) -> anyhow::Result<()> {
                 }
                 // "Enter a new key" selected or validation failed — fall through
             }
-        }
-    }
 
     if use_oauth {
         // OAuth browser flow
@@ -383,8 +380,8 @@ async fn run_setup_api_key(workspace: &Path, provider: &ProviderChoice) -> anyho
     let cred_store = KeyringCredentialStore::new();
 
     // Check for existing key before prompting
-    if let Ok(existing_key) = cred_store.get_key(&provider.name) {
-        if !existing_key.trim().is_empty() {
+    if let Ok(existing_key) = cred_store.get_key(&provider.name)
+        && !existing_key.trim().is_empty() {
             println!(
                 "  An API key for {} is already stored.",
                 provider.display_name
@@ -431,7 +428,6 @@ async fn run_setup_api_key(workspace: &Path, provider: &ProviderChoice) -> anyho
                 }
             }
         }
-    }
 
     let api_key: String = Password::new()
         .with_prompt(format!("Enter your {} API key", provider.display_name))

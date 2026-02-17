@@ -211,8 +211,8 @@ proptest! {
         // Build a valid 7-field cron expression: sec min hour day month weekday year
         let expr = format!("{} {} {} * * * *", second, minute, hour);
         let config = CronJobConfig::new("prop-test", &expr, "test task");
-        if let Ok(job) = CronJob::new(config) {
-            if let Some(next_run) = job.next_run {
+        if let Ok(job) = CronJob::new(config)
+            && let Some(next_run) = job.next_run {
                 // next_run should always be >= now
                 let now = chrono::Utc::now();
                 prop_assert!(
@@ -222,7 +222,6 @@ proptest! {
                     now
                 );
             }
-        }
         // If parsing fails, that's fine — not all combinations are valid
     }
 

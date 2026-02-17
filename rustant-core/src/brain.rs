@@ -144,17 +144,15 @@ pub fn sanitize_tool_sequence(messages: &mut Vec<Message>) {
     messages.retain(|msg| {
         if msg.role != Role::Tool {
             // Check user messages too — Anthropic sends tool_result as user role
-            if msg.role == Role::User {
-                if let Content::ToolResult { call_id, .. } = &msg.content {
-                    if !tool_call_ids.contains(call_id) {
+            if msg.role == Role::User
+                && let Content::ToolResult { call_id, .. } = &msg.content
+                    && !tool_call_ids.contains(call_id) {
                         warn!(
                             call_id = call_id.as_str(),
                             "Removing orphaned tool_result (no matching tool_call)"
                         );
                         return false;
                     }
-                }
-            }
             return true;
         }
         match &msg.content {

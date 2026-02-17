@@ -117,8 +117,8 @@ impl Tool for WebSearchTool {
         let mut results = Vec::new();
 
         // Extract abstract (main answer)
-        if let Some(abstract_text) = body.get("AbstractText").and_then(|v| v.as_str()) {
-            if !abstract_text.is_empty() {
+        if let Some(abstract_text) = body.get("AbstractText").and_then(|v| v.as_str())
+            && !abstract_text.is_empty() {
                 let source = body
                     .get("AbstractSource")
                     .and_then(|v| v.as_str())
@@ -129,7 +129,6 @@ impl Tool for WebSearchTool {
                     .unwrap_or("");
                 results.push(format!("[{}] {}\n  URL: {}", source, abstract_text, url));
             }
-        }
 
         // Extract related topics
         if let Some(topics) = body.get("RelatedTopics").and_then(|v| v.as_array()) {

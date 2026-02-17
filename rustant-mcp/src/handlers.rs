@@ -224,8 +224,8 @@ impl RequestHandler {
         // === Safety pipeline (skipped when safety is disabled) ===
         if self.mcp_safety.enabled {
             // 1. Rate limiting
-            if let Some(ref mut limiter) = self.rate_limiter {
-                if !limiter.check_and_record() {
+            if let Some(ref mut limiter) = self.rate_limiter
+                && !limiter.check_and_record() {
                     warn!(tool = %tool_name, "MCP rate limit exceeded");
                     return Err(McpError::RateLimited {
                         message: format!(
@@ -234,7 +234,6 @@ impl RequestHandler {
                         ),
                     });
                 }
-            }
 
             // 2. Denied tools list
             if self.mcp_safety.denied_tools.iter().any(|d| d == tool_name) {
@@ -247,8 +246,8 @@ impl RequestHandler {
             // 3. Risk level check (unless tool is in allowed_tools override)
             let is_explicitly_allowed =
                 self.mcp_safety.allowed_tools.iter().any(|a| a == tool_name);
-            if !is_explicitly_allowed {
-                if let Some(tool_risk) = self.tool_registry.get_risk_level(tool_name) {
+            if !is_explicitly_allowed
+                && let Some(tool_risk) = self.tool_registry.get_risk_level(tool_name) {
                     let max_risk = self.mcp_safety.parsed_max_risk_level();
                     if tool_risk > max_risk {
                         warn!(
@@ -265,11 +264,10 @@ impl RequestHandler {
                         });
                     }
                 }
-            }
 
             // 4. Input injection scan
-            if self.mcp_safety.scan_inputs {
-                if let Some(ref detector) = self.injection_detector {
+            if self.mcp_safety.scan_inputs
+                && let Some(ref detector) = self.injection_detector {
                     let args_str = arguments.to_string();
                     let scan = detector.scan_input(&args_str);
                     if scan.is_suspicious {
@@ -287,7 +285,6 @@ impl RequestHandler {
                         });
                     }
                 }
-            }
 
             // 5. JSON schema validation
             if let Some(schema) = self.tool_registry.get_parameters_schema(tool_name) {
@@ -330,8 +327,8 @@ impl RequestHandler {
                 };
 
                 // Output injection scan (warn-prefix, don't block)
-                if self.mcp_safety.enabled && self.mcp_safety.scan_outputs {
-                    if let Some(ref detector) = self.injection_detector {
+                if self.mcp_safety.enabled && self.mcp_safety.scan_outputs
+                    && let Some(ref detector) = self.injection_detector {
                         let scan = detector.scan_tool_output(&text);
                         if scan.is_suspicious {
                             warn!(
@@ -345,7 +342,6 @@ impl RequestHandler {
                             );
                         }
                     }
-                }
 
                 // 8. Audit log
                 if self.mcp_safety.enabled && self.mcp_safety.audit_enabled {

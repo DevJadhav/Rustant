@@ -290,17 +290,15 @@ impl AnthropicProvider {
         // Collect all tool_use IDs from assistant messages
         let mut tool_use_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
         for msg in &merged {
-            if msg["role"].as_str() == Some("assistant") {
-                if let Some(content) = msg["content"].as_array() {
+            if msg["role"].as_str() == Some("assistant")
+                && let Some(content) = msg["content"].as_array() {
                     for block in content {
-                        if block["type"].as_str() == Some("tool_use") {
-                            if let Some(id) = block["id"].as_str() {
+                        if block["type"].as_str() == Some("tool_use")
+                            && let Some(id) = block["id"].as_str() {
                                 tool_use_ids.insert(id.to_string());
                             }
-                        }
                     }
                 }
-            }
         }
 
         // Filter out orphaned tool_result blocks from user messages
@@ -535,11 +533,10 @@ impl AnthropicProvider {
             }
             "content_block_stop" => {
                 // If this was a tool_use block, emit ToolCallEnd.
-                if current_block_type.as_deref() == Some("tool_use") {
-                    if let Some(id) = current_block_id.take() {
+                if current_block_type.as_deref() == Some("tool_use")
+                    && let Some(id) = current_block_id.take() {
                         let _ = tx.send(StreamEvent::ToolCallEnd { id }).await;
                     }
-                }
                 *current_block_type = None;
 
                 Ok(None)
@@ -710,13 +707,12 @@ impl LlmProvider for AnthropicProvider {
                     }
 
                     // Extract input tokens from message_start event.
-                    if event_type == "message_start" {
-                        if let Some(input_tokens) =
+                    if event_type == "message_start"
+                        && let Some(input_tokens) =
                             data_json["message"]["usage"]["input_tokens"].as_u64()
                         {
                             total_usage.input_tokens = input_tokens as usize;
                         }
-                    }
                 }
 
                 current_event_type.clear();
@@ -782,7 +778,8 @@ mod tests {
 
     /// Helper to create a provider with a fake API key in the environment.
     fn make_provider() -> AnthropicProvider {
-        std::env::set_var("ANTHROPIC_TEST_KEY_UNIT", "sk-ant-test-key-12345");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var("ANTHROPIC_TEST_KEY_UNIT", "sk-ant-test-key-12345") };
         let config = test_config("ANTHROPIC_TEST_KEY_UNIT");
         AnthropicProvider::new(&config).expect("Provider creation should succeed")
     }
@@ -790,19 +787,22 @@ mod tests {
     #[test]
     fn test_new_reads_env() {
         let env_var = "ANTHROPIC_TEST_KEY_NEW_READS";
-        std::env::set_var(env_var, "sk-ant-my-secret-key");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var(env_var, "sk-ant-my-secret-key") };
         let config = test_config(env_var);
         let provider = AnthropicProvider::new(&config).unwrap();
         assert_eq!(provider.api_key, "sk-ant-my-secret-key");
         assert_eq!(provider.model, "claude-sonnet-4-20250514");
         assert_eq!(provider.base_url, DEFAULT_BASE_URL);
         assert_eq!(provider.context_window, 200_000);
-        std::env::remove_var(env_var);
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var(env_var) };
     }
 
     #[test]
     fn test_new_missing_env_returns_auth_failed() {
-        std::env::remove_var("ANTHROPIC_MISSING_KEY_XYZ");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("ANTHROPIC_MISSING_KEY_XYZ") };
         let config = test_config("ANTHROPIC_MISSING_KEY_XYZ");
         let result = AnthropicProvider::new(&config);
         assert!(result.is_err());
@@ -818,12 +818,14 @@ mod tests {
     #[test]
     fn test_new_custom_base_url() {
         let env_var = "ANTHROPIC_TEST_KEY_CUSTOM_URL";
-        std::env::set_var(env_var, "test-key");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var(env_var, "test-key") };
         let mut config = test_config(env_var);
         config.base_url = Some("https://my-proxy.example.com/v1".to_string());
         let provider = AnthropicProvider::new(&config).unwrap();
         assert_eq!(provider.base_url, "https://my-proxy.example.com/v1");
-        std::env::remove_var(env_var);
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var(env_var) };
     }
 
     #[test]

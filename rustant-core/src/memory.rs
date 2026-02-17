@@ -146,21 +146,17 @@ impl ShortTermMemory {
                     Content::ToolResult { call_id, .. } => {
                         if let Some(pair_idx) =
                             Self::find_tool_call_for_result(call_id, &self.messages, to_remove)
-                        {
-                            if !preserve_indices.contains(&pair_idx) {
+                            && !preserve_indices.contains(&pair_idx) {
                                 extra_preserves.push(pair_idx);
                             }
-                        }
                     }
                     // If pinned message is a tool_call, find its tool_result
                     Content::ToolCall { id, .. } => {
                         if let Some(pair_idx) =
                             Self::find_tool_result_for_call(id, &self.messages, to_remove)
-                        {
-                            if !preserve_indices.contains(&pair_idx) {
+                            && !preserve_indices.contains(&pair_idx) {
                                 extra_preserves.push(pair_idx);
                             }
-                        }
                     }
                     // MultiPart: check both tool_calls and tool_results
                     Content::MultiPart { parts } => {
@@ -171,22 +167,20 @@ impl ShortTermMemory {
                                         id,
                                         &self.messages,
                                         to_remove,
-                                    ) {
-                                        if !preserve_indices.contains(&pair_idx) {
+                                    )
+                                        && !preserve_indices.contains(&pair_idx) {
                                             extra_preserves.push(pair_idx);
                                         }
-                                    }
                                 }
                                 Content::ToolResult { call_id, .. } => {
                                     if let Some(pair_idx) = Self::find_tool_call_for_result(
                                         call_id,
                                         &self.messages,
                                         to_remove,
-                                    ) {
-                                        if !preserve_indices.contains(&pair_idx) {
+                                    )
+                                        && !preserve_indices.contains(&pair_idx) {
                                             extra_preserves.push(pair_idx);
                                         }
-                                    }
                                 }
                                 _ => {}
                             }
@@ -584,8 +578,8 @@ impl MemorySystem {
 
     /// Search facts using the hybrid engine (falls back to keyword search).
     pub fn search_facts_hybrid(&self, query: &str) -> Vec<&Fact> {
-        if let Some(ref engine) = self.search_engine {
-            if let Ok(results) = engine.search(query) {
+        if let Some(ref engine) = self.search_engine
+            && let Ok(results) = engine.search(query) {
                 let ids: Vec<String> = results.iter().map(|r| r.fact_id.clone()).collect();
                 let found: Vec<&Fact> = self
                     .long_term
@@ -597,7 +591,6 @@ impl MemorySystem {
                     return found;
                 }
             }
-        }
         // Fallback to keyword search
         self.long_term.search_facts(query)
     }

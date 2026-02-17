@@ -421,11 +421,10 @@ impl AuditStore {
     /// appended to the chain for tamper-evident integrity.
     pub fn add_trace(&mut self, trace: ExecutionTrace) {
         // Append to Merkle chain if enabled
-        if let Some(ref mut chain) = self.merkle_chain {
-            if let Ok(serialized) = serde_json::to_vec(&trace) {
+        if let Some(ref mut chain) = self.merkle_chain
+            && let Ok(serialized) = serde_json::to_vec(&trace) {
                 chain.append(&serialized);
             }
-        }
         if self.traces.len() >= self.max_traces {
             self.traces.remove(0);
         }
@@ -602,16 +601,14 @@ impl AuditQuery {
     /// Determine whether a given [`ExecutionTrace`] satisfies every non-`None`
     /// predicate in this query.
     fn matches(&self, trace: &ExecutionTrace) -> bool {
-        if let Some(sid) = self.session_id {
-            if trace.session_id != sid {
+        if let Some(sid) = self.session_id
+            && trace.session_id != sid {
                 return false;
             }
-        }
-        if let Some(tid) = self.task_id {
-            if trace.task_id != tid {
+        if let Some(tid) = self.task_id
+            && trace.task_id != tid {
                 return false;
             }
-        }
         if let Some(ref tool) = self.tool_name {
             let has_tool = trace
                 .events
@@ -639,16 +636,14 @@ impl AuditQuery {
                 _ => return false,
             }
         }
-        if let Some(since) = self.since {
-            if trace.started_at < since {
+        if let Some(since) = self.since
+            && trace.started_at < since {
                 return false;
             }
-        }
-        if let Some(until) = self.until {
-            if trace.started_at > until {
+        if let Some(until) = self.until
+            && trace.started_at > until {
                 return false;
             }
-        }
         true
     }
 }

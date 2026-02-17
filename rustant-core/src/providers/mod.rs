@@ -118,11 +118,10 @@ pub fn resolve_api_key(
     cred_store: &dyn CredentialStore,
 ) -> Result<String, LlmError> {
     // 1. Try credential store first
-    if let Some(ref cs_key) = config.credential_store_key {
-        if let Ok(key) = cred_store.get_key(cs_key) {
+    if let Some(ref cs_key) = config.credential_store_key
+        && let Ok(key) = cred_store.get_key(cs_key) {
             return Ok(key);
         }
-    }
     // 2. Fall back to env var
     std::env::var(&config.api_key_env).map_err(|_| LlmError::AuthFailed {
         provider: format!(
@@ -362,50 +361,59 @@ mod tests {
     #[test]
     fn test_create_provider_openai() {
         // Set a fake key for the test
-        std::env::set_var("RUSTANT_TEST_API_KEY", "test-key-123");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var("RUSTANT_TEST_API_KEY", "test-key-123") };
         let config = test_config("openai");
         let result = create_provider(&config);
         assert!(result.is_ok());
         let provider = result.unwrap();
         assert_eq!(provider.model_name(), "test-model");
-        std::env::remove_var("RUSTANT_TEST_API_KEY");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("RUSTANT_TEST_API_KEY") };
     }
 
     #[test]
     fn test_create_provider_anthropic() {
-        std::env::set_var("RUSTANT_TEST_API_KEY", "test-key-456");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var("RUSTANT_TEST_API_KEY", "test-key-456") };
         let config = test_config("anthropic");
         let result = create_provider(&config);
         assert!(result.is_ok());
         let provider = result.unwrap();
         assert_eq!(provider.model_name(), "test-model");
-        std::env::remove_var("RUSTANT_TEST_API_KEY");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("RUSTANT_TEST_API_KEY") };
     }
 
     #[test]
     fn test_create_provider_gemini() {
-        std::env::set_var("RUSTANT_TEST_API_KEY", "test-key-gemini");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var("RUSTANT_TEST_API_KEY", "test-key-gemini") };
         let config = test_config("gemini");
         let result = create_provider(&config);
         assert!(result.is_ok());
         let provider = result.unwrap();
         assert_eq!(provider.model_name(), "test-model");
-        std::env::remove_var("RUSTANT_TEST_API_KEY");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("RUSTANT_TEST_API_KEY") };
     }
 
     #[test]
     fn test_create_provider_unknown_defaults_to_openai() {
-        std::env::set_var("RUSTANT_TEST_API_KEY", "test-key-789");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var("RUSTANT_TEST_API_KEY", "test-key-789") };
         let config = test_config("local");
         let result = create_provider(&config);
         assert!(result.is_ok());
-        std::env::remove_var("RUSTANT_TEST_API_KEY");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("RUSTANT_TEST_API_KEY") };
     }
 
     #[test]
     fn test_create_provider_missing_key() {
         // Ensure the env var does not exist
-        std::env::remove_var("RUSTANT_NONEXISTENT_KEY");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("RUSTANT_NONEXISTENT_KEY") };
         let mut config = test_config("openai");
         config.api_key_env = "RUSTANT_NONEXISTENT_KEY".to_string();
         let result = create_provider(&config);
@@ -438,7 +446,8 @@ mod tests {
         use crate::credentials::InMemoryCredentialStore;
 
         // Both credential store and env var are set
-        std::env::set_var("RUSTANT_RESOLVE_TEST_KEY", "sk-from-env");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var("RUSTANT_RESOLVE_TEST_KEY", "sk-from-env") };
         let store = InMemoryCredentialStore::new();
         store.store_key("openai", "sk-from-cred-store").unwrap();
 
@@ -449,14 +458,16 @@ mod tests {
         let key = resolve_api_key(&config, &store).unwrap();
         // Credential store should win
         assert_eq!(key, "sk-from-cred-store");
-        std::env::remove_var("RUSTANT_RESOLVE_TEST_KEY");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("RUSTANT_RESOLVE_TEST_KEY") };
     }
 
     #[test]
     fn test_resolve_api_key_falls_back_to_env() {
         use crate::credentials::InMemoryCredentialStore;
 
-        std::env::set_var("RUSTANT_RESOLVE_FALLBACK_KEY", "sk-from-env");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var("RUSTANT_RESOLVE_FALLBACK_KEY", "sk-from-env") };
         let store = InMemoryCredentialStore::new();
         // No key in credential store
 
@@ -466,7 +477,8 @@ mod tests {
 
         let key = resolve_api_key(&config, &store).unwrap();
         assert_eq!(key, "sk-from-env");
-        std::env::remove_var("RUSTANT_RESOLVE_FALLBACK_KEY");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("RUSTANT_RESOLVE_FALLBACK_KEY") };
     }
 
     #[test]

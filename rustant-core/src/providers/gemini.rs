@@ -207,14 +207,13 @@ impl GeminiProvider {
 
         // For assistant messages with stored raw Gemini parts (preserving
         // thought_signature), use them verbatim instead of reconstructing.
-        if msg.role == Role::Assistant {
-            if let Some(raw_parts) = msg.metadata.get("gemini_raw_parts") {
+        if msg.role == Role::Assistant
+            && let Some(raw_parts) = msg.metadata.get("gemini_raw_parts") {
                 return serde_json::json!({
                     "role": role,
                     "parts": raw_parts,
                 });
             }
-        }
 
         let parts = Self::content_to_gemini_parts(&msg.content);
 
@@ -348,8 +347,8 @@ impl GeminiProvider {
             let mut function_call_names: std::collections::HashSet<String> =
                 std::collections::HashSet::new();
             for entry in &merged {
-                if entry["role"].as_str() == Some("model") {
-                    if let Some(parts) = entry["parts"].as_array() {
+                if entry["role"].as_str() == Some("model")
+                    && let Some(parts) = entry["parts"].as_array() {
                         for part in parts {
                             if let Some(name) =
                                 part.get("functionCall").and_then(|fc| fc["name"].as_str())
@@ -358,7 +357,6 @@ impl GeminiProvider {
                             }
                         }
                     }
-                }
             }
 
             // Filter out functionResponse parts whose names don't match any functionCall.
@@ -811,8 +809,8 @@ impl LlmProvider for GeminiProvider {
 
         // Process any remaining data in the buffer.
         let remaining = line_buffer.trim().to_string();
-        if !remaining.is_empty() {
-            if let Some(data_str) = remaining.strip_prefix("data: ") {
+        if !remaining.is_empty()
+            && let Some(data_str) = remaining.strip_prefix("data: ") {
                 match serde_json::from_str::<Value>(data_str) {
                     Ok(data_json) => {
                         if let Ok(Some(usage)) = Self::process_stream_chunk(&data_json, &tx).await {
@@ -833,7 +831,6 @@ impl LlmProvider for GeminiProvider {
                     }
                 }
             }
-        }
 
         let _ = tx.send(StreamEvent::Done { usage: total_usage }).await;
 
@@ -893,7 +890,8 @@ mod tests {
 
     /// Helper to create a provider with a fake API key in the environment.
     fn make_provider() -> GeminiProvider {
-        std::env::set_var("GEMINI_TEST_KEY_UNIT", "test-gemini-key-12345");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var("GEMINI_TEST_KEY_UNIT", "test-gemini-key-12345") };
         let config = test_config("GEMINI_TEST_KEY_UNIT");
         GeminiProvider::new(&config).expect("Provider creation should succeed")
     }
@@ -901,19 +899,22 @@ mod tests {
     #[test]
     fn test_new_reads_env() {
         let env_var = "GEMINI_TEST_KEY_NEW_READS";
-        std::env::set_var(env_var, "my-gemini-api-key");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var(env_var, "my-gemini-api-key") };
         let config = test_config(env_var);
         let provider = GeminiProvider::new(&config).unwrap();
         assert_eq!(provider.api_key, "my-gemini-api-key");
         assert_eq!(provider.model, "gemini-2.0-flash");
         assert_eq!(provider.base_url, DEFAULT_BASE_URL);
         assert_eq!(provider.context_window, 1_000_000);
-        std::env::remove_var(env_var);
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var(env_var) };
     }
 
     #[test]
     fn test_new_missing_env_returns_auth_failed() {
-        std::env::remove_var("GEMINI_MISSING_KEY_XYZ");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("GEMINI_MISSING_KEY_XYZ") };
         let config = test_config("GEMINI_MISSING_KEY_XYZ");
         let result = GeminiProvider::new(&config);
         assert!(result.is_err());
@@ -929,12 +930,14 @@ mod tests {
     #[test]
     fn test_new_custom_base_url() {
         let env_var = "GEMINI_TEST_KEY_CUSTOM_URL";
-        std::env::set_var(env_var, "test-key");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var(env_var, "test-key") };
         let mut config = test_config(env_var);
         config.base_url = Some("https://my-proxy.example.com/v1".to_string());
         let provider = GeminiProvider::new(&config).unwrap();
         assert_eq!(provider.base_url, "https://my-proxy.example.com/v1");
-        std::env::remove_var(env_var);
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var(env_var) };
     }
 
     #[test]
@@ -1726,13 +1729,15 @@ mod tests {
     fn test_provider_has_timeout() {
         // Verify provider creates successfully with timeout-enabled client
         let env_var = "GEMINI_TEST_KEY_TIMEOUT";
-        std::env::set_var(env_var, "test-key-timeout");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var(env_var, "test-key-timeout") };
         let config = test_config(env_var);
         let provider = GeminiProvider::new(&config);
         assert!(
             provider.is_ok(),
             "Provider with timeout should create successfully"
         );
-        std::env::remove_var(env_var);
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var(env_var) };
     }
 }

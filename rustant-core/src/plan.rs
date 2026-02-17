@@ -393,16 +393,14 @@ pub fn parse_plan_json(text: &str, goal: &str) -> ExecutionPlan {
 /// Strip markdown code fences from LLM output.
 fn strip_code_fences(text: &str) -> String {
     let trimmed = text.trim();
-    if let Some(rest) = trimmed.strip_prefix("```json") {
-        if let Some(inner) = rest.strip_suffix("```") {
+    if let Some(rest) = trimmed.strip_prefix("```json")
+        && let Some(inner) = rest.strip_suffix("```") {
             return inner.trim().to_string();
         }
-    }
-    if let Some(rest) = trimmed.strip_prefix("```") {
-        if let Some(inner) = rest.strip_suffix("```") {
+    if let Some(rest) = trimmed.strip_prefix("```")
+        && let Some(inner) = rest.strip_suffix("```") {
             return inner.trim().to_string();
         }
-    }
     trimmed.to_string()
 }
 

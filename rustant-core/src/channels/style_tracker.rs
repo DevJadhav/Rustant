@@ -90,11 +90,10 @@ impl CommunicationStyleTracker {
 
         // Greeting detection
         let greeting = detect_greeting(message);
-        if let Some(g) = greeting {
-            if !profile.common_greetings.contains(&g) && profile.common_greetings.len() < 5 {
+        if let Some(g) = greeting
+            && !profile.common_greetings.contains(&g) && profile.common_greetings.len() < 5 {
                 profile.common_greetings.push(g);
             }
-        }
 
         // Generate facts at threshold
         let mut facts = Vec::new();

@@ -545,8 +545,8 @@ fn parse_entry(entry: &str) -> Option<ArxivPaper> {
     }
 
     // Primary category from arxiv:primary_category
-    if let Some(pc_start) = entry.find("primary_category") {
-        if let Some(pc_end) = entry[pc_start..]
+    if let Some(pc_start) = entry.find("primary_category")
+        && let Some(pc_end) = entry[pc_start..]
             .find("/>")
             .or_else(|| entry[pc_start..].find(">"))
         {
@@ -555,7 +555,6 @@ fn parse_entry(entry: &str) -> Option<ArxivPaper> {
                 primary_category = term;
             }
         }
-    }
     if primary_category.is_empty() {
         primary_category = categories.first().cloned().unwrap_or_default();
     }

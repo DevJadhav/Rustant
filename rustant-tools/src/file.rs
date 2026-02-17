@@ -532,8 +532,8 @@ impl FileSearchTool {
         let mut result = String::with_capacity(pattern.len());
         let mut chars = pattern.chars().peekable();
         while let Some(ch) = chars.next() {
-            if ch == '\\' {
-                if let Some(&next) = chars.peek() {
+            if ch == '\\'
+                && let Some(&next) = chars.peek() {
                     // Strip backslash before common regex metacharacters.
                     if matches!(
                         next,
@@ -555,7 +555,6 @@ impl FileSearchTool {
                         continue;
                     }
                 }
-            }
             result.push(ch);
         }
         result

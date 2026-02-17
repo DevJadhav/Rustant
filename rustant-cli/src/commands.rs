@@ -165,13 +165,11 @@ async fn handle_init(workspace: &Path) -> anyhow::Result<()> {
                 eprintln!("  Setup failed: {}. Generating config with defaults.\n", e);
             } else {
                 // Reload config after setup wizard
-                if config_path.exists() {
-                    if let Ok(content) = std::fs::read_to_string(&config_path) {
-                        if let Ok(loaded) = toml::from_str::<rustant_core::AgentConfig>(&content) {
+                if config_path.exists()
+                    && let Ok(content) = std::fs::read_to_string(&config_path)
+                        && let Ok(loaded) = toml::from_str::<rustant_core::AgentConfig>(&content) {
                             config = loaded;
                         }
-                    }
-                }
             }
         }
     }
@@ -777,13 +775,11 @@ async fn handle_cron(action: CronAction, workspace: &Path) -> anyhow::Result<()>
 
     // Load scheduler from state file first, falling back to config
     let load_scheduler = || -> rustant_core::CronScheduler {
-        if state_file.exists() {
-            if let Ok(json) = std::fs::read_to_string(&state_file) {
-                if let Ok(scheduler) = rustant_core::CronScheduler::from_json(&json) {
+        if state_file.exists()
+            && let Ok(json) = std::fs::read_to_string(&state_file)
+                && let Ok(scheduler) = rustant_core::CronScheduler::from_json(&json) {
                     return scheduler;
                 }
-            }
-        }
         // Fall back to config-defined jobs
         let mut scheduler = rustant_core::CronScheduler::new();
         for job_config in &scheduler_config.cron_jobs {
@@ -1536,14 +1532,13 @@ fn resolve_frontend_dir() -> Option<std::path::PathBuf> {
     }
 
     // 2. Next to the executable
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(exe_dir) = exe.parent() {
             let p = exe_dir.join("frontend");
             if p.join("index.html").exists() {
                 return Some(p);
             }
         }
-    }
 
     // 3. Workspace development layout
     let workspace_candidates = ["rustant-ui/frontend", "frontend"];
@@ -1913,8 +1908,8 @@ pub async fn handle_update(action: UpdateAction) -> anyhow::Result<()> {
                         if let Some(url) = &result.release_url {
                             println!("Release: {}", url);
                         }
-                        if let Some(notes) = &result.release_notes {
-                            if !notes.is_empty() {
+                        if let Some(notes) = &result.release_notes
+                            && !notes.is_empty() {
                                 let preview = if notes.len() > 200 {
                                     format!("{}...", &notes[..197])
                                 } else {
@@ -1922,7 +1917,6 @@ pub async fn handle_update(action: UpdateAction) -> anyhow::Result<()> {
                                 };
                                 println!("\nRelease notes:\n{}", preview);
                             }
-                        }
                         println!("\nRun `rustant update install` to update.");
                     } else {
                         println!("You are running the latest version.");
@@ -2031,8 +2025,8 @@ pub async fn connect_mcp_servers(
                             .write_message(&serde_json::to_string(&list_req).unwrap())
                             .await;
 
-                        if let Ok(Some(tools_resp)) = transport.read_message().await {
-                            if let Ok(parsed) =
+                        if let Ok(Some(tools_resp)) = transport.read_message().await
+                            && let Ok(parsed) =
                                 serde_json::from_str::<serde_json::Value>(&tools_resp)
                             {
                                 let tools = parsed["result"]["tools"]
@@ -2053,7 +2047,6 @@ pub async fn connect_mcp_servers(
                                 );
                                 connected.push((config.name.clone(), tools));
                             }
-                        }
                     }
                     Ok(None) => {
                         tracing::warn!(name = %config.name, "MCP server closed before init response");

@@ -316,8 +316,8 @@ impl LspClient {
 
         match method {
             "textDocument/publishDiagnostics" => {
-                if let Some(params) = msg.get("params") {
-                    if let Ok(diag_params) =
+                if let Some(params) = msg.get("params")
+                    && let Ok(diag_params) =
                         serde_json::from_value::<PublishDiagnosticsNotification>(params.clone())
                     {
                         tracing::debug!(
@@ -328,7 +328,6 @@ impl LspClient {
                         self.cached_diagnostics
                             .insert(diag_params.uri, diag_params.diagnostics);
                     }
-                }
             }
             other => {
                 tracing::debug!(method = other, "Received unhandled notification");

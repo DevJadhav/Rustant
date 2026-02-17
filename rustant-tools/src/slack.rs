@@ -355,26 +355,22 @@ impl Tool for SlackTool {
 /// 2. Config file `channels.slack.bot_token`
 fn get_bot_token(workspace: &Path) -> Result<String, ToolError> {
     // Fast path: env var
-    if let Ok(token) = std::env::var("SLACK_BOT_TOKEN") {
-        if !token.is_empty() {
+    if let Ok(token) = std::env::var("SLACK_BOT_TOKEN")
+        && !token.is_empty() {
             return Ok(token);
         }
-    }
 
     // Fallback: load from config
-    if let Ok(config) = rustant_core::config::load_config(Some(workspace), None) {
-        if let Some(channels) = &config.channels {
-            if let Some(slack) = &channels.slack {
-                if !slack.bot_token.is_empty() {
+    if let Ok(config) = rustant_core::config::load_config(Some(workspace), None)
+        && let Some(channels) = &config.channels
+            && let Some(slack) = &channels.slack
+                && !slack.bot_token.is_empty() {
                     match slack.resolve_bot_token() {
                         Ok(token) if !token.is_empty() => return Ok(token),
                         Ok(_) => {}
                         Err(e) => tracing::warn!("Failed to resolve Slack bot token: {}", e),
                     }
                 }
-            }
-        }
-    }
 
     Err(ToolError::ExecutionFailed {
         name: "slack".to_string(),
@@ -525,31 +521,36 @@ mod tests {
     #[tokio::test]
     async fn test_slack_send_message_missing_channel() {
         let _guard = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("SLACK_BOT_TOKEN", "xoxb-test-token");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var("SLACK_BOT_TOKEN", "xoxb-test-token") };
         let tool = SlackTool::new(PathBuf::from("/tmp"));
         let result = tool
             .execute(json!({"action": "send_message", "message": "hello"}))
             .await;
         assert!(result.is_err());
-        std::env::remove_var("SLACK_BOT_TOKEN");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("SLACK_BOT_TOKEN") };
     }
 
     #[tokio::test]
     async fn test_slack_send_message_missing_message() {
         let _guard = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("SLACK_BOT_TOKEN", "xoxb-test-token");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var("SLACK_BOT_TOKEN", "xoxb-test-token") };
         let tool = SlackTool::new(PathBuf::from("/tmp"));
         let result = tool
             .execute(json!({"action": "send_message", "channel": "#general"}))
             .await;
         assert!(result.is_err());
-        std::env::remove_var("SLACK_BOT_TOKEN");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("SLACK_BOT_TOKEN") };
     }
 
     #[tokio::test]
     async fn test_slack_unknown_action() {
         let _guard = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("SLACK_BOT_TOKEN", "xoxb-test-token");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var("SLACK_BOT_TOKEN", "xoxb-test-token") };
         let tool = SlackTool::new(PathBuf::from("/tmp"));
         let result = tool.execute(json!({"action": "invalid_action"})).await;
         assert!(result.is_err());
@@ -560,45 +561,52 @@ mod tests {
             }
             _ => panic!("Expected InvalidArguments error"),
         }
-        std::env::remove_var("SLACK_BOT_TOKEN");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("SLACK_BOT_TOKEN") };
     }
 
     #[test]
     fn test_bot_token_env_resolution() {
         let _guard = ENV_MUTEX.lock().unwrap();
         // Test 1: valid env var is used
-        std::env::set_var("SLACK_BOT_TOKEN", "xoxb-from-env");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var("SLACK_BOT_TOKEN", "xoxb-from-env") };
         let result = get_bot_token(Path::new("/tmp"));
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "xoxb-from-env");
 
         // Test 2: empty env var is rejected (falls through to config)
-        std::env::set_var("SLACK_BOT_TOKEN", "");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var("SLACK_BOT_TOKEN", "") };
         let result = get_bot_token(Path::new("/tmp"));
         // Result depends on config; just verify empty string is not returned.
         if let Ok(ref token) = result {
             assert!(!token.is_empty());
         }
 
-        std::env::remove_var("SLACK_BOT_TOKEN");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("SLACK_BOT_TOKEN") };
     }
 
     #[tokio::test]
     async fn test_slack_reply_thread_missing_thread_ts() {
         let _guard = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("SLACK_BOT_TOKEN", "xoxb-test-token");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var("SLACK_BOT_TOKEN", "xoxb-test-token") };
         let tool = SlackTool::new(PathBuf::from("/tmp"));
         let result = tool
             .execute(json!({"action": "reply_thread", "channel": "#general", "message": "hi"}))
             .await;
         assert!(result.is_err());
-        std::env::remove_var("SLACK_BOT_TOKEN");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("SLACK_BOT_TOKEN") };
     }
 
     #[tokio::test]
     async fn test_slack_add_reaction_missing_emoji() {
         let _guard = ENV_MUTEX.lock().unwrap();
-        std::env::set_var("SLACK_BOT_TOKEN", "xoxb-test-token");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var("SLACK_BOT_TOKEN", "xoxb-test-token") };
         let tool = SlackTool::new(PathBuf::from("/tmp"));
         let result = tool
             .execute(
@@ -606,6 +614,7 @@ mod tests {
             )
             .await;
         assert!(result.is_err());
-        std::env::remove_var("SLACK_BOT_TOKEN");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("SLACK_BOT_TOKEN") };
     }
 }

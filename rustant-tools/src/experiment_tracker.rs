@@ -212,19 +212,17 @@ impl ExperimentTrackerTool {
                 if let Some(title) = args.get("title").and_then(|v| v.as_str()) {
                     h.title = title.to_string();
                 }
-                if let Some(status_str) = args.get("status").and_then(|v| v.as_str()) {
-                    if let Some(status) = parse_hypothesis_status(status_str) {
+                if let Some(status_str) = args.get("status").and_then(|v| v.as_str())
+                    && let Some(status) = parse_hypothesis_status(status_str) {
                         h.status = status;
                     }
-                }
-                if let Some(tags_val) = args.get("tags") {
-                    if let Some(arr) = tags_val.as_array() {
+                if let Some(tags_val) = args.get("tags")
+                    && let Some(arr) = tags_val.as_array() {
                         h.tags = arr
                             .iter()
                             .filter_map(|v| v.as_str().map(|s| s.to_string()))
                             .collect();
                     }
-                }
                 let title = h.title.clone();
                 let status = h.status.clone();
                 self.save_state(&state)?;
@@ -246,18 +244,15 @@ impl ExperimentTrackerTool {
             .hypotheses
             .iter()
             .filter(|h| {
-                if let Some(sf) = status_filter {
-                    if let Some(parsed) = parse_hypothesis_status(sf) {
-                        if h.status != parsed {
+                if let Some(sf) = status_filter
+                    && let Some(parsed) = parse_hypothesis_status(sf)
+                        && h.status != parsed {
                             return false;
                         }
-                    }
-                }
-                if let Some(tf) = tag_filter {
-                    if !h.tags.iter().any(|t| t == tf) {
+                if let Some(tf) = tag_filter
+                    && !h.tags.iter().any(|t| t == tf) {
                         return false;
                     }
-                }
                 true
             })
             .collect();
@@ -375,11 +370,10 @@ impl ExperimentTrackerTool {
         let mut state = self.load_state();
 
         // Validate hypothesis_id if provided
-        if let Some(ref hid) = hypothesis_id {
-            if !state.hypotheses.iter().any(|h| h.id == *hid) {
+        if let Some(ref hid) = hypothesis_id
+            && !state.hypotheses.iter().any(|h| h.id == *hid) {
                 return Ok(ToolOutput::text(format!("Hypothesis {} not found.", hid)));
             }
-        }
 
         let id = format!("e{}", state.next_experiment_id);
         state.next_experiment_id += 1;
@@ -539,8 +533,8 @@ impl ExperimentTrackerTool {
                 );
 
                 // Show related evidence if linked to a hypothesis
-                if let Some(ref hid) = e.hypothesis_id {
-                    if let Some(hyp) = state.hypotheses.iter().find(|h| h.id == *hid) {
+                if let Some(ref hid) = e.hypothesis_id
+                    && let Some(hyp) = state.hypotheses.iter().find(|h| h.id == *hid) {
                         let related: Vec<&Evidence> = hyp
                             .evidence
                             .iter()
@@ -559,7 +553,6 @@ impl ExperimentTrackerTool {
                             }
                         }
                     }
-                }
 
                 Ok(ToolOutput::text(out))
             }
@@ -577,23 +570,19 @@ impl ExperimentTrackerTool {
             .experiments
             .iter()
             .filter(|e| {
-                if let Some(hid) = hypothesis_id_filter {
-                    if e.hypothesis_id.as_deref() != Some(hid) {
+                if let Some(hid) = hypothesis_id_filter
+                    && e.hypothesis_id.as_deref() != Some(hid) {
                         return false;
                     }
-                }
-                if let Some(sf) = status_filter {
-                    if let Some(parsed) = parse_experiment_status(sf) {
-                        if e.status != parsed {
+                if let Some(sf) = status_filter
+                    && let Some(parsed) = parse_experiment_status(sf)
+                        && e.status != parsed {
                             return false;
                         }
-                    }
-                }
-                if let Some(tf) = tag_filter {
-                    if !e.tags.iter().any(|t| t == tf) {
+                if let Some(tf) = tag_filter
+                    && !e.tags.iter().any(|t| t == tf) {
                         return false;
                     }
-                }
                 true
             })
             .collect();

@@ -556,11 +556,10 @@ async fn handle_socket(mut socket: WebSocket, gw: SharedGateway) {
             gw.handle_client_message(client_msg, conn_id)
         };
 
-        if let Ok(json) = serde_json::to_string(&response) {
-            if socket.send(WsMessage::Text(json.into())).await.is_err() {
+        if let Ok(json) = serde_json::to_string(&response)
+            && socket.send(WsMessage::Text(json.into())).await.is_err() {
                 break;
             }
-        }
     }
 
     // Cleanup

@@ -421,15 +421,13 @@ pub async fn authorize_browser_flow(
     // This succeeds for accounts with Platform org/project setup. For Personal/
     // ChatGPT-only accounts it may fail — in that case we fall back to using the
     // OAuth access token directly as a Bearer token (same as Codex CLI).
-    if config.provider_name == "openai" {
-        if let Some(ref id_tok) = token.id_token {
-            if let Some(payload) = id_tok.split('.').nth(1) {
-                if let Ok(bytes) = URL_SAFE_NO_PAD.decode(payload) {
-                    if let Ok(claims) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+    if config.provider_name == "openai"
+        && let Some(ref id_tok) = token.id_token {
+            if let Some(payload) = id_tok.split('.').nth(1)
+                && let Ok(bytes) = URL_SAFE_NO_PAD.decode(payload)
+                    && let Ok(claims) = serde_json::from_slice::<serde_json::Value>(&bytes) {
                         debug!(claims = %claims, "ID token claims");
                     }
-                }
-            }
             debug!("Exchanging ID token for OpenAI API key...");
             match obtain_openai_api_key(config, id_tok).await {
                 Ok(api_key) => {
@@ -460,7 +458,6 @@ pub async fn authorize_browser_flow(
                 }
             }
         }
-    }
 
     Ok(token)
 }

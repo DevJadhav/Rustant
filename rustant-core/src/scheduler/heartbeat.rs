@@ -191,16 +191,14 @@ impl HeartbeatManager {
                 let text = String::from_utf8_lossy(&output.stdout);
                 // Look for pattern like "42%;" or "42%"
                 for word in text.split_whitespace() {
-                    if let Some(pct_str) = word.strip_suffix("%;") {
-                        if let Ok(pct) = pct_str.parse::<u32>() {
+                    if let Some(pct_str) = word.strip_suffix("%;")
+                        && let Ok(pct) = pct_str.parse::<u32>() {
                             return pct < 20;
                         }
-                    }
-                    if let Some(pct_str) = word.strip_suffix('%') {
-                        if let Ok(pct) = pct_str.parse::<u32>() {
+                    if let Some(pct_str) = word.strip_suffix('%')
+                        && let Ok(pct) = pct_str.parse::<u32>() {
                             return pct < 20;
                         }
-                    }
                 }
                 false // Couldn't parse, assume not low
             }
@@ -221,11 +219,10 @@ impl HeartbeatManager {
                 if let Some(line) = text.lines().nth(1) {
                     let fields: Vec<&str> = line.split_whitespace().collect();
                     // capacity/use% is typically at index 4 (e.g. "85%")
-                    if let Some(pct_str) = fields.get(4).and_then(|s| s.strip_suffix('%')) {
-                        if let Ok(pct) = pct_str.parse::<u32>() {
+                    if let Some(pct_str) = fields.get(4).and_then(|s| s.strip_suffix('%'))
+                        && let Ok(pct) = pct_str.parse::<u32>() {
                             return pct >= 90; // 90% used = <10% free
                         }
-                    }
                 }
                 false
             }

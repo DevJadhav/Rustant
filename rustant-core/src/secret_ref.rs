@@ -257,12 +257,14 @@ mod tests {
 
     #[test]
     fn test_resolve_env() {
-        std::env::set_var("RUSTANT_TEST_SECRET_REF", "env-secret-value");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var("RUSTANT_TEST_SECRET_REF", "env-secret-value") };
         let sr = SecretRef::env("RUSTANT_TEST_SECRET_REF");
         let store = InMemoryCredentialStore::new();
         let resolved = SecretResolver::resolve(&sr, &store).unwrap();
         assert_eq!(resolved, "env-secret-value");
-        std::env::remove_var("RUSTANT_TEST_SECRET_REF");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("RUSTANT_TEST_SECRET_REF") };
     }
 
     #[test]
@@ -294,7 +296,8 @@ mod tests {
 
     #[test]
     fn test_resolve_env_missing() {
-        std::env::remove_var("RUSTANT_ABSOLUTELY_MISSING_VAR");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("RUSTANT_ABSOLUTELY_MISSING_VAR") };
         let sr = SecretRef::env("RUSTANT_ABSOLUTELY_MISSING_VAR");
         let store = InMemoryCredentialStore::new();
         let result = SecretResolver::resolve(&sr, &store);

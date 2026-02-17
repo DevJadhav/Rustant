@@ -1067,33 +1067,28 @@ impl Tool for MacosSystemInfoTool {
             message: e,
         };
 
-        if info_type == "all" || info_type == "version" {
-            if let Ok(ver) = run_command("sw_vers", &[]).await {
+        if (info_type == "all" || info_type == "version")
+            && let Ok(ver) = run_command("sw_vers", &[]).await {
                 sections.push(format!("## macOS Version\n{ver}"));
             }
-        }
-        if info_type == "all" || info_type == "cpu" {
-            if let Ok(cpu) = run_command("sysctl", &["-n", "machdep.cpu.brand_string"]).await {
+        if (info_type == "all" || info_type == "cpu")
+            && let Ok(cpu) = run_command("sysctl", &["-n", "machdep.cpu.brand_string"]).await {
                 sections.push(format!("## CPU\n{cpu}"));
             }
-        }
-        if info_type == "all" || info_type == "memory" {
-            if let Ok(mem) = run_command("sysctl", &["-n", "hw.memsize"]).await {
+        if (info_type == "all" || info_type == "memory")
+            && let Ok(mem) = run_command("sysctl", &["-n", "hw.memsize"]).await {
                 let bytes: u64 = mem.trim().parse().unwrap_or(0);
                 let gb = bytes as f64 / 1_073_741_824.0;
                 sections.push(format!("## Memory\nTotal: {gb:.1} GB"));
             }
-        }
-        if info_type == "all" || info_type == "disk" {
-            if let Ok(disk) = run_command("df", &["-h", "/"]).await {
+        if (info_type == "all" || info_type == "disk")
+            && let Ok(disk) = run_command("df", &["-h", "/"]).await {
                 sections.push(format!("## Disk Usage\n{disk}"));
             }
-        }
-        if info_type == "all" || info_type == "battery" {
-            if let Ok(batt) = run_command("pmset", &["-g", "batt"]).await {
+        if (info_type == "all" || info_type == "battery")
+            && let Ok(batt) = run_command("pmset", &["-g", "batt"]).await {
                 sections.push(format!("## Battery\n{batt}"));
             }
-        }
         if info_type == "all" || info_type == "network" {
             let mut net_info = String::from("## Network\n");
             if let Ok(wifi) = run_command("networksetup", &["-getairportnetwork", "en0"]).await {
@@ -1104,11 +1099,10 @@ impl Tool for MacosSystemInfoTool {
             }
             sections.push(net_info);
         }
-        if info_type == "all" || info_type == "uptime" {
-            if let Ok(up) = run_command("uptime", &[]).await {
+        if (info_type == "all" || info_type == "uptime")
+            && let Ok(up) = run_command("uptime", &[]).await {
                 sections.push(format!("## Uptime\n{up}"));
             }
-        }
 
         if sections.is_empty() {
             return Err(exec_err(format!("Unknown info type: {info_type}")));

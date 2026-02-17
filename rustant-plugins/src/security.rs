@@ -78,15 +78,14 @@ impl PluginSecurityValidator {
         }
 
         // Check capability count
-        if let Some(max) = self.max_capabilities {
-            if metadata.capabilities.len() > max {
+        if let Some(max) = self.max_capabilities
+            && metadata.capabilities.len() > max {
                 errors.push(format!(
                     "Plugin requests {} capabilities (max: {})",
                     metadata.capabilities.len(),
                     max
                 ));
             }
-        }
 
         // Warn about dangerous capabilities
         for cap in &metadata.capabilities {
@@ -108,15 +107,14 @@ impl PluginSecurityValidator {
         }
 
         // Version compatibility check
-        if let Some(ref min_version) = metadata.min_core_version {
-            if !is_version_compatible(min_version, env!("CARGO_PKG_VERSION")) {
+        if let Some(ref min_version) = metadata.min_core_version
+            && !is_version_compatible(min_version, env!("CARGO_PKG_VERSION")) {
                 errors.push(format!(
                     "Plugin requires core version >= {} (current: {})",
                     min_version,
                     env!("CARGO_PKG_VERSION")
                 ));
             }
-        }
 
         let is_valid = errors.is_empty();
         SecurityValidationResult {

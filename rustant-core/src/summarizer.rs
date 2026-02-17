@@ -272,11 +272,10 @@ pub fn smart_fallback_summary(messages: &[Message], max_chars: usize) -> String 
     let mut parts = Vec::new();
 
     // Always include first message (the initial request context)
-    if let Some(first) = messages.first() {
-        if let Some(text) = first.content.as_text() {
+    if let Some(first) = messages.first()
+        && let Some(text) = first.content.as_text() {
             parts.push(format!("[Start] {}", truncate_str(text, quarter)));
         }
-    }
 
     // Extract tool call summaries (tool name + brief result)
     for msg in messages.iter() {
@@ -292,13 +291,11 @@ pub fn smart_fallback_summary(messages: &[Message], max_chars: usize) -> String 
     }
 
     // Always include last message if different from first
-    if messages.len() > 1 {
-        if let Some(last) = messages.last() {
-            if let Some(text) = last.content.as_text() {
+    if messages.len() > 1
+        && let Some(last) = messages.last()
+            && let Some(text) = last.content.as_text() {
                 parts.push(format!("[Latest] {}", truncate_str(text, quarter)));
             }
-        }
-    }
 
     let joined = parts.join("\n");
     if joined.len() > max_chars {

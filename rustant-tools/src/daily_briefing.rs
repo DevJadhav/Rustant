@@ -113,15 +113,14 @@ async fn get_system_status() -> Result<String, String> {
     let mut output = String::new();
 
     // Battery
-    if let Ok(battery) = run_command("pmset", &["-g", "batt"]).await {
-        if let Some(pct_line) = battery.lines().nth(1) {
+    if let Ok(battery) = run_command("pmset", &["-g", "batt"]).await
+        && let Some(pct_line) = battery.lines().nth(1) {
             output.push_str(&format!("Battery: {}\n", pct_line.trim()));
         }
-    }
 
     // Disk usage
-    if let Ok(disk) = run_command("df", &["-h", "/"]).await {
-        if let Some(usage_line) = disk.lines().nth(1) {
+    if let Ok(disk) = run_command("df", &["-h", "/"]).await
+        && let Some(usage_line) = disk.lines().nth(1) {
             let parts: Vec<&str> = usage_line.split_whitespace().collect();
             if parts.len() >= 5 {
                 output.push_str(&format!(
@@ -130,7 +129,6 @@ async fn get_system_status() -> Result<String, String> {
                 ));
             }
         }
-    }
 
     if output.is_empty() {
         Ok("System status unavailable.".to_string())

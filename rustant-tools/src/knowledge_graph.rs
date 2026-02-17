@@ -640,11 +640,10 @@ impl Tool for KnowledgeGraphTool {
                     }
 
                     for edge in &state.edges {
-                        if let Some(ref rt) = rel_filter {
-                            if &edge.relationship_type != rt {
+                        if let Some(ref rt) = rel_filter
+                            && &edge.relationship_type != rt {
                                 continue;
                             }
-                        }
 
                         let neighbor_id = if edge.source_id == current_id {
                             &edge.target_id
@@ -704,11 +703,10 @@ impl Tool for KnowledgeGraphTool {
                     .nodes
                     .iter()
                     .filter(|n| {
-                        if let Some(ref nt) = type_filter {
-                            if &n.node_type != nt {
+                        if let Some(ref nt) = type_filter
+                            && &n.node_type != nt {
                                 return false;
                             }
-                        }
                         n.name.to_lowercase().contains(&query)
                             || n.description.to_lowercase().contains(&query)
                             || n.tags.iter().any(|t| t.to_lowercase().contains(&query))
@@ -744,16 +742,14 @@ impl Tool for KnowledgeGraphTool {
                     .nodes
                     .iter()
                     .filter(|n| {
-                        if let Some(ref nt) = type_filter {
-                            if &n.node_type != nt {
+                        if let Some(ref nt) = type_filter
+                            && &n.node_type != nt {
                                 return false;
                             }
-                        }
-                        if let Some(tag) = tag_filter {
-                            if !n.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+                        if let Some(tag) = tag_filter
+                            && !n.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
                                 return false;
                             }
-                        }
                         true
                     })
                     .collect();

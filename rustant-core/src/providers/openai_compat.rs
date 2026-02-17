@@ -339,11 +339,10 @@ impl OpenAiCompatibleProvider {
                 // Multiple tool calls: wrap in MultiPart
                 // Optionally include text if present
                 let mut parts = Vec::new();
-                if let Some(text) = message.get("content").and_then(|c| c.as_str()) {
-                    if !text.is_empty() {
+                if let Some(text) = message.get("content").and_then(|c| c.as_str())
+                    && !text.is_empty() {
                         parts.push(Content::text(text));
                     }
-                }
                 parts.extend(calls);
                 Content::MultiPart { parts }
             }
@@ -410,15 +409,14 @@ impl OpenAiCompatibleProvider {
         // --- Pass 1: Collect all tool_call IDs ---
         let mut tool_call_ids: HashSet<String> = HashSet::new();
         for msg in &messages {
-            if msg["role"].as_str() == Some("assistant") {
-                if let Some(calls) = msg["tool_calls"].as_array() {
+            if msg["role"].as_str() == Some("assistant")
+                && let Some(calls) = msg["tool_calls"].as_array() {
                     for call in calls {
                         if let Some(id) = call["id"].as_str() {
                             tool_call_ids.insert(id.to_string());
                         }
                     }
                 }
-            }
         }
 
         // --- Pass 2: Remove orphaned tool messages ---
@@ -552,11 +550,10 @@ impl LlmProvider for OpenAiCompatibleProvider {
         if !request.stop_sequences.is_empty() {
             body["stop"] = json!(request.stop_sequences);
         }
-        if let Some(tools) = &request.tools {
-            if !tools.is_empty() {
+        if let Some(tools) = &request.tools
+            && !tools.is_empty() {
                 body["tools"] = json!(Self::tools_to_json(tools));
             }
-        }
 
         debug!(url = %url, model = %self.model, "Sending OpenAI completion request");
 
@@ -611,11 +608,10 @@ impl LlmProvider for OpenAiCompatibleProvider {
         if !request.stop_sequences.is_empty() {
             body["stop"] = json!(request.stop_sequences);
         }
-        if let Some(tools) = &request.tools {
-            if !tools.is_empty() {
+        if let Some(tools) = &request.tools
+            && !tools.is_empty() {
                 body["tools"] = json!(Self::tools_to_json(tools));
             }
-        }
 
         let response = self
             .client
@@ -672,11 +668,10 @@ impl LlmProvider for OpenAiCompatibleProvider {
                     let delta = choice.get("delta").unwrap_or(&empty_obj);
 
                     // Content token
-                    if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
-                        if !content.is_empty() {
+                    if let Some(content) = delta.get("content").and_then(|c| c.as_str())
+                        && !content.is_empty() {
                             let _ = tx.send(StreamEvent::Token(content.to_string())).await;
                         }
-                    }
 
                     // Tool calls
                     if let Some(tool_calls) = delta.get("tool_calls").and_then(|t| t.as_array()) {
@@ -702,9 +697,9 @@ impl LlmProvider for OpenAiCompatibleProvider {
                                         .await;
                                 }
                                 // Arguments delta
-                                if let Some(args) = func.get("arguments").and_then(|a| a.as_str()) {
-                                    if !args.is_empty() {
-                                        if let Some((id, _)) = active_tool_calls.get(&index) {
+                                if let Some(args) = func.get("arguments").and_then(|a| a.as_str())
+                                    && !args.is_empty()
+                                        && let Some((id, _)) = active_tool_calls.get(&index) {
                                             let _ = tx
                                                 .send(StreamEvent::ToolCallDelta {
                                                     id: id.clone(),
@@ -712,21 +707,18 @@ impl LlmProvider for OpenAiCompatibleProvider {
                                                 })
                                                 .await;
                                         }
-                                    }
-                                }
                             }
                         }
                     }
 
                     // Finish reason
-                    if let Some(finish) = choice.get("finish_reason").and_then(|f| f.as_str()) {
-                        if finish == "tool_calls" {
+                    if let Some(finish) = choice.get("finish_reason").and_then(|f| f.as_str())
+                        && finish == "tool_calls" {
                             // Send ToolCallEnd for all active calls
                             for (_, (id, _)) in active_tool_calls.drain() {
                                 let _ = tx.send(StreamEvent::ToolCallEnd { id }).await;
                             }
                         }
-                    }
                 }
             }
         }
@@ -981,18 +973,21 @@ mod tests {
 
     #[test]
     fn test_new_reads_env() {
-        std::env::set_var("RUSTANT_TEST_OPENAI_KEY", "sk-test-key");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var("RUSTANT_TEST_OPENAI_KEY", "sk-test-key") };
         let config = test_config();
         let provider = OpenAiCompatibleProvider::new(&config).unwrap();
         assert_eq!(provider.model_name(), "gpt-4o");
         assert_eq!(provider.context_window(), 128_000);
         assert!(provider.supports_tools());
-        std::env::remove_var("RUSTANT_TEST_OPENAI_KEY");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("RUSTANT_TEST_OPENAI_KEY") };
     }
 
     #[test]
     fn test_new_missing_key() {
-        std::env::remove_var("RUSTANT_TEST_OPENAI_KEY_MISSING");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("RUSTANT_TEST_OPENAI_KEY_MISSING") };
         let mut config = test_config();
         config.api_key_env = "RUSTANT_TEST_OPENAI_KEY_MISSING".to_string();
         let result = OpenAiCompatibleProvider::new(&config);
@@ -1015,18 +1010,21 @@ mod tests {
 
     #[test]
     fn test_custom_base_url() {
-        std::env::set_var("RUSTANT_TEST_OPENAI_KEY", "test-key");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var("RUSTANT_TEST_OPENAI_KEY", "test-key") };
         let mut config = test_config();
         config.base_url = Some("http://localhost:11434/v1".to_string());
         let provider = OpenAiCompatibleProvider::new(&config).unwrap();
         assert_eq!(provider.base_url, "http://localhost:11434/v1");
-        std::env::remove_var("RUSTANT_TEST_OPENAI_KEY");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("RUSTANT_TEST_OPENAI_KEY") };
     }
 
     #[test]
     fn test_ollama_provider_no_api_key_required() {
         // Ollama on localhost should not require an API key env var
-        std::env::remove_var("RUSTANT_TEST_OLLAMA_KEY_NONEXISTENT");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("RUSTANT_TEST_OLLAMA_KEY_NONEXISTENT") };
         let mut config = test_config();
         config.api_key_env = "RUSTANT_TEST_OLLAMA_KEY_NONEXISTENT".to_string();
         config.base_url = Some("http://localhost:11434/v1".to_string());
@@ -1042,7 +1040,8 @@ mod tests {
 
     #[test]
     fn test_ollama_127_0_0_1_no_api_key_required() {
-        std::env::remove_var("RUSTANT_TEST_OLLAMA_KEY_NONEXISTENT2");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("RUSTANT_TEST_OLLAMA_KEY_NONEXISTENT2") };
         let mut config = test_config();
         config.api_key_env = "RUSTANT_TEST_OLLAMA_KEY_NONEXISTENT2".to_string();
         config.base_url = Some("http://127.0.0.1:11434/v1".to_string());
@@ -1053,7 +1052,8 @@ mod tests {
 
     #[test]
     fn test_remote_provider_still_requires_api_key() {
-        std::env::remove_var("RUSTANT_TEST_REMOTE_KEY_NONEXISTENT");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("RUSTANT_TEST_REMOTE_KEY_NONEXISTENT") };
         let mut config = test_config();
         config.api_key_env = "RUSTANT_TEST_REMOTE_KEY_NONEXISTENT".to_string();
         config.base_url = None; // defaults to api.openai.com
@@ -1086,7 +1086,8 @@ mod tests {
 
     #[test]
     fn test_ollama_model_zero_cost() {
-        std::env::remove_var("RUSTANT_TEST_OLLAMA_COST_KEY");
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("RUSTANT_TEST_OLLAMA_COST_KEY") };
         let mut config = test_config();
         config.api_key_env = "RUSTANT_TEST_OLLAMA_COST_KEY".to_string();
         config.base_url = Some("http://localhost:11434/v1".to_string());

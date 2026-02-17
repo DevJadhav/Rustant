@@ -170,12 +170,11 @@ impl ProjectIndexer {
             }
 
             // Skip files that are too large
-            if let Ok(meta) = path.metadata() {
-                if meta.len() > self.config.max_file_size {
+            if let Ok(meta) = path.metadata()
+                && meta.len() > self.config.max_file_size {
                     files_skipped += 1;
                     continue;
                 }
-            }
 
             // Check file extension
             if !is_indexable(path) {
@@ -198,8 +197,8 @@ impl ProjectIndexer {
             }
 
             // Optionally index file content
-            if self.config.index_content {
-                if let Ok(content) = std::fs::read_to_string(path) {
+            if self.config.index_content
+                && let Ok(content) = std::fs::read_to_string(path) {
                     // Index a content summary (first N lines + function signatures)
                     let summary = self.summarize_file(&rel_path, &content);
                     if !summary.is_empty() {
@@ -220,7 +219,6 @@ impl ProjectIndexer {
                         }
                     }
                 }
-            }
 
             files_indexed += 1;
         }

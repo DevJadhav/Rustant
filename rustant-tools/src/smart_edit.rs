@@ -115,23 +115,21 @@ fn parse_line_pattern(pattern: &str) -> Option<(usize, usize)> {
     let lower = pattern.trim().to_lowercase();
 
     // "line 42"
-    if let Some(rest) = lower.strip_prefix("line ") {
-        if let Ok(n) = rest.trim().parse::<usize>() {
+    if let Some(rest) = lower.strip_prefix("line ")
+        && let Ok(n) = rest.trim().parse::<usize>() {
             return Some((n, n));
         }
-    }
 
     // "lines 10-20"
     if let Some(rest) = lower.strip_prefix("lines ") {
         let parts: Vec<&str> = rest.split('-').collect();
-        if parts.len() == 2 {
-            if let (Ok(a), Ok(b)) = (
+        if parts.len() == 2
+            && let (Ok(a), Ok(b)) = (
                 parts[0].trim().parse::<usize>(),
                 parts[1].trim().parse::<usize>(),
             ) {
                 return Some((a, b));
             }
-        }
     }
 
     None

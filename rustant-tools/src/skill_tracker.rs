@@ -639,11 +639,9 @@ impl Tool for SkillTrackerTool {
                         // Check if proficiency improved during this period
                         if let (Some(first), Some(last)) =
                             (relevant_entries.first(), relevant_entries.last())
-                        {
-                            if last.proficiency_after > first.proficiency_before {
+                            && last.proficiency_after > first.proficiency_before {
                                 skills_improved += 1;
                             }
-                        }
                     }
                 }
 
@@ -731,10 +729,10 @@ impl Tool for SkillTrackerTool {
 
                 // Cross-reference with flashcards if available
                 let flashcards_path = self.flashcards_path();
-                if flashcards_path.exists() {
-                    if let Ok(fc_data) = std::fs::read_to_string(&flashcards_path) {
-                        if let Ok(fc_state) = serde_json::from_str::<Value>(&fc_data) {
-                            if let Some(cards) = fc_state.get("cards").and_then(|v| v.as_array()) {
+                if flashcards_path.exists()
+                    && let Ok(fc_data) = std::fs::read_to_string(&flashcards_path)
+                        && let Ok(fc_state) = serde_json::from_str::<Value>(&fc_data)
+                            && let Some(cards) = fc_state.get("cards").and_then(|v| v.as_array()) {
                                 let decks: std::collections::HashSet<String> = cards
                                     .iter()
                                     .filter_map(|c| {
@@ -768,9 +766,6 @@ impl Tool for SkillTrackerTool {
                                     }
                                 }
                             }
-                        }
-                    }
-                }
 
                 Ok(ToolOutput::text(output))
             }

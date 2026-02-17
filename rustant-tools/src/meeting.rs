@@ -493,8 +493,8 @@ impl Tool for MacosMeetingRecorderTool {
 
             "record" => {
                 // Check if already recording
-                if let Some(state) = RecordingState::load() {
-                    if state.is_recording {
+                if let Some(state) = RecordingState::load()
+                    && state.is_recording {
                         return Err(ToolError::ExecutionFailed {
                             name: "macos_meeting_recorder".into(),
                             message: format!(
@@ -503,7 +503,6 @@ impl Tool for MacosMeetingRecorderTool {
                             ),
                         });
                     }
-                }
 
                 let title = args["title"].as_str().map(|s| s.to_string());
                 let timestamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
@@ -544,8 +543,8 @@ impl Tool for MacosMeetingRecorderTool {
 
             "record_and_transcribe" => {
                 // Check if already recording
-                if let Some(state) = RecordingState::load() {
-                    if state.is_recording {
+                if let Some(state) = RecordingState::load()
+                    && state.is_recording {
                         return Err(ToolError::ExecutionFailed {
                             name: "macos_meeting_recorder".into(),
                             message: format!(
@@ -554,7 +553,6 @@ impl Tool for MacosMeetingRecorderTool {
                             ),
                         });
                     }
-                }
 
                 let title = args["title"].as_str().unwrap_or("Meeting").to_string();
                 let timestamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
@@ -648,13 +646,11 @@ impl Tool for MacosMeetingRecorderTool {
                 })?;
 
                 // Cancel the silence monitor if running
-                if state.silence_monitor_active {
-                    if let Ok(mut guard) = SILENCE_MONITOR_STOP.lock() {
-                        if let Some(sender) = guard.take() {
+                if state.silence_monitor_active
+                    && let Ok(mut guard) = SILENCE_MONITOR_STOP.lock()
+                        && let Some(sender) = guard.take() {
                             let _ = sender.send(true);
                         }
-                    }
-                }
 
                 debug!(pid = pid, "Stopping meeting recording");
                 stop_recording(pid)

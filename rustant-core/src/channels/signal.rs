@@ -208,9 +208,9 @@ impl SignalCliBridge for RealSignalCliBridge {
         let mut messages = Vec::new();
 
         for line in stdout.lines() {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-                if let Some(data_msg) = v["envelope"]["dataMessage"].as_object() {
-                    if let Some(text) = data_msg.get("message").and_then(|m| m.as_str()) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line)
+                && let Some(data_msg) = v["envelope"]["dataMessage"].as_object()
+                    && let Some(text) = data_msg.get("message").and_then(|m| m.as_str()) {
                         messages.push(SignalIncoming {
                             sender: v["envelope"]["source"].as_str().unwrap_or("").to_string(),
                             sender_name: v["envelope"]["sourceName"]
@@ -220,8 +220,6 @@ impl SignalCliBridge for RealSignalCliBridge {
                             timestamp: v["envelope"]["timestamp"].as_u64().unwrap_or(0),
                         });
                     }
-                }
-            }
         }
 
         Ok(messages)
