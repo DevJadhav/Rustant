@@ -1,14 +1,22 @@
-# Rustant
+<p align="center">
+  <img src="docs/rustant-logo.svg" alt="Rustant" width="400">
+</p>
 
-[![CI](https://github.com/DevJadhav/Rustant/actions/workflows/ci.yml/badge.svg)](https://github.com/DevJadhav/Rustant/actions/workflows/ci.yml)
-[![crates.io](https://img.shields.io/crates/v/rustant.svg)](https://crates.io/crates/rustant)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
-[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](CHANGELOG.md)
+<p align="center">
+  <a href="https://github.com/DevJadhav/Rustant/actions/workflows/ci.yml"><img src="https://github.com/DevJadhav/Rustant/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://crates.io/crates/rustant"><img src="https://img.shields.io/crates/v/rustant.svg" alt="crates.io"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.70%2B-orange.svg" alt="Rust"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.0-green.svg" alt="Version"></a>
+</p>
 
-A high-performance, privacy-first autonomous personal agent built entirely in Rust.
+<p align="center">A high-performance, privacy-first autonomous personal agent built entirely in Rust.</p>
 
 **Rust** + **Assistant** = **Rustant** — like an industrious ant, small but capable of carrying workloads many times its size.
+
+<p align="center">
+  <img src="docs/rustant.png" alt="Rustant" width="600">
+</p>
 
 ## Overview
 
