@@ -5,11 +5,11 @@
 //! Toggled with Ctrl+E.
 
 use crate::tui::theme::Theme;
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
-use ratatui::Frame;
 use rustant_core::explanation::{DecisionExplanation, DecisionType, FactorInfluence};
 
 /// State for the explanation panel.

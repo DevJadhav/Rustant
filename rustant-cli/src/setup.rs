@@ -11,7 +11,7 @@
 
 use dialoguer::{Input, Password, Select};
 use rustant_core::credentials::{CredentialStore, KeyringCredentialStore};
-use rustant_core::providers::models::{list_models, ModelInfo};
+use rustant_core::providers::models::{ModelInfo, list_models};
 use std::path::Path;
 
 /// A provider option presented during the setup wizard.

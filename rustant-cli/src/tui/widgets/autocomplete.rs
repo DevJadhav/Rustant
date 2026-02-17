@@ -3,11 +3,11 @@
 use crate::tui::theme::Theme;
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher};
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState};
-use ratatui::Frame;
 use std::path::{Path, PathBuf};
 
 /// Maximum number of files to scan.
@@ -327,10 +327,11 @@ mod tests {
         let (_dir, ws) = setup_test_workspace();
         let mut ac = AutocompleteState::new(ws);
         ac.activate("main");
-        assert!(ac
-            .suggestions()
-            .iter()
-            .any(|s| s.display.contains("main.rs")));
+        assert!(
+            ac.suggestions()
+                .iter()
+                .any(|s| s.display.contains("main.rs"))
+        );
     }
 
     #[test]
@@ -338,10 +339,11 @@ mod tests {
         let (_dir, ws) = setup_test_workspace();
         let mut ac = AutocompleteState::new(ws);
         ac.activate("hlp");
-        assert!(ac
-            .suggestions()
-            .iter()
-            .any(|s| s.display.contains("helpers")));
+        assert!(
+            ac.suggestions()
+                .iter()
+                .any(|s| s.display.contains("helpers"))
+        );
     }
 
     #[test]

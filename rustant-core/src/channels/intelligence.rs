@@ -1610,7 +1610,7 @@ mod tests {
             reasoning: "uncertain classification".to_string(),
         };
         let config = ChannelIntelligenceConfig::default(); // threshold=High
-                                                           // Low confidence (0.4) should prevent escalation even with Urgent priority
+        // Low confidence (0.4) should prevent escalation even with Urgent priority
         let action = llm_response_to_action(&response, &config, 0.4);
         assert_ne!(action, SuggestedAction::Escalate);
         // Should fall through to normal processing

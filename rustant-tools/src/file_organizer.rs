@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use rustant_core::error::ToolError;
 use rustant_core::types::{RiskLevel, ToolOutput};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -252,7 +252,7 @@ impl Tool for FileOrganizerTool {
                     total_size as f64 / 1_048_576.0
                 );
                 let mut sorted: Vec<_> = by_ext.iter().collect();
-                sorted.sort_by(|a, b| b.1 .1.cmp(&a.1 .1));
+                sorted.sort_by(|a, b| b.1.1.cmp(&a.1.1));
                 for (ext, (count, size)) in sorted.iter().take(15) {
                     output.push_str(&format!(
                         "  .{:<10} {:>5} files  {:>8.1} KB\n",

@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use rustant_core::error::ToolError;
 use rustant_core::types::{RiskLevel, ToolOutput};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 
 use crate::registry::Tool;
@@ -511,15 +511,31 @@ impl ExperimentTrackerTool {
                     e.id,
                     e.name,
                     e.status,
-                    if e.description.is_empty() { "(none)" } else { &e.description },
+                    if e.description.is_empty() {
+                        "(none)"
+                    } else {
+                        &e.description
+                    },
                     e.hypothesis_id.as_deref().unwrap_or("(none)"),
-                    if e.tags.is_empty() { "(none)".to_string() } else { e.tags.join(", ") },
+                    if e.tags.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        e.tags.join(", ")
+                    },
                     e.config,
                     e.metrics,
-                    if e.notes.is_empty() { "(none)" } else { &e.notes },
+                    if e.notes.is_empty() {
+                        "(none)"
+                    } else {
+                        &e.notes
+                    },
                     e.created_at.format("%Y-%m-%d %H:%M UTC"),
-                    e.started_at.map(|t| t.format("%Y-%m-%d %H:%M UTC").to_string()).unwrap_or_else(|| "(not started)".to_string()),
-                    e.completed_at.map(|t| t.format("%Y-%m-%d %H:%M UTC").to_string()).unwrap_or_else(|| "(not completed)".to_string()),
+                    e.started_at
+                        .map(|t| t.format("%Y-%m-%d %H:%M UTC").to_string())
+                        .unwrap_or_else(|| "(not started)".to_string()),
+                    e.completed_at
+                        .map(|t| t.format("%Y-%m-%d %H:%M UTC").to_string())
+                        .unwrap_or_else(|| "(not completed)".to_string()),
                 );
 
                 // Show related evidence if linked to a hypothesis

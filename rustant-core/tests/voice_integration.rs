@@ -4,8 +4,8 @@
 //! They do NOT require the `voice` feature flag or any audio hardware.
 
 use rustant_core::voice::{
-    audio_convert, AudioChunk, MockSttProvider, MockTtsProvider, SttWakeDetector, SynthesisRequest,
-    TranscriptionResult, VoiceActivityDetector,
+    AudioChunk, MockSttProvider, MockTtsProvider, SttWakeDetector, SynthesisRequest,
+    TranscriptionResult, VoiceActivityDetector, audio_convert,
 };
 
 #[tokio::test]

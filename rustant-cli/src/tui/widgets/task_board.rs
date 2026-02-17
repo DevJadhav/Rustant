@@ -4,11 +4,11 @@
 //! resource usage, and elapsed time. Toggleable with Ctrl+T.
 
 use crate::tui::theme::Theme;
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Row, Table};
-use ratatui::Frame;
 use std::collections::HashMap;
 use uuid::Uuid;
 

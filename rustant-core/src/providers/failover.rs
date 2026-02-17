@@ -12,7 +12,7 @@ use crate::types::{CompletionRequest, CompletionResponse, Message, StreamEvent};
 use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, info, warn};
 
 // ---------------------------------------------------------------------------

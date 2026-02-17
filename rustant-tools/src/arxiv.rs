@@ -4,14 +4,14 @@ use async_trait::async_trait;
 use chrono::Utc;
 use rustant_core::error::ToolError;
 use rustant_core::types::{RiskLevel, ToolOutput};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::arxiv_api::{
-    generate_bibtex, language_config, AnalysisDepth, ArxivClient, ArxivLibraryState,
-    ArxivSearchParams, ArxivSortBy, DigestConfig, ImplementationMode, ImplementationRecord,
-    ImplementationStatus, LibraryEntry, ProjectScaffold, ScaffoldFile,
+    AnalysisDepth, ArxivClient, ArxivLibraryState, ArxivSearchParams, ArxivSortBy, DigestConfig,
+    ImplementationMode, ImplementationRecord, ImplementationStatus, LibraryEntry, ProjectScaffold,
+    ScaffoldFile, generate_bibtex, language_config,
 };
 use crate::registry::Tool;
 
@@ -177,9 +177,21 @@ impl ArxivResearchTool {
             paper.updated,
             paper.pdf_url,
             paper.abs_url,
-            paper.doi.as_ref().map(|d| format!("\nDOI: {}", d)).unwrap_or_default(),
-            paper.comment.as_ref().map(|c| format!("\nComment: {}", c)).unwrap_or_default(),
-            paper.journal_ref.as_ref().map(|j| format!("\nJournal: {}", j)).unwrap_or_default(),
+            paper
+                .doi
+                .as_ref()
+                .map(|d| format!("\nDOI: {}", d))
+                .unwrap_or_default(),
+            paper
+                .comment
+                .as_ref()
+                .map(|c| format!("\nComment: {}", c))
+                .unwrap_or_default(),
+            paper
+                .journal_ref
+                .as_ref()
+                .map(|j| format!("\nJournal: {}", j))
+                .unwrap_or_default(),
             paper.summary,
         );
 

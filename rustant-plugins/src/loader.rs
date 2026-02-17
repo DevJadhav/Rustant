@@ -45,27 +45,34 @@ impl NativePluginLoader {
     ///
     /// Loading native plugins executes arbitrary code. Only load trusted plugins.
     pub unsafe fn load(&self, path: &Path) -> Result<Box<dyn Plugin>, PluginError> {
-        let lib = libloading::Library::new(path)
-            .map_err(|e| PluginError::LoadFailed(format!("{}: {}", path.display(), e)))?;
+        // SAFETY: The caller guarantees the plugin library at `path` is trusted.
+        let lib = unsafe {
+            libloading::Library::new(path)
+                .map_err(|e| PluginError::LoadFailed(format!("{}: {}", path.display(), e)))?
+        };
 
         // Look for the plugin creation function
-        let create_fn: libloading::Symbol<unsafe extern "C" fn() -> *mut dyn Plugin> =
+        // SAFETY: We trust the symbol exists with the expected signature in the loaded library.
+        let create_fn: libloading::Symbol<unsafe extern "C" fn() -> *mut dyn Plugin> = unsafe {
             lib.get(b"rustant_plugin_create").map_err(|e| {
                 PluginError::LoadFailed(format!(
                     "Symbol 'rustant_plugin_create' not found in {}: {}",
                     path.display(),
                     e
                 ))
-            })?;
+            })?
+        };
 
-        let raw = create_fn();
+        // SAFETY: The create function is provided by the trusted plugin.
+        let raw = unsafe { create_fn() };
         if raw.is_null() {
             return Err(PluginError::LoadFailed(
                 "Plugin creation function returned null".into(),
             ));
         }
 
-        let plugin = Box::from_raw(raw);
+        // SAFETY: `raw` is non-null and was allocated by the plugin's create function.
+        let plugin = unsafe { Box::from_raw(raw) };
 
         // Keep the library alive by leaking it (plugin owns the code)
         std::mem::forget(lib);

@@ -2,10 +2,10 @@
 
 use crate::tui::theme::Theme;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders};
-use ratatui::Frame;
 use tui_textarea::TextArea;
 
 /// Input widget wrapping tui-textarea.

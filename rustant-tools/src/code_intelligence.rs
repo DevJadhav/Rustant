@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use rustant_core::error::ToolError;
 use rustant_core::types::{RiskLevel, ToolOutput};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -732,15 +732,31 @@ impl CodeIntelligenceTool {
 
     fn language_semantics_notes(lang: &str) -> &'static str {
         match lang.to_lowercase().as_str() {
-            "rust" => "Ownership & borrowing, no GC, Result/Option for errors, pattern matching, traits for polymorphism, lifetimes.",
-            "python" => "Dynamic typing, GC, exceptions for errors, duck typing, indentation-based blocks, list comprehensions.",
-            "javascript" | "js" => "Dynamic typing, prototype-based OOP, async/await with Promises, closures, event loop concurrency.",
-            "typescript" | "ts" => "Structural typing over JavaScript, interfaces, generics, union/intersection types, async/await.",
-            "go" => "Static typing, GC, error values (not exceptions), goroutines/channels for concurrency, interfaces (implicit), no generics (pre-1.18).",
-            "java" => "Static typing, GC, checked exceptions, class-based OOP, interfaces, generics with type erasure.",
+            "rust" => {
+                "Ownership & borrowing, no GC, Result/Option for errors, pattern matching, traits for polymorphism, lifetimes."
+            }
+            "python" => {
+                "Dynamic typing, GC, exceptions for errors, duck typing, indentation-based blocks, list comprehensions."
+            }
+            "javascript" | "js" => {
+                "Dynamic typing, prototype-based OOP, async/await with Promises, closures, event loop concurrency."
+            }
+            "typescript" | "ts" => {
+                "Structural typing over JavaScript, interfaces, generics, union/intersection types, async/await."
+            }
+            "go" => {
+                "Static typing, GC, error values (not exceptions), goroutines/channels for concurrency, interfaces (implicit), no generics (pre-1.18)."
+            }
+            "java" => {
+                "Static typing, GC, checked exceptions, class-based OOP, interfaces, generics with type erasure."
+            }
             "c" => "Manual memory management, pointers, no OOP, preprocessor macros, header files.",
-            "c++" | "cpp" => "Manual memory + RAII/smart pointers, templates, OOP with multiple inheritance, operator overloading.",
-            "ruby" => "Dynamic typing, GC, everything is an object, blocks/procs/lambdas, mixins via modules.",
+            "c++" | "cpp" => {
+                "Manual memory + RAII/smart pointers, templates, OOP with multiple inheritance, operator overloading."
+            }
+            "ruby" => {
+                "Dynamic typing, GC, everything is an object, blocks/procs/lambdas, mixins via modules."
+            }
             _ => "General-purpose programming language.",
         }
     }
@@ -1896,7 +1912,10 @@ impl Tool for CodeIntelligenceTool {
             "dependency_map" => self.dependency_map(&args),
             other => Err(ToolError::InvalidArguments {
                 name: "code_intelligence".to_string(),
-                reason: format!("Unknown action '{}'. Valid actions: analyze_architecture, detect_patterns, translate_snippet, compare_implementations, tech_debt_report, api_surface, dependency_map", other),
+                reason: format!(
+                    "Unknown action '{}'. Valid actions: analyze_architecture, detect_patterns, translate_snippet, compare_implementations, tech_debt_report, api_surface, dependency_map",
+                    other
+                ),
             }),
         }
     }

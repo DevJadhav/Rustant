@@ -12,13 +12,13 @@ use rustant_core::{
     Agent, AgentCallback, AgentConfig, CancellationToken, MockLlmProvider, RegisteredTool,
 };
 #[cfg(feature = "browser")]
-use rustant_tools::browser::{create_browser_tools, BrowserToolContext};
+use rustant_tools::browser::{BrowserToolContext, create_browser_tools};
 use rustant_tools::register_builtin_tools;
 use rustant_tools::registry::ToolRegistry;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Connect to or launch a browser and register all 24 browser tools with the agent.
 ///
@@ -483,12 +483,14 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
 /// usage updates, and decision explanations are hidden for cleaner output.
 pub(crate) struct CliCallback {
     pub verbose: Arc<AtomicBool>,
+    has_streamed: Arc<AtomicBool>,
 }
 
 impl CliCallback {
     pub fn new(verbose: bool) -> Self {
         Self {
             verbose: Arc::new(AtomicBool::new(verbose)),
+            has_streamed: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -496,10 +498,16 @@ impl CliCallback {
 #[async_trait::async_trait]
 impl AgentCallback for CliCallback {
     async fn on_assistant_message(&self, message: &str) {
-        println!("\n\x1b[32mRustant:\x1b[0m {}", message);
+        if self.has_streamed.swap(false, Ordering::SeqCst) {
+            // Streaming tokens already displayed this content — just terminate the line.
+            println!();
+        } else {
+            println!("\n\x1b[32mRustant:\x1b[0m {}", message);
+        }
     }
 
     async fn on_token(&self, token: &str) {
+        self.has_streamed.store(true, Ordering::SeqCst);
         print!("{}", token);
         let _ = io::stdout().flush();
     }
@@ -876,8 +884,12 @@ fn show_onboarding(workspace: &Path) {
     }
     println!();
     println!("  Quick reference:");
-    println!("    \x1b[32m@\x1b[0m reference files  |  \x1b[32m/\x1b[0m commands  |  \x1b[32m/tools\x1b[0m list tools");
-    println!("    \x1b[32m/permissions\x1b[0m adjust safety  |  \x1b[32m/context\x1b[0m check memory usage");
+    println!(
+        "    \x1b[32m@\x1b[0m reference files  |  \x1b[32m/\x1b[0m commands  |  \x1b[32m/tools\x1b[0m list tools"
+    );
+    println!(
+        "    \x1b[32m/permissions\x1b[0m adjust safety  |  \x1b[32m/context\x1b[0m check memory usage"
+    );
     println!();
     println!(
         "  I'll ask for approval before modifying files. Adjust with \x1b[32m/permissions\x1b[0m."
@@ -1111,7 +1123,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     continue;
                 }
                 "/tools" => {
-                    let defs = agent.tool_definitions();
+                    let defs = agent.tool_definitions(None);
                     println!("Registered tools ({}):", defs.len());
                     for def in &defs {
                         println!("  - {}: {}", def.name, def.description);
@@ -1235,7 +1247,9 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     match arg1 {
                         "on" => {
                             agent.set_plan_mode(true);
-                            println!("\x1b[32mPlan mode enabled.\x1b[0m Tasks will generate a plan for review before execution.");
+                            println!(
+                                "\x1b[32mPlan mode enabled.\x1b[0m Tasks will generate a plan for review before execution."
+                            );
                         }
                         "off" => {
                             agent.set_plan_mode(false);
@@ -1347,7 +1361,9 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                             }
                         }
                         _ => {
-                            println!("Usage: /workflow list|show|run <name> [key=val]|runs|status|cancel <id>");
+                            println!(
+                                "Usage: /workflow list|show|run <name> [key=val]|runs|status|cancel <id>"
+                            );
                             continue;
                         }
                     };
@@ -1550,7 +1566,9 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                                 println!("\n\x1b[36m  [Voice] \x1b[0m{}", text);
                             });
                             match ts.voice_start(cfg, ws, on_text).await {
-                                Ok(()) => println!("\x1b[32m  Voice command mode ON\x1b[0m — listening for speech..."),
+                                Ok(()) => println!(
+                                    "\x1b[32m  Voice command mode ON\x1b[0m — listening for speech..."
+                                ),
                                 Err(e) => println!("\x1b[31mError starting voice: {}\x1b[0m", e),
                             }
                         }
@@ -1668,9 +1686,13 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     let prev = verbose_flag.load(Ordering::Relaxed);
                     verbose_flag.store(!prev, Ordering::Relaxed);
                     if !prev {
-                        println!("\x1b[32m  Verbose mode ON\x1b[0m — tool details, status, and usage will be shown.");
+                        println!(
+                            "\x1b[32m  Verbose mode ON\x1b[0m — tool details, status, and usage will be shown."
+                        );
                     } else {
-                        println!("\x1b[33m  Verbose mode OFF\x1b[0m — clean output (only responses and approvals).");
+                        println!(
+                            "\x1b[33m  Verbose mode OFF\x1b[0m — clean output (only responses and approvals)."
+                        );
                     }
                     continue;
                 }
@@ -1679,7 +1701,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     if let Some(info) = cmd_registry.lookup(cmd) {
                         if info.tui_only {
                             println!(
-                                "The {} command is only available in TUI mode. Launch with: rustant (without --no-tui)",
+                                "The {} command is only available in TUI mode. Launch with: rustant --tui",
                                 cmd
                             );
                             continue;
@@ -2496,11 +2518,15 @@ fn handle_workflows_command() {
 
     println!();
     println!("  Daily automation templates:");
-    println!("    morning_briefing  — Schedule with: rustant cron add briefing \"0 0 9 * * MON-FRI *\" \"workflow run morning_briefing\"");
+    println!(
+        "    morning_briefing  — Schedule with: rustant cron add briefing \"0 0 9 * * MON-FRI *\" \"workflow run morning_briefing\""
+    );
     println!(
         "    pr_review         — Run: rustant workflow run pr_review --input branch=feature-xyz"
     );
-    println!("    dependency_audit  — Schedule weekly: rustant cron add audit \"0 0 10 * * MON *\" \"workflow run dependency_audit\"");
+    println!(
+        "    dependency_audit  — Schedule weekly: rustant cron add audit \"0 0 10 * * MON *\" \"workflow run dependency_audit\""
+    );
     println!(
         "    changelog         — Run: rustant workflow run changelog --input since=\"1 week ago\""
     );
@@ -2618,7 +2644,9 @@ fn handle_sessions_command(sub: &str, arg: &str, workspace: &Path) {
             for entry in &sessions {
                 print_session_entry(entry);
             }
-            println!("\nCommands: /sessions search <query> | /sessions tag <name> <tag> | /sessions filter <tag>");
+            println!(
+                "\nCommands: /sessions search <query> | /sessions tag <name> <tag> | /sessions filter <tag>"
+            );
             println!("Resume with: /resume <name>");
         }
     }
@@ -2712,7 +2740,10 @@ fn handle_config_command(key: &str, value: &str, agent: &mut Agent) {
             "max_iterations" => println!("max_iterations = {}", config.safety.max_iterations),
             "streaming" => println!("streaming = {}", config.llm.use_streaming),
             "window_size" => println!("window_size = {}", config.memory.window_size),
-            _ => println!("Unknown config key: {}. Available: model, approval_mode, max_iterations, streaming, window_size", key),
+            _ => println!(
+                "Unknown config key: {}. Available: model, approval_mode, max_iterations, streaming, window_size",
+                key
+            ),
         }
         return;
     }
@@ -2883,7 +2914,7 @@ async fn handle_doctor_command(agent: &Agent, workspace: &Path) {
 
     // 4. Tool registration check
     println!("\n\x1b[1mTools\x1b[0m");
-    let tools = agent.tool_definitions();
+    let tools = agent.tool_definitions(None);
     let expected_min_tools = 10;
     println!("  Registered:    {} tools", tools.len());
     if tools.len() < expected_min_tools {
@@ -3252,7 +3283,9 @@ fn handle_digest_command(sub: &str, workspace: &Path) {
             // Show latest digest
             if !digest_dir.exists() {
                 println!("No digests generated yet.");
-                println!("The intelligence layer will generate digests based on your configured frequency.");
+                println!(
+                    "The intelligence layer will generate digests based on your configured frequency."
+                );
                 println!("Use /intelligence to check the current intelligence status.");
                 return;
             }

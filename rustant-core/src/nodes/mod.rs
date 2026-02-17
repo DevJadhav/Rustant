@@ -13,8 +13,8 @@ pub mod types;
 
 pub use consent::{ConsentEntry, ConsentStore};
 pub use discovery::{
-    DiscoveredNode, MdnsConfig, MdnsDiscovery, MdnsServiceRecord, MdnsTransport, NodeDiscovery,
-    UdpMdnsTransport, MDNS_MULTICAST_ADDR, MDNS_PORT, RUSTANT_SERVICE_NAME,
+    DiscoveredNode, MDNS_MULTICAST_ADDR, MDNS_PORT, MdnsConfig, MdnsDiscovery, MdnsServiceRecord,
+    MdnsTransport, NodeDiscovery, RUSTANT_SERVICE_NAME, UdpMdnsTransport,
 };
 pub use manager::NodeManager;
 pub use types::{

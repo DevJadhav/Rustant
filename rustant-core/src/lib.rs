@@ -69,16 +69,16 @@ pub use channels::{
 };
 pub use config::MultiAgentConfig;
 pub use config::{
-    config_exists, AgentConfig, ApprovalMode, CouncilConfig, CouncilMemberConfig,
-    ExternalMcpServerConfig, KnowledgeConfig, VotingStrategy,
+    AgentConfig, ApprovalMode, CouncilConfig, CouncilMemberConfig, ExternalMcpServerConfig,
+    KnowledgeConfig, VotingStrategy, config_exists,
 };
 pub use config::{
     AutoReplyMode, ChannelIntelligenceConfig, DigestFrequency, IntelligenceConfig,
     MessagePriority as ChannelMessagePriority,
 };
 pub use council::{
-    detect_available_providers, should_use_council, CouncilMemberResponse, CouncilResult,
-    DetectedProvider, PeerReview, PlanningCouncil,
+    CouncilMemberResponse, CouncilResult, DetectedProvider, PeerReview, PlanningCouncil,
+    detect_available_providers, should_use_council,
 };
 pub use plan::{
     ExecutionPlan, PlanAlternative, PlanConfig, PlanDecision, PlanStatus, PlanStep, StepStatus,
@@ -119,11 +119,11 @@ pub use nodes::{
 pub use oauth::AuthMethod;
 pub use pairing::{DeviceIdentity, PairingChallenge, PairingManager, PairingResult};
 pub use project_detect::{
-    detect_project, example_tasks, recommended_allowed_commands, ProjectInfo, ProjectType,
+    ProjectInfo, ProjectType, detect_project, example_tasks, recommended_allowed_commands,
 };
 pub use providers::{
-    create_council_members, create_provider, create_provider_with_auth, CircuitBreaker,
-    CircuitState, FailoverProvider, GeminiProvider, ModelInfo,
+    CircuitBreaker, CircuitState, FailoverProvider, GeminiProvider, ModelInfo,
+    create_council_members, create_provider, create_provider_with_auth,
 };
 pub use safety::{
     AdaptiveTrust, ApprovalContext, ApprovalDecision, BehavioralFingerprint, ContractEnforcer,
@@ -139,9 +139,9 @@ pub use search::{HybridSearchEngine, SearchConfig, SearchResult};
 pub use secret_ref::{MigrationResult, SecretRef, SecretResolveError, SecretResolver};
 pub use session_manager::{SessionEntry, SessionIndex, SessionManager};
 pub use skills::{
-    parse_skill_md, validate_skill, ParseError as SkillParseError, SkillConfig, SkillDefinition,
-    SkillLoader, SkillRegistry, SkillRequirement, SkillRiskLevel, SkillToolDef, ValidationError,
-    ValidationResult,
+    ParseError as SkillParseError, SkillConfig, SkillDefinition, SkillLoader, SkillRegistry,
+    SkillRequirement, SkillRiskLevel, SkillToolDef, ValidationError, ValidationResult,
+    parse_skill_md, validate_skill,
 };
 pub use summarizer::{ContextSummarizer, ContextSummary, TokenAlert, TokenCostDisplay};
 pub use types::{
@@ -150,11 +150,11 @@ pub use types::{
     TokenUsage, ToolDefinition, ToolOutput,
 };
 pub use voice::{
-    audio_convert, AudioChunk, AudioFormat, MeetingRecordingSession, MeetingResult, MeetingStatus,
+    AudioChunk, AudioFormat, MeetingRecordingSession, MeetingResult, MeetingStatus,
     MockSttProvider, MockTtsProvider, MockWakeDetector, OpenAiSttProvider, OpenAiTtsProvider,
     SttProvider, SttWakeDetector, SynthesisRequest, SynthesisResult, ToggleState,
     TranscriptionResult, TranscriptionSegment, TtsProvider, VadEvent, VoiceActivityDetector,
-    VoiceCommandSession, WakeWordDetector,
+    VoiceCommandSession, WakeWordDetector, audio_convert,
 };
 #[cfg(feature = "voice")]
 pub use voice::{
@@ -162,8 +162,8 @@ pub use voice::{
     WhisperLocalProvider,
 };
 pub use workflow::{
-    get_builtin, list_builtin_names, parse_workflow, validate_workflow, WorkflowDefinition,
-    WorkflowExecutor, WorkflowState, WorkflowStatus,
+    WorkflowDefinition, WorkflowExecutor, WorkflowState, WorkflowStatus, get_builtin,
+    list_builtin_names, parse_workflow, validate_workflow,
 };
 
 #[cfg(test)]

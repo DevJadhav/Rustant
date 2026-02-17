@@ -8,9 +8,9 @@ pub mod parser;
 pub mod types;
 pub mod validator;
 
-pub use parser::{parse_skill_md, ParseError};
+pub use parser::{ParseError, parse_skill_md};
 pub use types::{SkillConfig, SkillDefinition, SkillRequirement, SkillRiskLevel, SkillToolDef};
-pub use validator::{validate_skill, ValidationError, ValidationResult};
+pub use validator::{ValidationError, ValidationResult, validate_skill};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

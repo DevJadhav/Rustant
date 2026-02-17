@@ -178,10 +178,12 @@ mod tests {
 
         let result = validate_skill(&skill, &[], &[]);
         assert!(!result.is_valid);
-        assert!(result
-            .errors
-            .iter()
-            .any(|e| matches!(e, ValidationError::MissingSecret(_))));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::MissingSecret(_)))
+        );
     }
 
     #[test]
@@ -197,10 +199,12 @@ mod tests {
 
         let result = validate_skill(&skill, &[], &[]);
         assert!(!result.is_valid);
-        assert!(result
-            .errors
-            .iter()
-            .any(|e| matches!(e, ValidationError::MissingTool(_))));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::MissingTool(_)))
+        );
     }
 
     #[test]

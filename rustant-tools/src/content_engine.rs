@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use rustant_core::error::ToolError;
 use rustant_core::types::{RiskLevel, ToolOutput};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 
 use crate::registry::Tool;
@@ -348,7 +348,8 @@ impl Tool for ContentEngineTool {
                     .get("platform")
                     .and_then(|v| v.as_str())
                     .unwrap_or("blog");
-                let platform = ContentPlatform::from_str_loose(platform_str).unwrap_or(ContentPlatform::Blog);
+                let platform =
+                    ContentPlatform::from_str_loose(platform_str).unwrap_or(ContentPlatform::Blog);
                 let body = args
                     .get("body")
                     .and_then(|v| v.as_str())
@@ -443,10 +444,7 @@ impl Tool for ContentEngineTool {
 
             "set_status" => {
                 let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                let status_str = args
-                    .get("status")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let status_str = args.get("status").and_then(|v| v.as_str()).unwrap_or("");
                 let new_status = match ContentStatus::from_str_loose(status_str) {
                     Some(s) => s,
                     None => {
@@ -548,9 +546,7 @@ impl Tool for ContentEngineTool {
                     .filter(|p| {
                         p.title.to_lowercase().contains(&query)
                             || p.body.to_lowercase().contains(&query)
-                            || p.tags
-                                .iter()
-                                .any(|t| t.to_lowercase().contains(&query))
+                            || p.tags.iter().any(|t| t.to_lowercase().contains(&query))
                     })
                     .map(Self::format_piece_summary)
                     .collect();
@@ -578,9 +574,7 @@ impl Tool for ContentEngineTool {
                 let title = state.pieces[idx].title.clone();
                 state.pieces.remove(idx);
                 // Remove linked calendar entries
-                state
-                    .calendar
-                    .retain(|c| c.content_id != Some(id));
+                state.calendar.retain(|c| c.content_id != Some(id));
                 self.save_state(&state)?;
 
                 Ok(ToolOutput::text(format!(
@@ -591,27 +585,21 @@ impl Tool for ContentEngineTool {
 
             "schedule" => {
                 let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                let date_str = args
-                    .get("date")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let date_str = args.get("date").and_then(|v| v.as_str()).unwrap_or("");
                 if date_str.is_empty() {
                     return Ok(ToolOutput::text(
                         "Please provide a date in YYYY-MM-DD format.",
                     ));
                 }
-                let time_str = args
-                    .get("time")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("09:00");
+                let time_str = args.get("time").and_then(|v| v.as_str()).unwrap_or("09:00");
 
                 let datetime_str = format!("{}T{}:00Z", date_str, time_str);
-                let scheduled_dt = datetime_str
-                    .parse::<DateTime<Utc>>()
-                    .map_err(|e| ToolError::ExecutionFailed {
+                let scheduled_dt = datetime_str.parse::<DateTime<Utc>>().map_err(|e| {
+                    ToolError::ExecutionFailed {
                         name: "content_engine".to_string(),
                         message: format!("Invalid date/time '{}': {}", datetime_str, e),
-                    })?;
+                    }
+                })?;
 
                 let idx = match Self::find_piece(&state.pieces, id) {
                     Some(i) => i,
@@ -689,11 +677,7 @@ impl Tool for ContentEngineTool {
                 let filtered: Vec<&CalendarEntry> = state
                     .calendar
                     .iter()
-                    .filter(|c| {
-                        month_filter
-                            .map(|m| c.date.starts_with(m))
-                            .unwrap_or(true)
-                    })
+                    .filter(|c| month_filter.map(|m| c.date.starts_with(m)).unwrap_or(true))
                     .filter(|c| {
                         platform_filter
                             .as_ref()
@@ -733,14 +717,8 @@ impl Tool for ContentEngineTool {
             }
 
             "calendar_remove" => {
-                let date = args
-                    .get("date")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let platform_str = args
-                    .get("platform")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let date = args.get("date").and_then(|v| v.as_str()).unwrap_or("");
+                let platform_str = args.get("platform").and_then(|v| v.as_str()).unwrap_or("");
                 let platform = match ContentPlatform::from_str_loose(platform_str) {
                     Some(p) => p,
                     None => {
@@ -881,10 +859,7 @@ impl Tool for ContentEngineTool {
                     prompt.push_str(&format!("Target audience: {}\n\n", piece.audience));
                 }
                 prompt.push_str(&format!("Original title: {}\n", piece.title));
-                prompt.push_str(&format!(
-                    "Original platform: {}\n\n",
-                    piece.platform
-                ));
+                prompt.push_str(&format!("Original platform: {}\n\n", piece.platform));
                 prompt.push_str(&format!("Original content:\n{}\n", piece.body));
 
                 Ok(ToolOutput::text(format!(

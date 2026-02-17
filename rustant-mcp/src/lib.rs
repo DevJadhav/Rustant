@@ -258,10 +258,12 @@ mod tests {
         .to_string();
         let resp = server.process_message(&call_req).await.unwrap().unwrap();
         let result = resp.result.unwrap();
-        assert!(result["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("hello mcp"));
+        assert!(
+            result["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("hello mcp")
+        );
     }
 
     #[tokio::test]
@@ -344,10 +346,12 @@ mod tests {
         client.write_message(&call_req).await.unwrap();
         let resp_str = client.read_message().await.unwrap().unwrap();
         let resp: JsonRpcResponse = serde_json::from_str(&resp_str).unwrap();
-        assert!(resp.result.unwrap()["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("channel test"));
+        assert!(
+            resp.result.unwrap()["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("channel test")
+        );
 
         // 5. List resources
         let res_req = json!({
@@ -378,10 +382,12 @@ mod tests {
         client.write_message(&read_req).await.unwrap();
         let resp_str = client.read_message().await.unwrap().unwrap();
         let resp: JsonRpcResponse = serde_json::from_str(&resp_str).unwrap();
-        assert!(resp.result.unwrap()["contents"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("fn main()"));
+        assert!(
+            resp.result.unwrap()["contents"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("fn main()")
+        );
 
         // Close client to signal EOF
         drop(client);

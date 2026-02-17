@@ -161,7 +161,7 @@ impl PairingManager {
     /// Create a new pairing challenge.
     pub fn create_challenge(&mut self) -> PairingChallenge {
         let mut rng = rand::thread_rng();
-        let nonce_bytes: [u8; 32] = rng.gen();
+        let nonce_bytes: [u8; 32] = rng.r#gen();
         let nonce = hex::encode(nonce_bytes);
 
         let challenge = PairingChallenge {

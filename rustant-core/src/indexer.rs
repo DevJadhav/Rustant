@@ -4,7 +4,7 @@
 //! `.gitignore`, extracts file paths, function signatures, and content summaries,
 //! then indexes them into the `HybridSearchEngine` for semantic codebase search.
 
-use crate::project_detect::{detect_project, ProjectInfo};
+use crate::project_detect::{ProjectInfo, detect_project};
 use crate::search::{HybridSearchEngine, SearchConfig, SearchResult};
 use ignore::WalkBuilder;
 use std::path::{Path, PathBuf};

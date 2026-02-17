@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use rustant_core::error::ToolError;
 use rustant_core::types::{RiskLevel, ToolOutput};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -866,10 +866,12 @@ mod tests {
         assert!(schema["properties"]["action"].get("enum").is_some());
         let actions = schema["properties"]["action"]["enum"].as_array().unwrap();
         assert_eq!(actions.len(), 8);
-        assert!(schema["required"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("action")));
+        assert!(
+            schema["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("action"))
+        );
     }
 
     #[tokio::test]

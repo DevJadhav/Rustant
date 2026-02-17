@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use rustant_core::error::ToolError;
 use rustant_core::types::{RiskLevel, ToolOutput};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 
 use crate::registry::Tool;
@@ -240,10 +240,11 @@ impl Tool for SkillTrackerTool {
             }
 
             "log_practice" => {
-                let skill_id =
-                    args.get("skill_id").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                let duration_mins =
-                    args.get("duration_mins").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let skill_id = args.get("skill_id").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                let duration_mins = args
+                    .get("duration_mins")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
                 if skill_id == 0 || duration_mins == 0 {
                     return Ok(ToolOutput::text(
                         "Provide skill_id and duration_mins (both > 0).",
@@ -281,16 +282,12 @@ impl Tool for SkillTrackerTool {
                         duration_mins, skill_name, proficiency_before, current
                     )))
                 } else {
-                    Ok(ToolOutput::text(format!(
-                        "Skill #{} not found.",
-                        skill_id
-                    )))
+                    Ok(ToolOutput::text(format!("Skill #{} not found.", skill_id)))
                 }
             }
 
             "assess" => {
-                let skill_id =
-                    args.get("skill_id").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                let skill_id = args.get("skill_id").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                 if let Some(skill) = state.skills.iter().find(|s| s.id == skill_id) {
                     let mut prompt = format!(
                         "=== Self-Assessment: {} ===\n\
@@ -313,10 +310,7 @@ impl Tool for SkillTrackerTool {
                         prompt.push_str("Last Practiced: Never\n");
                     }
                     if !skill.resources.is_empty() {
-                        prompt.push_str(&format!(
-                            "Resources: {}\n",
-                            skill.resources.join(", ")
-                        ));
+                        prompt.push_str(&format!("Resources: {}\n", skill.resources.join(", ")));
                     }
                     if !skill.practice_log.is_empty() {
                         let total_mins: u32 =
@@ -351,10 +345,7 @@ impl Tool for SkillTrackerTool {
                     );
                     Ok(ToolOutput::text(prompt))
                 } else {
-                    Ok(ToolOutput::text(format!(
-                        "Skill #{} not found.",
-                        skill_id
-                    )))
+                    Ok(ToolOutput::text(format!("Skill #{} not found.", skill_id)))
                 }
             }
 
@@ -453,9 +444,7 @@ impl Tool for SkillTrackerTool {
                     "create" => {
                         let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("");
                         if name.is_empty() {
-                            return Ok(ToolOutput::text(
-                                "Provide a name for the learning path.",
-                            ));
+                            return Ok(ToolOutput::text("Provide a name for the learning path."));
                         }
                         let skill_ids: Vec<usize> = args
                             .get("skill_ids")
@@ -474,10 +463,7 @@ impl Tool for SkillTrackerTool {
                         // Validate skill IDs exist
                         for &sid in &skill_ids {
                             if !state.skills.iter().any(|s| s.id == sid) {
-                                return Ok(ToolOutput::text(format!(
-                                    "Skill #{} not found.",
-                                    sid
-                                )));
+                                return Ok(ToolOutput::text(format!("Skill #{} not found.", sid)));
                             }
                         }
                         let milestones: Vec<Milestone> = args
@@ -522,21 +508,13 @@ impl Tool for SkillTrackerTool {
                         )))
                     }
                     "show" => {
-                        let path_id = args
-                            .get("path_id")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0) as usize;
-                        if let Some(path) =
-                            state.learning_paths.iter().find(|p| p.id == path_id)
-                        {
-                            let mut output = format!(
-                                "Learning Path #{}: '{}'\nSkills:\n",
-                                path.id, path.name
-                            );
+                        let path_id =
+                            args.get("path_id").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                        if let Some(path) = state.learning_paths.iter().find(|p| p.id == path_id) {
+                            let mut output =
+                                format!("Learning Path #{}: '{}'\nSkills:\n", path.id, path.name);
                             for &sid in &path.skill_ids {
-                                if let Some(skill) =
-                                    state.skills.iter().find(|s| s.id == sid)
-                                {
+                                if let Some(skill) = state.skills.iter().find(|s| s.id == sid) {
                                     output.push_str(&format!(
                                         "  #{} {} — {}/{}\n",
                                         skill.id,
@@ -545,10 +523,7 @@ impl Tool for SkillTrackerTool {
                                         skill.target_level
                                     ));
                                 } else {
-                                    output.push_str(&format!(
-                                        "  #{} (not found)\n",
-                                        sid
-                                    ));
+                                    output.push_str(&format!("  #{} (not found)\n", sid));
                                 }
                             }
                             if !path.milestones.is_empty() {
@@ -576,10 +551,8 @@ impl Tool for SkillTrackerTool {
                         }
                     }
                     "update" => {
-                        let path_id = args
-                            .get("path_id")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0) as usize;
+                        let path_id =
+                            args.get("path_id").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                         if let Some(path) =
                             state.learning_paths.iter_mut().find(|p| p.id == path_id)
                         {
@@ -614,8 +587,7 @@ impl Tool for SkillTrackerTool {
                                     })
                                     .collect();
                             }
-                            if let Some(cm) =
-                                args.get("current_milestone").and_then(|v| v.as_u64())
+                            if let Some(cm) = args.get("current_milestone").and_then(|v| v.as_u64())
                             {
                                 path.current_milestone = cm as usize;
                             }
@@ -640,10 +612,7 @@ impl Tool for SkillTrackerTool {
             }
 
             "progress_report" => {
-                let period = args
-                    .get("period")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("all");
+                let period = args.get("period").and_then(|v| v.as_str()).unwrap_or("all");
                 let now = Utc::now();
                 let cutoff = match period {
                     "week" => Some(now - chrono::Duration::days(7)),
@@ -663,8 +632,10 @@ impl Tool for SkillTrackerTool {
                         .collect();
                     if !relevant_entries.is_empty() {
                         sessions_count += relevant_entries.len();
-                        total_practice_mins +=
-                            relevant_entries.iter().map(|e| e.duration_mins).sum::<u32>();
+                        total_practice_mins += relevant_entries
+                            .iter()
+                            .map(|e| e.duration_mins)
+                            .sum::<u32>();
                         // Check if proficiency improved during this period
                         if let (Some(first), Some(last)) =
                             (relevant_entries.first(), relevant_entries.last())
@@ -763,14 +734,13 @@ impl Tool for SkillTrackerTool {
                 if flashcards_path.exists() {
                     if let Ok(fc_data) = std::fs::read_to_string(&flashcards_path) {
                         if let Ok(fc_state) = serde_json::from_str::<Value>(&fc_data) {
-                            if let Some(cards) = fc_state.get("cards").and_then(|v| v.as_array())
-                            {
+                            if let Some(cards) = fc_state.get("cards").and_then(|v| v.as_array()) {
                                 let decks: std::collections::HashSet<String> = cards
                                     .iter()
                                     .filter_map(|c| {
-                                        c.get("deck").and_then(|d| d.as_str()).map(|s| {
-                                            s.to_lowercase()
-                                        })
+                                        c.get("deck")
+                                            .and_then(|d| d.as_str())
+                                            .map(|s| s.to_lowercase())
                                     })
                                     .collect();
                                 if !decks.is_empty() {

@@ -6,7 +6,7 @@
   <a href="https://github.com/DevJadhav/Rustant/actions/workflows/ci.yml"><img src="https://github.com/DevJadhav/Rustant/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://crates.io/crates/rustant"><img src="https://img.shields.io/crates/v/rustant.svg" alt="crates.io"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.70%2B-orange.svg" alt="Rust"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.85%2B-orange.svg" alt="Rust"></a>
   <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.0-green.svg" alt="Version"></a>
 </p>
 
@@ -79,7 +79,7 @@ rustant --model gpt-4o --approval cautious --workspace ./project "add tests for 
 | `-m, --model` | Override LLM model |
 | `-w, --workspace` | Set workspace directory |
 | `--approval` | Approval mode: `safe`, `cautious`, `paranoid`, `yolo` |
-| `--no-tui` | Use simple REPL instead of TUI |
+| `--tui` | Enable TUI mode (default is REPL) |
 | `-c, --config` | Custom config file path |
 | `-v, -vv, -vvv` | Increase verbosity |
 | `-q, --quiet` | Suppress non-essential output |
@@ -659,7 +659,7 @@ cargo bench -p rustant-tools
 cargo doc --workspace --no-deps --open
 ```
 
-**Requirements:** Rust 1.70+, Git configured (`git config --global user.email` / `user.name`)
+**Requirements:** Rust 1.85+, Git configured (`git config --global user.email` / `user.name`)
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and PR guidelines.
 

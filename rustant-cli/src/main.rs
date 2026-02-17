@@ -35,9 +35,9 @@ struct Cli {
     #[arg(short, long)]
     config: Option<PathBuf>,
 
-    /// Disable TUI, use simple REPL
+    /// Enable TUI mode (default is REPL)
     #[arg(long)]
-    no_tui: bool,
+    tui: bool,
 
     /// Approval mode: safe, cautious, paranoid, yolo
     #[arg(short = 'a', long)]
@@ -582,9 +582,9 @@ async fn main() -> anyhow::Result<()> {
         }
     } else if let Some(task) = cli.task {
         repl::run_single_task(&task, config, workspace).await
-    } else if cli.no_tui || !config.ui.use_tui {
-        repl::run_interactive(config, workspace).await
-    } else {
+    } else if cli.tui || config.ui.use_tui {
         tui::run(config, workspace).await
+    } else {
+        repl::run_interactive(config, workspace).await
     }
 }

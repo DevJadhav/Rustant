@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use rustant_core::error::ToolError;
 use rustant_core::types::{RiskLevel, ToolOutput};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -1118,9 +1118,11 @@ mod tests {
             .execute(json!({ "action": "strategy_review" }))
             .await
             .unwrap();
-        assert!(result
-            .content
-            .contains("Comprehensive Career Strategy Review"));
+        assert!(
+            result
+                .content
+                .contains("Comprehensive Career Strategy Review")
+        );
         assert!(result.content.contains("Senior role"));
         assert!(result.content.contains("Bob"));
         assert!(result.content.contains("Instructions"));

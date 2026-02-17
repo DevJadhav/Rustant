@@ -12,7 +12,7 @@ use crate::types::{
 };
 use async_trait::async_trait;
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashSet;
 use tokio::sync::mpsc;
 use tracing::{debug, warn};

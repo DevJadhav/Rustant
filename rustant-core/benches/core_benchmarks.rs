@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use rustant_core::config::SafetyConfig;
 use rustant_core::memory::{Fact, LongTermMemory, ShortTermMemory};
 use rustant_core::merkle::MerkleChain;

@@ -213,7 +213,7 @@ async fn handle_init(workspace: &Path) -> anyhow::Result<()> {
     println!("  \x1b[1m--- Quick Start ---\x1b[0m\n");
     println!("  \x1b[33mInteractive mode:\x1b[0m  rustant");
     println!("  \x1b[33mSingle task:\x1b[0m       rustant \"your task here\"");
-    println!("  \x1b[33mTUI mode:\x1b[0m          rustant --no-tui=false");
+    println!("  \x1b[33mTUI mode:\x1b[0m          rustant --tui");
     println!();
     println!("  \x1b[33mSlash commands:\x1b[0m");
     println!("    /help     Show available commands");
@@ -1482,7 +1482,9 @@ pub async fn handle_browser(action: BrowserAction, workspace: &Path) -> anyhow::
                                 );
                             }
                             Err(_) => {
-                                println!("\n  Status: \x1b[31mDisconnected\x1b[0m (Chrome not reachable)");
+                                println!(
+                                    "\n  Status: \x1b[31mDisconnected\x1b[0m (Chrome not reachable)"
+                                );
                                 println!("  Clearing stale session...");
                                 BrowserSessionStore::clear(workspace).ok();
                             }
@@ -1732,7 +1734,7 @@ pub async fn handle_canvas(action: CanvasAction) -> anyhow::Result<()> {
 }
 
 pub async fn handle_skill(action: SkillAction) -> anyhow::Result<()> {
-    use rustant_core::skills::{parse_skill_md, validate_skill, SkillLoader};
+    use rustant_core::skills::{SkillLoader, parse_skill_md, validate_skill};
 
     match action {
         SkillAction::List { dir } => {
@@ -1890,7 +1892,7 @@ pub async fn handle_plugin(action: PluginAction) -> anyhow::Result<()> {
 }
 
 pub async fn handle_update(action: UpdateAction) -> anyhow::Result<()> {
-    use rustant_core::updater::{UpdateChecker, UpdateConfig, Updater, CURRENT_VERSION};
+    use rustant_core::updater::{CURRENT_VERSION, UpdateChecker, UpdateConfig, Updater};
 
     match action {
         UpdateAction::Check => {

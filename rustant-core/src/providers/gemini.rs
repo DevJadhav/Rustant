@@ -1431,9 +1431,11 @@ mod tests {
 
         // Unsupported fields are removed
         assert!(sanitized.get("additionalProperties").is_none());
-        assert!(sanitized["properties"]["headers"]
-            .get("additionalProperties")
-            .is_none());
+        assert!(
+            sanitized["properties"]["headers"]
+                .get("additionalProperties")
+                .is_none()
+        );
         assert!(sanitized["properties"]["count"].get("default").is_none());
 
         // But supported fields within those properties still exist

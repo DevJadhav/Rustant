@@ -565,9 +565,11 @@ mod tests {
         );
         let result = intel.classify_email(classified);
         assert_eq!(result.category, EmailCategory::ActionRequired);
-        assert!(result
-            .suggested_labels
-            .contains(&"action-required".to_string()));
+        assert!(
+            result
+                .suggested_labels
+                .contains(&"action-required".to_string())
+        );
         assert!(result.suggested_labels.contains(&"priority".to_string()));
     }
 

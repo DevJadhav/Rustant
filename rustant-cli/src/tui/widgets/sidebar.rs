@@ -1,11 +1,11 @@
 //! Sidebar widget showing active files, agent status, and context fill.
 
 use crate::tui::theme::Theme;
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, Paragraph};
-use ratatui::Frame;
 use rustant_core::memory::ContextBreakdown;
 use rustant_core::types::AgentStatus;
 

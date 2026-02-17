@@ -380,10 +380,12 @@ mod tests {
         // All methods should return errors, NOT panic with todo!()
         let read_result = transport.read_message().await;
         assert!(read_result.is_err());
-        assert!(read_result
-            .unwrap_err()
-            .to_string()
-            .contains("not yet implemented"));
+        assert!(
+            read_result
+                .unwrap_err()
+                .to_string()
+                .contains("not yet implemented")
+        );
 
         let write_result = transport.write_message("test").await;
         assert!(write_result.is_err());

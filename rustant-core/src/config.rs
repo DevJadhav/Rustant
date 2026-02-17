@@ -5,8 +5,8 @@
 //! in the workspace directory.
 
 use figment::{
-    providers::{Env, Format, Serialized, Toml},
     Figment,
+    providers::{Env, Format, Serialized, Toml},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -1063,7 +1063,7 @@ pub struct UiConfig {
     pub vim_mode: bool,
     /// Whether to show cost information in the UI.
     pub show_cost: bool,
-    /// Whether to use the TUI (false = simple REPL).
+    /// Whether to use the TUI (false = simple REPL, default).
     pub use_tui: bool,
     /// Whether verbose output is enabled (shows tool execution details).
     #[serde(default)]
@@ -1076,7 +1076,7 @@ impl Default for UiConfig {
             theme: "dark".to_string(),
             vim_mode: false,
             show_cost: true,
-            use_tui: true,
+            use_tui: false,
             verbose: false,
         }
     }

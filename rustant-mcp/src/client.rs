@@ -5,7 +5,7 @@
 //! and can execute tool calls.
 
 use crate::error::McpError;
-use crate::protocol::{JsonRpcResponse, McpTool, RequestId, MCP_PROTOCOL_VERSION};
+use crate::protocol::{JsonRpcResponse, MCP_PROTOCOL_VERSION, McpTool, RequestId};
 use crate::transport::Transport;
 use serde_json::json;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -247,8 +247,8 @@ impl Default for McpClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transport::ChannelTransport;
     use crate::McpServer;
+    use crate::transport::ChannelTransport;
     use rustant_tools::registry::ToolRegistry;
     use std::sync::Arc;
     use tempfile::TempDir;
@@ -321,10 +321,12 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("hello from client"));
+        assert!(
+            result["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("hello from client")
+        );
 
         drop(client_transport);
         let _ = server_handle.await;

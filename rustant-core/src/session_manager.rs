@@ -388,7 +388,7 @@ impl SessionManager {
                 None => {
                     return Err(MemoryError::SessionLoadFailed {
                         message: format!("No session found matching: '{}'", query),
-                    })
+                    });
                 }
             }
         };

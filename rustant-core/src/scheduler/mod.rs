@@ -14,5 +14,5 @@ pub use heartbeat::{HeartbeatConfig, HeartbeatManager, HeartbeatTask, QuietHours
 pub use jobs::{BackgroundJob, JobManager, JobStatus};
 pub use persistence::{load_state, save_state};
 pub use webhook::{
-    compute_hmac_signature, WebhookEndpoint, WebhookHandler, WebhookRequest, WebhookResult,
+    WebhookEndpoint, WebhookHandler, WebhookRequest, WebhookResult, compute_hmac_signature,
 };

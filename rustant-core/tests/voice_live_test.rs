@@ -7,8 +7,8 @@
 //!   OPENAI_API_KEY=... cargo test -p rustant-core -- --ignored voice_live
 
 use rustant_core::voice::{
-    audio_convert, AudioChunk, OpenAiSttProvider, OpenAiTtsProvider, SttProvider, SynthesisRequest,
-    TtsProvider,
+    AudioChunk, OpenAiSttProvider, OpenAiTtsProvider, SttProvider, SynthesisRequest, TtsProvider,
+    audio_convert,
 };
 
 /// Helper to get the API key from the environment.

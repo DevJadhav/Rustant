@@ -149,7 +149,7 @@ pub trait SlackHttpClient: Send + Sync {
 
     // Reactions
     async fn reactions_add(&self, channel: &str, timestamp: &str, name: &str)
-        -> Result<(), String>;
+    -> Result<(), String>;
     async fn reactions_get(
         &self,
         channel: &str,
@@ -427,11 +427,12 @@ impl Channel for SlackChannel {
 
     async fn receive_messages(&self) -> Result<Vec<ChannelMessage>, RustantError> {
         let channels = if self.config.allowed_channels.is_empty() {
-            vec![self
-                .config
-                .default_channel
-                .clone()
-                .unwrap_or_else(|| "general".to_string())]
+            vec![
+                self.config
+                    .default_channel
+                    .clone()
+                    .unwrap_or_else(|| "general".to_string()),
+            ]
         } else {
             self.config.allowed_channels.clone()
         };

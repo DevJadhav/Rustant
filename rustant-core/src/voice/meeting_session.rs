@@ -8,9 +8,9 @@
 //! to avoid circular dependency with `rustant-tools`.
 
 use crate::config::MeetingConfig;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::{watch, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::{Mutex, watch};
 use tokio::task::JoinHandle;
 #[allow(unused_imports)]
 use tracing::{debug, info, warn};

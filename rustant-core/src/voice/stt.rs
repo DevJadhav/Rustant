@@ -4,8 +4,8 @@
 //! always available. `WhisperLocalProvider` requires the `voice` feature.
 
 use async_trait::async_trait;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::types::{AudioChunk, TranscriptionResult};
 use crate::error::VoiceError;

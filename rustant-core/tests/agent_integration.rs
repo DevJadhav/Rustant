@@ -3,13 +3,13 @@
 //! These tests exercise the full agent loop end-to-end using MockLlmProvider,
 //! verifying the Think → Act → Observe cycle works correctly.
 
+use rustant_core::Agent;
 use rustant_core::agent::{RecordingCallback, RegisteredTool};
 use rustant_core::brain::MockLlmProvider;
 use rustant_core::config::AgentConfig;
 use rustant_core::error::{AgentError, RustantError};
 use rustant_core::memory::MemorySystem;
 use rustant_core::types::{AgentStatus, RiskLevel, ToolDefinition, ToolOutput};
-use rustant_core::Agent;
 use std::path::Path;
 use std::sync::Arc;
 

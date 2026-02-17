@@ -5,11 +5,11 @@
 //! and a scrollable mini-terminal for shell output lines.
 
 use crate::tui::theme::Theme;
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Gauge, Paragraph, Wrap};
-use ratatui::Frame;
 use rustant_core::types::ProgressUpdate;
 use std::time::Instant;
 

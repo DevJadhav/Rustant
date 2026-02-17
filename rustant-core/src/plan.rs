@@ -912,9 +912,11 @@ mod tests {
         assert_eq!(plan.goal, "Do something");
         assert_eq!(plan.steps.len(), 1);
         assert!(plan.summary.contains("fallback"));
-        assert!(plan.steps[0]
-            .description
-            .contains("Execute task as described"));
+        assert!(
+            plan.steps[0]
+                .description
+                .contains("Execute task as described")
+        );
     }
 
     #[test]

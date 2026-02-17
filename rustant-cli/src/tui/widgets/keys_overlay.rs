@@ -4,11 +4,11 @@
 //! Toggled with F1 or the /keys command.
 
 use crate::tui::theme::Theme;
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
-use ratatui::Frame;
 
 /// State for the keyboard shortcuts overlay.
 #[derive(Debug, Clone, Default)]

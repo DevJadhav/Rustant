@@ -4,9 +4,9 @@
 //! that the safety pipeline correctly blocks dangerous requests.
 
 use rustant_core::config::McpSafetyConfig;
+use rustant_mcp::McpServer;
 use rustant_mcp::protocol::{JsonRpcResponse, MCP_PROTOCOL_VERSION};
 use rustant_mcp::transport::{ChannelTransport, Transport};
-use rustant_mcp::McpServer;
 use rustant_tools::registry::ToolRegistry;
 use serde_json::json;
 use std::sync::Arc;

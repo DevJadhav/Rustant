@@ -481,12 +481,13 @@ impl Tool for MacosMeetingRecorderTool {
         match action {
             "detect_meeting" => {
                 debug!("Detecting active meeting applications");
-                let result = detect_meeting_apps()
-                    .await
-                    .map_err(|e| ToolError::ExecutionFailed {
-                        name: "macos_meeting_recorder".into(),
-                        message: e,
-                    })?;
+                let result =
+                    detect_meeting_apps()
+                        .await
+                        .map_err(|e| ToolError::ExecutionFailed {
+                            name: "macos_meeting_recorder".into(),
+                            message: e,
+                        })?;
                 Ok(ToolOutput::text(result))
             }
 
@@ -535,9 +536,7 @@ impl Tool for MacosMeetingRecorderTool {
                 })?;
 
                 info!(pid = pid, path = %audio_path, "Meeting recording started");
-                let app_info = meeting_app
-                    .map(|a| format!(" ({a})"))
-                    .unwrap_or_default();
+                let app_info = meeting_app.map(|a| format!(" ({a})")).unwrap_or_default();
                 Ok(ToolOutput::text(format!(
                     "Recording started{app_info}.\nAudio: {audio_path}\nPID: {pid}\n\nUse action 'stop' to stop recording."
                 )))
@@ -557,10 +556,7 @@ impl Tool for MacosMeetingRecorderTool {
                     }
                 }
 
-                let title = args["title"]
-                    .as_str()
-                    .unwrap_or("Meeting")
-                    .to_string();
+                let title = args["title"].as_str().unwrap_or("Meeting").to_string();
                 let timestamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
                 let audio_path = format!("/tmp/rustant_meeting_{timestamp}.wav");
 
@@ -618,9 +614,7 @@ impl Tool for MacosMeetingRecorderTool {
                 }
 
                 info!(pid = pid, path = %audio_path, auto_flow = true, "Meeting recording started with auto-flow");
-                let app_info = meeting_app
-                    .map(|a| format!(" ({a})"))
-                    .unwrap_or_default();
+                let app_info = meeting_app.map(|a| format!(" ({a})")).unwrap_or_default();
                 let silence_info = if silence_timeout > 0 {
                     format!(" Auto-stop after {silence_timeout}s of silence.")
                 } else {
@@ -663,10 +657,12 @@ impl Tool for MacosMeetingRecorderTool {
                 }
 
                 debug!(pid = pid, "Stopping meeting recording");
-                stop_recording(pid).await.map_err(|e| ToolError::ExecutionFailed {
-                    name: "macos_meeting_recorder".into(),
-                    message: e,
-                })?;
+                stop_recording(pid)
+                    .await
+                    .map_err(|e| ToolError::ExecutionFailed {
+                        name: "macos_meeting_recorder".into(),
+                        message: e,
+                    })?;
 
                 // Announce stop via TTS if auto-flow
                 if state.auto_flow {
@@ -687,9 +683,7 @@ impl Tool for MacosMeetingRecorderTool {
                     });
                 }
 
-                let file_size = std::fs::metadata(path)
-                    .map(|m| m.len())
-                    .unwrap_or(0);
+                let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
 
                 // Auto-flow: transcribe and save to Notes.app
                 if state.auto_flow {
@@ -772,12 +766,13 @@ impl Tool for MacosMeetingRecorderTool {
                 }
 
                 debug!(path = audio_path, "Transcribing audio file");
-                let transcript = transcribe_audio_file(audio_path, &api_key)
-                    .await
-                    .map_err(|e| ToolError::ExecutionFailed {
-                        name: "macos_meeting_recorder".into(),
-                        message: e,
-                    })?;
+                let transcript =
+                    transcribe_audio_file(audio_path, &api_key)
+                        .await
+                        .map_err(|e| ToolError::ExecutionFailed {
+                            name: "macos_meeting_recorder".into(),
+                            message: e,
+                        })?;
 
                 if transcript.is_empty() {
                     return Ok(ToolOutput::text(
@@ -786,10 +781,7 @@ impl Tool for MacosMeetingRecorderTool {
                     ));
                 }
 
-                info!(
-                    chars = transcript.len(),
-                    "Transcription completed"
-                );
+                info!(chars = transcript.len(), "Transcription completed");
                 Ok(ToolOutput::text(format!(
                     "Transcription ({} characters):\n\n{}",
                     transcript.len(),
@@ -801,14 +793,18 @@ impl Tool for MacosMeetingRecorderTool {
                 let transcript = require_str(&args, "transcript", "macos_meeting_recorder")?;
                 let title = args["title"].as_str().unwrap_or("Untitled Meeting");
                 let folder = args["folder"].as_str().unwrap_or("Meeting Transcripts");
-                let summary = args["summary"]
-                    .as_str()
-                    .unwrap_or("(Summary not provided — use LLM to generate one from the transcript)");
+                let summary = args["summary"].as_str().unwrap_or(
+                    "(Summary not provided — use LLM to generate one from the transcript)",
+                );
                 let action_items = args["action_items"]
                     .as_str()
                     .unwrap_or("(No action items extracted)");
 
-                debug!(title = title, folder = folder, "Saving transcript to Notes.app");
+                debug!(
+                    title = title,
+                    folder = folder,
+                    "Saving transcript to Notes.app"
+                );
                 let result = save_to_notes(title, summary, action_items, transcript, folder)
                     .await
                     .map_err(|e| ToolError::ExecutionFailed {
@@ -820,37 +816,33 @@ impl Tool for MacosMeetingRecorderTool {
                 Ok(ToolOutput::text(result))
             }
 
-            "status" => {
-                match RecordingState::load() {
-                    Some(state) if state.is_recording => {
-                        let app_info = state
-                            .meeting_app
-                            .map(|a| format!("\nMeeting app: {a}"))
-                            .unwrap_or_default();
-                        let title_info = state
-                            .title
-                            .map(|t| format!("\nTitle: {t}"))
-                            .unwrap_or_default();
-                        let flow_info = if state.auto_flow {
-                            "\nMode: auto-transcribe (record_and_transcribe)"
-                        } else {
-                            "\nMode: manual (record)"
-                        };
-                        let silence_info = if state.silence_monitor_active {
-                            "\nSilence monitor: active"
-                        } else {
-                            ""
-                        };
-                        Ok(ToolOutput::text(format!(
-                            "Recording in progress.\nStarted: {}\nAudio: {}{app_info}{title_info}{flow_info}{silence_info}",
-                            state.started_at, state.audio_path
-                        )))
-                    }
-                    _ => Ok(ToolOutput::text(
-                        "No active recording.".to_string(),
-                    )),
+            "status" => match RecordingState::load() {
+                Some(state) if state.is_recording => {
+                    let app_info = state
+                        .meeting_app
+                        .map(|a| format!("\nMeeting app: {a}"))
+                        .unwrap_or_default();
+                    let title_info = state
+                        .title
+                        .map(|t| format!("\nTitle: {t}"))
+                        .unwrap_or_default();
+                    let flow_info = if state.auto_flow {
+                        "\nMode: auto-transcribe (record_and_transcribe)"
+                    } else {
+                        "\nMode: manual (record)"
+                    };
+                    let silence_info = if state.silence_monitor_active {
+                        "\nSilence monitor: active"
+                    } else {
+                        ""
+                    };
+                    Ok(ToolOutput::text(format!(
+                        "Recording in progress.\nStarted: {}\nAudio: {}{app_info}{title_info}{flow_info}{silence_info}",
+                        state.started_at, state.audio_path
+                    )))
                 }
-            }
+                _ => Ok(ToolOutput::text("No active recording.".to_string())),
+            },
 
             other => Err(ToolError::InvalidArguments {
                 name: "macos_meeting_recorder".to_string(),
@@ -887,10 +879,12 @@ mod tests {
                 .len()
                 >= 7 // detect_meeting, record, record_and_transcribe, stop, transcribe, summarize_to_notes, status
         );
-        assert!(schema["required"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("action")));
+        assert!(
+            schema["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("action"))
+        );
     }
 
     #[test]

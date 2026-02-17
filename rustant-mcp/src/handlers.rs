@@ -3,8 +3,8 @@
 use crate::error::McpError;
 use crate::protocol::{
     CallToolParams, CallToolResult, InitializeParams, InitializeResult, ListResourcesResult,
-    ListToolsResult, McpTool, ReadResourceParams, ReadResourceResult, ResourcesCapability,
-    ServerCapabilities, ServerInfo, ToolContent, ToolsCapability, MCP_PROTOCOL_VERSION,
+    ListToolsResult, MCP_PROTOCOL_VERSION, McpTool, ReadResourceParams, ReadResourceResult,
+    ResourcesCapability, ServerCapabilities, ServerInfo, ToolContent, ToolsCapability,
 };
 use crate::resources::ResourceManager;
 use rustant_core::config::McpSafetyConfig;
@@ -755,10 +755,12 @@ mod tests {
         // 4. Call a tool
         let call_params = serde_json::json!({"name": "echo", "arguments": {"text": "test"}});
         let call_result = handler.route("tools/call", call_params).await.unwrap();
-        assert!(call_result["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("test"));
+        assert!(
+            call_result["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("test")
+        );
 
         // 5. List resources
         let resources_result = handler.route("resources/list", Value::Null).await.unwrap();
@@ -769,10 +771,12 @@ mod tests {
         let uri = resources[0]["uri"].as_str().unwrap();
         let read_params = serde_json::json!({"uri": uri});
         let read_result = handler.route("resources/read", read_params).await.unwrap();
-        assert!(read_result["contents"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("fn main()"));
+        assert!(
+            read_result["contents"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("fn main()")
+        );
     }
 
     #[test]

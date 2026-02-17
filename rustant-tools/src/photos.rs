@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use rustant_core::error::ToolError;
 use rustant_core::types::{RiskLevel, ToolOutput};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::Duration;
 
 use crate::registry::Tool;

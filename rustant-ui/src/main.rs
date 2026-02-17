@@ -8,7 +8,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use rustant_core::gateway::{gateway_router, GatewayConfig, GatewayServer, SharedGateway};
+use rustant_core::gateway::{GatewayConfig, GatewayServer, SharedGateway, gateway_router};
 use rustant_ui::AppState;
 use std::path::PathBuf;
 use std::sync::Arc;

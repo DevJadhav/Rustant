@@ -7,10 +7,10 @@
 //! For approval requests, a oneshot channel is used so the agent
 //! suspends until the user responds in the TUI.
 
+use rustant_core::AgentCallback;
 use rustant_core::explanation::DecisionExplanation;
 use rustant_core::safety::{ActionRequest, ApprovalDecision};
 use rustant_core::types::{AgentStatus, CostEstimate, ProgressUpdate, TokenUsage, ToolOutput};
-use rustant_core::AgentCallback;
 use tokio::sync::{mpsc, oneshot};
 
 /// Events sent from the Agent (via TuiCallback) to the TUI event loop.

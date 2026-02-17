@@ -4,7 +4,7 @@
 
 use axum::body::Body;
 use rustant_core::gateway::{
-    gateway_router, GatewayConfig, GatewayServer, PendingApproval, SharedGateway,
+    GatewayConfig, GatewayServer, PendingApproval, SharedGateway, gateway_router,
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;

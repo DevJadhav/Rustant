@@ -2,6 +2,7 @@
 
 use proptest::prelude::*;
 
+use rustant_core::Message;
 use rustant_core::credentials::CredentialStore;
 use rustant_core::credentials::InMemoryCredentialStore;
 use rustant_core::injection::InjectionDetector;
@@ -10,7 +11,6 @@ use rustant_core::merkle::MerkleChain;
 use rustant_core::scheduler::{CronJob, CronJobConfig, CronScheduler};
 use rustant_core::skills::parse_skill_md;
 use rustant_core::updater::is_newer_version;
-use rustant_core::Message;
 
 // --- Version comparison properties ---
 

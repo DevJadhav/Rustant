@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use rustant_core::error::ToolError;
 use rustant_core::types::{RiskLevel, ToolOutput};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 
 use crate::registry::Tool;
@@ -814,9 +814,7 @@ impl Tool for SelfImprovementTool {
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 if task_description.is_empty() {
-                    return Ok(ToolOutput::text(
-                        "Provide 'task_description' for feedback.",
-                    ));
+                    return Ok(ToolOutput::text("Provide 'task_description' for feedback."));
                 }
                 let satisfaction = args
                     .get("satisfaction")
@@ -1159,9 +1157,11 @@ mod tests {
             .await
             .unwrap();
         assert!(result.content.contains("Baseline reset"));
-        assert!(result
-            .content
-            .contains("Preferences and feedback preserved"));
+        assert!(
+            result
+                .content
+                .contains("Preferences and feedback preserved")
+        );
 
         // Verify patterns and metrics cleared, preferences and feedback kept
         let state = tool.load_state();

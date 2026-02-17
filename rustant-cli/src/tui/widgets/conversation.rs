@@ -1,12 +1,12 @@
 //! Conversation pane widget - scrollable message list.
 
 use crate::tui::theme::Theme;
-use crate::tui::widgets::markdown::{render_markdown, SyntaxHighlighter};
+use crate::tui::widgets::markdown::{SyntaxHighlighter, render_markdown};
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use ratatui::Frame;
 use rustant_core::types::{Content, Message, Role};
 
 /// A displayable message in the conversation.
@@ -91,6 +91,10 @@ impl ConversationState {
         if self.auto_scroll {
             self.scroll_to_bottom();
         }
+    }
+
+    pub fn has_streaming_content(&self) -> bool {
+        !self.streaming_buffer.is_empty()
     }
 
     pub fn finish_streaming(&mut self) {

@@ -12,8 +12,8 @@
 //! | Google Gemini | Supported | Google OAuth 2.0 |
 //! | Anthropic | Blocked for 3rd-party | API key only |
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{DateTime, Utc};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -137,7 +137,7 @@ fn generate_pkce_pair() -> PkcePair {
 /// Generate a random state parameter for CSRF protection.
 fn generate_state() -> String {
     let mut rng = rand::thread_rng();
-    let bytes: [u8; 32] = rng.gen();
+    let bytes: [u8; 32] = rng.r#gen();
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
@@ -1566,9 +1566,11 @@ mod tests {
         let config = slack_oauth_config("slack-client-123", Some("slack-secret".into()));
         assert_eq!(config.provider_name, "slack");
         assert_eq!(config.client_id, "slack-client-123");
-        assert!(config
-            .authorization_url
-            .contains("slack.com/oauth/v2/authorize"));
+        assert!(
+            config
+                .authorization_url
+                .contains("slack.com/oauth/v2/authorize")
+        );
         assert!(config.token_url.contains("slack.com/api/oauth.v2.access"));
         assert!(config.scopes.contains(&"chat:write".to_string()));
         assert!(config.scopes.contains(&"channels:history".to_string()));
@@ -1582,9 +1584,11 @@ mod tests {
         let config = discord_oauth_config("discord-client-456", Some("discord-secret".into()));
         assert_eq!(config.provider_name, "discord");
         assert_eq!(config.client_id, "discord-client-456");
-        assert!(config
-            .authorization_url
-            .contains("discord.com/api/oauth2/authorize"));
+        assert!(
+            config
+                .authorization_url
+                .contains("discord.com/api/oauth2/authorize")
+        );
         assert!(config.token_url.contains("discord.com/api/oauth2/token"));
         assert!(config.scopes.contains(&"bot".to_string()));
         assert!(config.scopes.contains(&"messages.read".to_string()));
@@ -1600,29 +1604,39 @@ mod tests {
         );
         assert_eq!(config.provider_name, "teams");
         assert_eq!(config.client_id, "teams-client-789");
-        assert!(config
-            .authorization_url
-            .contains("login.microsoftonline.com/my-tenant-id"));
-        assert!(config
-            .token_url
-            .contains("login.microsoftonline.com/my-tenant-id"));
-        assert!(config
-            .scopes
-            .contains(&"https://graph.microsoft.com/.default".to_string()));
+        assert!(
+            config
+                .authorization_url
+                .contains("login.microsoftonline.com/my-tenant-id")
+        );
+        assert!(
+            config
+                .token_url
+                .contains("login.microsoftonline.com/my-tenant-id")
+        );
+        assert!(
+            config
+                .scopes
+                .contains(&"https://graph.microsoft.com/.default".to_string())
+        );
         assert!(config.supports_device_code);
-        assert!(config
-            .device_code_url
-            .as_ref()
-            .unwrap()
-            .contains("my-tenant-id"));
+        assert!(
+            config
+                .device_code_url
+                .as_ref()
+                .unwrap()
+                .contains("my-tenant-id")
+        );
     }
 
     #[test]
     fn test_teams_oauth_config_common_tenant() {
         let config = teams_oauth_config("teams-client", "common", None);
-        assert!(config
-            .authorization_url
-            .contains("common/oauth2/v2.0/authorize"));
+        assert!(
+            config
+                .authorization_url
+                .contains("common/oauth2/v2.0/authorize")
+        );
         assert!(config.token_url.contains("common/oauth2/v2.0/token"));
     }
 
@@ -1631,18 +1645,26 @@ mod tests {
         let config = whatsapp_oauth_config("meta-app-123", Some("meta-secret".into()));
         assert_eq!(config.provider_name, "whatsapp");
         assert_eq!(config.client_id, "meta-app-123");
-        assert!(config
-            .authorization_url
-            .contains("facebook.com/v18.0/dialog/oauth"));
-        assert!(config
-            .token_url
-            .contains("graph.facebook.com/v18.0/oauth/access_token"));
-        assert!(config
-            .scopes
-            .contains(&"whatsapp_business_messaging".to_string()));
-        assert!(config
-            .scopes
-            .contains(&"whatsapp_business_management".to_string()));
+        assert!(
+            config
+                .authorization_url
+                .contains("facebook.com/v18.0/dialog/oauth")
+        );
+        assert!(
+            config
+                .token_url
+                .contains("graph.facebook.com/v18.0/oauth/access_token")
+        );
+        assert!(
+            config
+                .scopes
+                .contains(&"whatsapp_business_messaging".to_string())
+        );
+        assert!(
+            config
+                .scopes
+                .contains(&"whatsapp_business_management".to_string())
+        );
         assert!(!config.supports_device_code);
     }
 
@@ -1653,14 +1675,18 @@ mod tests {
         assert_eq!(config.client_id, "gmail-client-id");
         assert!(config.authorization_url.contains("accounts.google.com"));
         assert!(config.token_url.contains("oauth2.googleapis.com"));
-        assert!(config
-            .scopes
-            .contains(&"https://mail.google.com/".to_string()));
+        assert!(
+            config
+                .scopes
+                .contains(&"https://mail.google.com/".to_string())
+        );
         // Gmail config should request offline access
-        assert!(config
-            .extra_auth_params
-            .iter()
-            .any(|(k, v)| k == "access_type" && v == "offline"));
+        assert!(
+            config
+                .extra_auth_params
+                .iter()
+                .any(|(k, v)| k == "access_type" && v == "offline")
+        );
     }
 
     #[test]

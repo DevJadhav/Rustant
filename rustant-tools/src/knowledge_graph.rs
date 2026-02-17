@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use rustant_core::error::ToolError;
 use rustant_core::types::{RiskLevel, ToolOutput};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -299,10 +299,7 @@ impl Tool for KnowledgeGraphTool {
                     return Ok(ToolOutput::text("Missing required parameter 'name'."));
                 }
 
-                let node_type_str = args
-                    .get("node_type")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let node_type_str = args.get("node_type").and_then(|v| v.as_str()).unwrap_or("");
                 let node_type = match NodeType::from_str_loose(node_type_str) {
                     Some(nt) => nt,
                     None => {
@@ -398,8 +395,16 @@ impl Tool for KnowledgeGraphTool {
                     node.node_type.as_str(),
                     node.id,
                     node.node_type.as_str(),
-                    if node.description.is_empty() { "(none)" } else { &node.description },
-                    if node.tags.is_empty() { "(none)".to_string() } else { node.tags.join(", ") },
+                    if node.description.is_empty() {
+                        "(none)"
+                    } else {
+                        &node.description
+                    },
+                    if node.tags.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        node.tags.join(", ")
+                    },
                     node.created_at.format("%Y-%m-%d %H:%M"),
                     node.updated_at.format("%Y-%m-%d %H:%M"),
                 );
@@ -415,7 +420,11 @@ impl Tool for KnowledgeGraphTool {
                     output.push_str(&format!("\n  Edges ({}):", connected_edges.len()));
                     for edge in &connected_edges {
                         let direction = if edge.source_id == id {
-                            format!("--[{}]--> {}", edge.relationship_type.as_str(), edge.target_id)
+                            format!(
+                                "--[{}]--> {}",
+                                edge.relationship_type.as_str(),
+                                edge.target_id
+                            )
                         } else {
                             format!(
                                 "<--[{}]-- {}",
@@ -492,14 +501,8 @@ impl Tool for KnowledgeGraphTool {
             }
 
             "add_edge" => {
-                let source_id = args
-                    .get("source_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let target_id = args
-                    .get("target_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let source_id = args.get("source_id").and_then(|v| v.as_str()).unwrap_or("");
+                let target_id = args.get("target_id").and_then(|v| v.as_str()).unwrap_or("");
                 let rel_str = args
                     .get("relationship_type")
                     .and_then(|v| v.as_str())
@@ -565,14 +568,8 @@ impl Tool for KnowledgeGraphTool {
             }
 
             "remove_edge" => {
-                let source_id = args
-                    .get("source_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let target_id = args
-                    .get("target_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let source_id = args.get("source_id").and_then(|v| v.as_str()).unwrap_or("");
+                let target_id = args.get("target_id").and_then(|v| v.as_str()).unwrap_or("");
 
                 if source_id.is_empty() || target_id.is_empty() {
                     return Ok(ToolOutput::text(
@@ -672,10 +669,7 @@ impl Tool for KnowledgeGraphTool {
                     )));
                 }
 
-                let mut output = format!(
-                    "Neighbors of '{}' (depth {}):\n",
-                    id, max_depth
-                );
+                let mut output = format!("Neighbors of '{}' (depth {}):\n", id, max_depth);
                 for (nid, depth) in &found_nodes {
                     if let Some(node) = state.nodes.iter().find(|n| n.id == *nid) {
                         output.push_str(&format!(
@@ -717,17 +711,12 @@ impl Tool for KnowledgeGraphTool {
                         }
                         n.name.to_lowercase().contains(&query)
                             || n.description.to_lowercase().contains(&query)
-                            || n.tags
-                                .iter()
-                                .any(|t| t.to_lowercase().contains(&query))
+                            || n.tags.iter().any(|t| t.to_lowercase().contains(&query))
                     })
                     .collect();
 
                 if matches.is_empty() {
-                    return Ok(ToolOutput::text(format!(
-                        "No nodes matching '{}'.",
-                        query
-                    )));
+                    return Ok(ToolOutput::text(format!("No nodes matching '{}'.", query)));
                 }
 
                 let mut output = format!("Found {} node(s):\n", matches.len());
@@ -761,11 +750,7 @@ impl Tool for KnowledgeGraphTool {
                             }
                         }
                         if let Some(tag) = tag_filter {
-                            if !n
-                                .tags
-                                .iter()
-                                .any(|t| t.eq_ignore_ascii_case(tag))
-                            {
+                            if !n.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
                                 return false;
                             }
                         }
@@ -791,10 +776,7 @@ impl Tool for KnowledgeGraphTool {
             }
 
             "path" => {
-                let from_id = args
-                    .get("from_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let from_id = args.get("from_id").and_then(|v| v.as_str()).unwrap_or("");
                 let to_id = args.get("to_id").and_then(|v| v.as_str()).unwrap_or("");
 
                 if from_id.is_empty() || to_id.is_empty() {
@@ -804,16 +786,10 @@ impl Tool for KnowledgeGraphTool {
                 }
 
                 if !state.nodes.iter().any(|n| n.id == from_id) {
-                    return Ok(ToolOutput::text(format!(
-                        "Node '{}' not found.",
-                        from_id
-                    )));
+                    return Ok(ToolOutput::text(format!("Node '{}' not found.", from_id)));
                 }
                 if !state.nodes.iter().any(|n| n.id == to_id) {
-                    return Ok(ToolOutput::text(format!(
-                        "Node '{}' not found.",
-                        to_id
-                    )));
+                    return Ok(ToolOutput::text(format!("Node '{}' not found.", to_id)));
                 }
 
                 // BFS shortest path (bidirectional edges)
@@ -951,7 +927,10 @@ impl Tool for KnowledgeGraphTool {
                             .find(|n| n.id == ***nid)
                             .map(|n| n.name.as_str())
                             .unwrap_or("?");
-                        output.push_str(&format!("    {} ({}) — {} connections\n", nid, node_name, count));
+                        output.push_str(&format!(
+                            "    {} ({}) — {} connections\n",
+                            nid, node_name, count
+                        ));
                     }
                 }
 
@@ -959,14 +938,9 @@ impl Tool for KnowledgeGraphTool {
             }
 
             "import_arxiv" => {
-                let arxiv_id = args
-                    .get("arxiv_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let arxiv_id = args.get("arxiv_id").and_then(|v| v.as_str()).unwrap_or("");
                 if arxiv_id.is_empty() {
-                    return Ok(ToolOutput::text(
-                        "Missing required parameter 'arxiv_id'.",
-                    ));
+                    return Ok(ToolOutput::text("Missing required parameter 'arxiv_id'."));
                 }
 
                 let lib_path = self.arxiv_library_path();
@@ -976,12 +950,11 @@ impl Tool for KnowledgeGraphTool {
                     ));
                 }
 
-                let lib_json = std::fs::read_to_string(&lib_path).map_err(|e| {
-                    ToolError::ExecutionFailed {
+                let lib_json =
+                    std::fs::read_to_string(&lib_path).map_err(|e| ToolError::ExecutionFailed {
                         name: "knowledge_graph".to_string(),
                         message: format!("Failed to read arxiv library: {}", e),
-                    }
-                })?;
+                    })?;
 
                 let library: ArxivLibraryFile =
                     serde_json::from_str(&lib_json).map_err(|e| ToolError::ExecutionFailed {
@@ -989,11 +962,7 @@ impl Tool for KnowledgeGraphTool {
                         message: format!("Failed to parse arxiv library: {}", e),
                     })?;
 
-                let entry = match library
-                    .entries
-                    .iter()
-                    .find(|e| e.paper.id == arxiv_id)
-                {
+                let entry = match library.entries.iter().find(|e| e.paper.id == arxiv_id) {
                     Some(e) => e,
                     None => {
                         return Ok(ToolOutput::text(format!(

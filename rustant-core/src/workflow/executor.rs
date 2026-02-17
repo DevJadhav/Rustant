@@ -2,7 +2,7 @@
 //! handling errors, and persisting state for pause/resume.
 
 use crate::error::WorkflowError;
-use crate::workflow::templates::{evaluate_condition, render_value, TemplateContext};
+use crate::workflow::templates::{TemplateContext, evaluate_condition, render_value};
 use crate::workflow::types::{
     ApprovalDecision, ErrorAction, GateType, WorkflowDefinition, WorkflowState, WorkflowStatus,
 };
@@ -632,10 +632,12 @@ steps:
         let state = executor.start(&wf, HashMap::new()).await.unwrap();
         assert_eq!(state.status, WorkflowStatus::Completed);
         assert!(state.step_outputs.contains_key("failing"));
-        assert!(state.step_outputs["failing"]
-            .as_str()
-            .unwrap()
-            .contains("skipped"));
+        assert!(
+            state.step_outputs["failing"]
+                .as_str()
+                .unwrap()
+                .contains("skipped")
+        );
     }
 
     #[tokio::test]

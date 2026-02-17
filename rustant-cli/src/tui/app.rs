@@ -2,26 +2,26 @@
 
 use crate::repl::extract_tool_detail;
 use crate::tui::callback::{TuiCallback, TuiEvent};
-use crate::tui::event::{map_approval_key, map_global_key, Action, EventHandler};
+use crate::tui::event::{Action, EventHandler, map_approval_key, map_global_key};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::autocomplete::AutocompleteState;
 use crate::tui::widgets::command_palette::CommandPalette;
-use crate::tui::widgets::conversation::{render_conversation, ConversationState, DisplayMessage};
+use crate::tui::widgets::conversation::{ConversationState, DisplayMessage, render_conversation};
 use crate::tui::widgets::diff_view::DiffView;
-use crate::tui::widgets::explanation_panel::{render_explanation_panel, ExplanationPanel};
-use crate::tui::widgets::header::{render_header, HeaderData};
+use crate::tui::widgets::explanation_panel::{ExplanationPanel, render_explanation_panel};
+use crate::tui::widgets::header::{HeaderData, render_header};
 use crate::tui::widgets::input_area::{InputAction, InputWidget};
-use crate::tui::widgets::keys_overlay::{render_keys_overlay, KeysOverlay};
+use crate::tui::widgets::keys_overlay::{KeysOverlay, render_keys_overlay};
 use crate::tui::widgets::markdown::SyntaxHighlighter;
-use crate::tui::widgets::plan_panel::{render_plan_panel, PlanPanel};
-use crate::tui::widgets::progress_bar::{render_progress_bar, ProgressState};
-use crate::tui::widgets::replay_panel::{render_replay_panel, ReplayPanel};
-use crate::tui::widgets::sidebar::{render_sidebar, FileEntry, FileStatus, SidebarData};
-use crate::tui::widgets::status_bar::{render_status_bar, InputMode, StatusBarData};
-use crate::tui::widgets::task_board::{render_task_board, TaskBoard};
+use crate::tui::widgets::plan_panel::{PlanPanel, render_plan_panel};
+use crate::tui::widgets::progress_bar::{ProgressState, render_progress_bar};
+use crate::tui::widgets::replay_panel::{ReplayPanel, render_replay_panel};
+use crate::tui::widgets::sidebar::{FileEntry, FileStatus, SidebarData, render_sidebar};
+use crate::tui::widgets::status_bar::{InputMode, StatusBarData, render_status_bar};
+use crate::tui::widgets::task_board::{TaskBoard, render_task_board};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
-use ratatui::layout::{Constraint, Layout};
 use ratatui::Frame;
+use ratatui::layout::{Constraint, Layout};
 use rustant_core::audit::{Analytics, AuditExporter, AuditQuery, AuditStore, ExecutionTrace};
 use rustant_core::replay::ReplaySession;
 use rustant_core::types::{AgentStatus, Role};
@@ -137,7 +137,7 @@ impl App {
         };
 
         let sidebar = SidebarData {
-            tools_available: agent.tool_definitions().len(),
+            tools_available: agent.tool_definitions(None).len(),
             max_iterations: config.safety.max_iterations,
             ..Default::default()
         };
@@ -297,7 +297,13 @@ impl App {
             0
         };
 
-        let [header_area, main_area, progress_area, input_area, status_area] = Layout::vertical([
+        let [
+            header_area,
+            main_area,
+            progress_area,
+            input_area,
+            status_area,
+        ] = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(8),
             Constraint::Length(progress_height),
@@ -1029,7 +1035,7 @@ impl App {
                 });
             }
             "/tools" => {
-                let defs = self.agent.tool_definitions();
+                let defs = self.agent.tool_definitions(None);
                 let tool_list = defs
                     .iter()
                     .map(|d| format!("  {} - {}", d.name, d.description))
@@ -1525,7 +1531,7 @@ impl App {
             }
             "/doctor" => {
                 let config = self.agent.config();
-                let tools = self.agent.tool_definitions();
+                let tools = self.agent.tool_definitions(None);
                 let mem = self.agent.memory();
                 let audit_count = self.agent.safety().audit_log().len();
                 let has_git = self.workspace.join(".git").exists();
@@ -1817,7 +1823,7 @@ impl App {
                 self.push_system_msg(
                     "The setup wizard requires interactive terminal input.\n\
                      Please exit the TUI and run: rustant setup\n\
-                     Or use: rustant --no-tui to enter REPL mode, then /setup",
+                     Or use: rustant to enter REPL mode, then /setup",
                 );
             }
             "/workflows" => {
@@ -2310,14 +2316,20 @@ impl App {
     pub fn handle_tui_event(&mut self, event: TuiEvent) {
         match event {
             TuiEvent::AssistantMessage(msg) => {
+                // If streaming was active, finish_streaming() already pushes the
+                // accumulated text as a message. Only push a separate message if
+                // there was no streaming (non-streaming mode).
+                let had_streaming = self.conversation.has_streaming_content();
                 self.conversation.finish_streaming();
-                self.conversation.push_message(DisplayMessage {
-                    role: Role::Assistant,
-                    text: msg,
-                    tool_name: None,
-                    is_error: false,
-                    timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
-                });
+                if !had_streaming {
+                    self.conversation.push_message(DisplayMessage {
+                        role: Role::Assistant,
+                        text: msg,
+                        tool_name: None,
+                        is_error: false,
+                        timestamp: chrono::Utc::now().format("%H:%M:%S").to_string(),
+                    });
+                }
             }
             TuiEvent::StreamToken(token) => {
                 self.conversation.append_stream_token(&token);
@@ -3221,9 +3233,11 @@ mod tests {
         let mut app = App::new(test_config(), std::env::temp_dir());
         app.handle_command("/foobar");
         assert_eq!(app.conversation.messages.len(), 1);
-        assert!(app.conversation.messages[0]
-            .text
-            .contains("Unknown command"));
+        assert!(
+            app.conversation.messages[0]
+                .text
+                .contains("Unknown command")
+        );
     }
 
     #[test]
@@ -3522,11 +3536,12 @@ mod tests {
         {
             app.handle_command(&format!("/load {}", test_name));
             // Should have a "Session loaded" message
-            assert!(app
-                .conversation
-                .messages
-                .iter()
-                .any(|m| m.text.contains("Session loaded")));
+            assert!(
+                app.conversation
+                    .messages
+                    .iter()
+                    .any(|m| m.text.contains("Session loaded"))
+            );
 
             // Clean up
             if let Some(dir) = App::sessions_dir() {

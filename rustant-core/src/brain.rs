@@ -63,6 +63,21 @@ impl TokenCounter {
         self.bpe.encode_with_special_tokens(text).len()
     }
 
+    /// Estimate the token count for a set of tool definitions.
+    ///
+    /// Each tool definition adds overhead for the JSON schema structure
+    /// (type/function wrapper), plus the name, description, and parameters.
+    pub fn count_tool_definitions(&self, tools: &[ToolDefinition]) -> usize {
+        let mut total = 0;
+        for tool in tools {
+            total += 10; // struct overhead (type, function wrapper, required fields)
+            total += self.count(&tool.name);
+            total += self.count(&tool.description);
+            total += self.count(&tool.parameters.to_string());
+        }
+        total
+    }
+
     /// Estimate the token count for a set of messages.
     /// Adds overhead for message structure (role, separators).
     pub fn count_messages(&self, messages: &[Message]) -> usize {
@@ -267,6 +282,19 @@ impl Brain {
         self.token_counter.count_messages(messages)
     }
 
+    /// Estimate token count for messages plus tool definitions.
+    pub fn estimate_tokens_with_tools(
+        &self,
+        messages: &[Message],
+        tools: Option<&[ToolDefinition]>,
+    ) -> usize {
+        let mut total = self.token_counter.count_messages(messages);
+        if let Some(tool_defs) = tools {
+            total += self.token_counter.count_tool_definitions(tool_defs);
+        }
+        total
+    }
+
     /// Construct messages for the LLM with system prompt prepended.
     ///
     /// If a knowledge addendum has been set via `set_knowledge_addendum()`,
@@ -294,7 +322,10 @@ impl Brain {
         tools: Option<Vec<ToolDefinition>>,
     ) -> Result<CompletionResponse, LlmError> {
         let messages = self.build_messages(conversation);
-        let token_estimate = self.provider.estimate_tokens(&messages);
+        let mut token_estimate = self.provider.estimate_tokens(&messages);
+        if let Some(ref tool_defs) = tools {
+            token_estimate += self.token_counter.count_tool_definitions(tool_defs);
+        }
         let context_limit = self.provider.context_window();
 
         if token_estimate > context_limit {
@@ -654,21 +685,12 @@ Other behaviors:
 - Prefer small, focused changes over large rewrites
 - Respect file boundaries and permissions
 
-Tool categories:
-
-File & Code: file_read, file_write, file_list, file_search, file_patch, smart_edit, codebase_search, document_read (for PDFs/docs only)
-Git: git_status, git_diff, git_commit
-Shell: shell_exec (last resort only)
-Utilities: calculator, datetime, echo, web_search (for web searches — uses DuckDuckGo, preferred over safari/shell), web_fetch (for fetching URL content — preferred over safari/shell), http_api, template, pdf_generate, compress, file_organizer
-Personal Productivity: pomodoro, inbox, finance, flashcards, travel, relationships
-Research & Intelligence: arxiv_research (ALWAYS use this for paper/preprint searches — it has a built-in arXiv API client, never use safari/curl for arXiv), knowledge_graph (concepts, papers, relationships, BFS traversal), experiment_tracker (hypotheses, experiments, evidence)
-Code Analysis: code_intelligence (architecture, patterns, tech debt, API surface, dependency map), codebase_search
-Professional Growth: skill_tracker (proficiency, practice logs, learning paths), career_intel (goals, achievements, portfolio), content_engine (multi-platform content pipeline, calendar)
-Life Management: life_planner (energy-aware scheduling, deadlines, habits), system_monitor (service topology, health checks, incidents), privacy_manager (data boundaries, compliance, audit), self_improvement (usage patterns, performance, preferences)
-macOS Native: macos_calendar, macos_reminders, macos_notes, macos_clipboard, macos_system_info, macos_app_control, macos_notification, macos_screenshot, macos_spotlight, macos_finder, macos_focus_mode, macos_mail, macos_music, macos_shortcuts, macos_meeting_recorder (use 'record_and_transcribe' for full meeting flow — TTS announcement, silence auto-stop, auto-transcribe to Notes.app; use 'stop' to end manually), macos_daily_briefing, macos_contacts, homekit
-macOS Automation: macos_gui_scripting, macos_accessibility, macos_screen_analyze, macos_safari (only for Safari-specific tasks like tab management — for web searches use web_search, for fetching pages use web_fetch)
-iMessage: imessage_contacts, imessage_send, imessage_read
-Voice: macos_say
+Tools:
+- Use the tools provided to you. Each tool has a name, description, and parameter schema.
+- For arXiv/paper searches: ALWAYS use arxiv_research (built-in API client), never safari/curl.
+- For web searches: use web_search (DuckDuckGo), not safari/shell.
+- For fetching URLs: use web_fetch, not safari/shell.
+- For meeting recording: use macos_meeting_recorder with 'record_and_transcribe' for full flow.
 
 Workflows (structured multi-step templates — run via shell_exec "rustant workflow run <name>"):
   code_review, refactor, test_generation, documentation, dependency_update,
@@ -1286,5 +1308,77 @@ mod tests {
         ];
         super::sanitize_tool_sequence(&mut messages);
         assert_eq!(messages.len(), 3);
+    }
+
+    #[test]
+    fn test_count_tool_definitions() {
+        let counter = TokenCounter::for_model("gpt-4");
+        let tools = vec![
+            ToolDefinition {
+                name: "calculator".to_string(),
+                description: "Perform arithmetic calculations".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "expression": { "type": "string", "description": "Math expression" }
+                    },
+                    "required": ["expression"]
+                }),
+            },
+            ToolDefinition {
+                name: "file_read".to_string(),
+                description: "Read a file from the filesystem".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "File path" }
+                    },
+                    "required": ["path"]
+                }),
+            },
+        ];
+
+        let token_count = counter.count_tool_definitions(&tools);
+        // Each tool: 10 overhead + name tokens + description tokens + params tokens
+        // Should be a meaningful positive number
+        assert!(
+            token_count > 40,
+            "Two tool definitions should count as >40 tokens, got {}",
+            token_count
+        );
+        // Sanity: shouldn't be absurdly large
+        assert!(
+            token_count < 500,
+            "Two simple tool definitions should be <500 tokens, got {}",
+            token_count
+        );
+    }
+
+    #[test]
+    fn test_count_tool_definitions_empty() {
+        let counter = TokenCounter::for_model("gpt-4");
+        assert_eq!(counter.count_tool_definitions(&[]), 0);
+    }
+
+    #[test]
+    fn test_estimate_tokens_with_tools() {
+        let provider = Arc::new(MockLlmProvider::new());
+        let brain = Brain::new(provider, "system prompt");
+
+        let messages = vec![Message::user("hello")];
+        let tools = vec![ToolDefinition {
+            name: "echo".to_string(),
+            description: "Echo text back".to_string(),
+            parameters: serde_json::json!({"type": "object"}),
+        }];
+
+        let without_tools = brain.estimate_tokens(&messages);
+        let with_tools = brain.estimate_tokens_with_tools(&messages, Some(&tools));
+        assert!(
+            with_tools > without_tools,
+            "Token estimate with tools ({}) should be greater than without ({})",
+            with_tools,
+            without_tools
+        );
     }
 }

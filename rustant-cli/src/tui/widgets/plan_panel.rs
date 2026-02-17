@@ -3,11 +3,11 @@
 //! Toggle with Ctrl+P. When a plan is under review, the panel auto-shows
 //! and captures keyboard focus for plan-specific actions.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
-use ratatui::Frame;
 use rustant_core::plan::{ExecutionPlan, PlanDecision, StepStatus};
 use tokio::sync::oneshot;
 

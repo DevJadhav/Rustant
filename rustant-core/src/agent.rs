@@ -18,7 +18,7 @@ use crate::types::{
     AgentState, AgentStatus, CompletionResponse, Content, CostEstimate, Message, ProgressUpdate,
     RiskLevel, Role, StreamEvent, TaskClassification, TokenUsage, ToolDefinition, ToolOutput,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{mpsc, oneshot};
@@ -319,10 +319,164 @@ impl Agent {
         self.tools.insert(tool.definition.name.clone(), tool);
     }
 
-    /// Get tool definitions for the LLM.
-    pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
-        let mut defs: Vec<ToolDefinition> =
-            self.tools.values().map(|t| t.definition.clone()).collect();
+    /// Map a task classification to the set of tool names relevant for that task.
+    ///
+    /// Returns `None` for `General` and `Workflow(_)` classifications, meaning
+    /// all tools should be sent.  For specific classifications, returns a set
+    /// containing core tools (always needed) plus task-specific tools, reducing
+    /// the number of tool definitions sent per LLM request from ~67 to ~12-25.
+    fn tools_for_classification(
+        classification: &TaskClassification,
+    ) -> Option<HashSet<&'static str>> {
+        // Core tools — always included regardless of classification
+        let core: [&str; 10] = [
+            "ask_user",
+            "echo",
+            "datetime",
+            "calculator",
+            "shell_exec",
+            "file_read",
+            "file_write",
+            "file_list",
+            "file_search",
+            "web_search",
+        ];
+
+        let extra: &[&str] = match classification {
+            TaskClassification::General | TaskClassification::Workflow(_) => return None,
+            TaskClassification::FileOperation => &[
+                "file_patch",
+                "smart_edit",
+                "codebase_search",
+                "document_read",
+            ],
+            TaskClassification::GitOperation => &[
+                "git_status",
+                "git_diff",
+                "git_commit",
+                "file_patch",
+                "smart_edit",
+            ],
+            TaskClassification::CodeAnalysis => &[
+                "code_intelligence",
+                "codebase_search",
+                "smart_edit",
+                "git_status",
+                "git_diff",
+            ],
+            TaskClassification::Search => &["codebase_search", "web_fetch", "smart_edit"],
+            TaskClassification::WebSearch => &["web_fetch"],
+            TaskClassification::WebFetch => &["web_fetch", "http_api"],
+            TaskClassification::Calendar => &["macos_calendar", "macos_notification"],
+            TaskClassification::Reminders => &["macos_reminders", "macos_notification"],
+            TaskClassification::Notes => &["macos_notes"],
+            TaskClassification::Email => &["macos_mail", "macos_notification"],
+            TaskClassification::Music => &["macos_music"],
+            TaskClassification::AppControl => &[
+                "macos_app_control",
+                "macos_gui_scripting",
+                "macos_accessibility",
+                "macos_screen_analyze",
+            ],
+            TaskClassification::Clipboard => &["macos_clipboard"],
+            TaskClassification::Screenshot => &["macos_screenshot"],
+            TaskClassification::SystemInfo => &["macos_system_info"],
+            TaskClassification::Contacts => &["macos_contacts", "imessage_contacts"],
+            TaskClassification::Safari => &["macos_safari", "web_fetch"],
+            TaskClassification::HomeKit => &["homekit"],
+            TaskClassification::Photos => &["photos"],
+            TaskClassification::Voice => &["macos_say"],
+            TaskClassification::Meeting => &[
+                "macos_meeting_recorder",
+                "macos_notes",
+                "macos_notification",
+            ],
+            TaskClassification::DailyBriefing => &[
+                "macos_daily_briefing",
+                "macos_calendar",
+                "macos_reminders",
+                "macos_mail",
+                "macos_notes",
+            ],
+            TaskClassification::GuiScripting => &[
+                "macos_gui_scripting",
+                "macos_accessibility",
+                "macos_screen_analyze",
+                "macos_app_control",
+            ],
+            TaskClassification::Accessibility => &[
+                "macos_accessibility",
+                "macos_gui_scripting",
+                "macos_screen_analyze",
+            ],
+            TaskClassification::Browser => &[
+                "browser_navigate",
+                "browser_click",
+                "browser_type",
+                "browser_screenshot",
+                "web_fetch",
+            ],
+            TaskClassification::Messaging => {
+                &["imessage_read", "imessage_send", "imessage_contacts"]
+            }
+            TaskClassification::Slack => &["slack"],
+            TaskClassification::ArxivResearch => {
+                &["arxiv_research", "knowledge_graph", "web_fetch"]
+            }
+            TaskClassification::KnowledgeGraph => &["knowledge_graph"],
+            TaskClassification::ExperimentTracking => &["experiment_tracker"],
+            TaskClassification::CodeIntelligence => {
+                &["code_intelligence", "codebase_search", "smart_edit"]
+            }
+            TaskClassification::ContentEngine => &["content_engine"],
+            TaskClassification::SkillTracker => &["skill_tracker"],
+            TaskClassification::CareerIntel => &["career_intel"],
+            TaskClassification::SystemMonitor => &["system_monitor"],
+            TaskClassification::LifePlanner => &["life_planner"],
+            TaskClassification::PrivacyManager => &["privacy_manager"],
+            TaskClassification::SelfImprovement => &["self_improvement"],
+            TaskClassification::Notification => &["macos_notification"],
+            TaskClassification::Spotlight => &["macos_spotlight"],
+            TaskClassification::FocusMode => &["macos_focus_mode"],
+            TaskClassification::Finder => &["macos_finder"],
+        };
+
+        let mut set: HashSet<&str> = core.into_iter().collect();
+        set.extend(extra.iter().copied());
+        Some(set)
+    }
+
+    /// Get tool definitions for the LLM, optionally filtered by task classification.
+    ///
+    /// When a classification is provided (and is not `General`/`Workflow`), only
+    /// tools relevant to that task type are returned, reducing token overhead by
+    /// 60-82% (~25K-35K tokens down to ~5K-12K).
+    pub fn tool_definitions(
+        &self,
+        classification: Option<&TaskClassification>,
+    ) -> Vec<ToolDefinition> {
+        let allowed = classification.and_then(Self::tools_for_classification);
+
+        let mut defs: Vec<ToolDefinition> = if let Some(ref allowed_set) = allowed {
+            self.tools
+                .values()
+                .filter(|t| allowed_set.contains(t.definition.name.as_str()))
+                .map(|t| t.definition.clone())
+                .collect()
+        } else {
+            self.tools.values().map(|t| t.definition.clone()).collect()
+        };
+
+        let tool_count = defs.len();
+        let total_registered = self.tools.len();
+        if tool_count < total_registered {
+            debug!(
+                filtered = tool_count,
+                total = total_registered,
+                classification = ?classification,
+                "Filtered tool definitions for LLM request"
+            );
+        }
 
         // Add the ask_user pseudo-tool so the LLM knows it can ask clarifying questions.
         defs.push(ToolDefinition {
@@ -417,7 +571,7 @@ impl Agent {
             self.callback.on_status_change(AgentStatus::Thinking).await;
 
             let conversation = self.memory.context_messages();
-            let tools = Some(self.tool_definitions());
+            let tools = Some(self.tool_definitions(self.state.task_classification.as_ref()));
 
             // Context health check before LLM call
             {
@@ -445,8 +599,10 @@ impl Agent {
                 }
             }
 
-            // Pre-call budget check
-            let estimated_tokens = self.brain.estimate_tokens(&conversation);
+            // Pre-call budget check (includes tool definition token overhead)
+            let estimated_tokens = self
+                .brain
+                .estimate_tokens_with_tools(&conversation, tools.as_deref());
             let (input_rate, output_rate) = self.brain.provider_cost_rates();
             let budget_result = self
                 .budget
@@ -843,7 +999,7 @@ impl Agent {
         let mut tool_calls: std::collections::HashMap<String, (String, String)> =
             std::collections::HashMap::new();
         let mut tool_call_order: Vec<String> = Vec::new(); // preserve order
-                                                           // Raw provider-specific function call data (e.g., Gemini thought_signature)
+        // Raw provider-specific function call data (e.g., Gemini thought_signature)
         let mut raw_function_calls: std::collections::HashMap<String, serde_json::Value> =
             std::collections::HashMap::new();
 
@@ -868,7 +1024,7 @@ impl Agent {
                     id,
                     arguments_delta,
                 } => {
-                    if let Some((_, ref mut args)) = tool_calls.get_mut(&id) {
+                    if let Some((_, args)) = tool_calls.get_mut(&id) {
                         args.push_str(&arguments_delta);
                     }
                 }
@@ -1830,37 +1986,97 @@ impl Agent {
         }
 
         let tool_hint = match classification {
-            TaskClassification::Clipboard => "For this task, call the 'macos_clipboard' tool with {\"action\":\"read\"} to read the clipboard or {\"action\":\"write\",\"content\":\"...\"} to write to it.",
-            TaskClassification::SystemInfo => "For this task, call the 'macos_system_info' tool with the appropriate action: \"battery\", \"disk\", \"memory\", \"cpu\", \"network\", or \"version\".",
-            TaskClassification::AppControl => "For this task, call the 'macos_app_control' tool with the appropriate action: \"list_running\", \"open\", \"quit\", or \"activate\".",
-            TaskClassification::Meeting => "For this task, call 'macos_meeting_recorder'. Use action 'record_and_transcribe' to start (announces via TTS, records with silence detection, auto-transcribes to Notes.app). Use 'stop' to stop manually. Use 'status' to check state.",
-            TaskClassification::Calendar => "For this task, call the 'macos_calendar' tool with the appropriate action.",
-            TaskClassification::Reminders => "For this task, call the 'macos_reminders' tool with the appropriate action.",
-            TaskClassification::Notes => "For this task, call the 'macos_notes' tool with the appropriate action.",
-            TaskClassification::Screenshot => "For this task, call the 'macos_screenshot' tool with the appropriate action.",
-            TaskClassification::Notification => "For this task, call the 'macos_notification' tool.",
-            TaskClassification::Spotlight => "For this task, call the 'macos_spotlight' tool to search files using Spotlight.",
+            TaskClassification::Clipboard => {
+                "For this task, call the 'macos_clipboard' tool with {\"action\":\"read\"} to read the clipboard or {\"action\":\"write\",\"content\":\"...\"} to write to it."
+            }
+            TaskClassification::SystemInfo => {
+                "For this task, call the 'macos_system_info' tool with the appropriate action: \"battery\", \"disk\", \"memory\", \"cpu\", \"network\", or \"version\"."
+            }
+            TaskClassification::AppControl => {
+                "For this task, call the 'macos_app_control' tool with the appropriate action: \"list_running\", \"open\", \"quit\", or \"activate\"."
+            }
+            TaskClassification::Meeting => {
+                "For this task, call 'macos_meeting_recorder'. Use action 'record_and_transcribe' to start (announces via TTS, records with silence detection, auto-transcribes to Notes.app). Use 'stop' to stop manually. Use 'status' to check state."
+            }
+            TaskClassification::Calendar => {
+                "For this task, call the 'macos_calendar' tool with the appropriate action."
+            }
+            TaskClassification::Reminders => {
+                "For this task, call the 'macos_reminders' tool with the appropriate action."
+            }
+            TaskClassification::Notes => {
+                "For this task, call the 'macos_notes' tool with the appropriate action."
+            }
+            TaskClassification::Screenshot => {
+                "For this task, call the 'macos_screenshot' tool with the appropriate action."
+            }
+            TaskClassification::Notification => {
+                "For this task, call the 'macos_notification' tool."
+            }
+            TaskClassification::Spotlight => {
+                "For this task, call the 'macos_spotlight' tool to search files using Spotlight."
+            }
             TaskClassification::FocusMode => "For this task, call the 'macos_focus_mode' tool.",
-            TaskClassification::Music => "For this task, call the 'macos_music' tool with the appropriate action.",
-            TaskClassification::Email => "For this task, call the 'macos_mail' tool with the appropriate action.",
-            TaskClassification::Finder => "For this task, call the 'macos_finder' tool with the appropriate action.",
-            TaskClassification::Contacts => "For this task, call the 'macos_contacts' tool with the appropriate action.",
-            TaskClassification::WebSearch => "For this task, call the 'web_search' tool with {\"query\": \"your search terms\"}. Do NOT use macos_safari or shell_exec for web searches — use the dedicated web_search tool which queries DuckDuckGo.",
-            TaskClassification::WebFetch => "For this task, call the 'web_fetch' tool with {\"url\": \"https://...\"} to retrieve page content. Do NOT use macos_safari or shell_exec — use the dedicated web_fetch tool.",
-            TaskClassification::Safari => "For this task, call the 'macos_safari' tool with the appropriate action. Note: for simple web searches use 'web_search' instead, and for fetching page content use 'web_fetch' instead.",
-            TaskClassification::Slack => "For this task, call the 'slack' tool with the appropriate action (send_message, read_messages, list_channels, reply_thread, list_users, add_reaction). Do NOT use macos_gui_scripting or macos_app_control to interact with Slack.",
-            TaskClassification::Messaging => "For this task, call the appropriate iMessage tool: 'imessage_read', 'imessage_send', or 'imessage_contacts'.",
-            TaskClassification::ArxivResearch => "For this task, call the 'arxiv_research' tool with {\"action\": \"search\", \"query\": \"your search terms\", \"max_results\": 10}. This tool uses the arXiv API directly — do NOT use macos_safari, shell_exec, or curl. Other actions: fetch (get by ID), analyze (LLM summary), trending (recent papers), paper_to_code, paper_to_notebook, save/library/remove, export_bibtex.",
-            TaskClassification::KnowledgeGraph => "For this task, call the 'knowledge_graph' tool. Actions: add_node, get_node, update_node, remove_node, add_edge, remove_edge, neighbors, search, list, path, stats, import_arxiv, export_dot.",
-            TaskClassification::ExperimentTracking => "For this task, call the 'experiment_tracker' tool. Actions: add_hypothesis, update_hypothesis, list_hypotheses, get_hypothesis, add_experiment, start_experiment, complete_experiment, fail_experiment, get_experiment, list_experiments, record_evidence, compare_experiments, summary, export_markdown.",
-            TaskClassification::CodeIntelligence => "For this task, call the 'code_intelligence' tool. Actions: analyze_architecture, detect_patterns, translate_snippet, compare_implementations, tech_debt_report, api_surface, dependency_map.",
-            TaskClassification::ContentEngine => "For this task, call the 'content_engine' tool. Actions: create, update, set_status, get, list, search, delete, schedule, calendar_add, calendar_list, calendar_remove, stats, adapt, export_markdown.",
-            TaskClassification::SkillTracker => "For this task, call the 'skill_tracker' tool. Actions: add_skill, log_practice, assess, list_skills, knowledge_gaps, learning_path, progress_report, daily_practice.",
-            TaskClassification::CareerIntel => "For this task, call the 'career_intel' tool. Actions: set_goal, log_achievement, add_portfolio, gap_analysis, market_scan, network_note, progress_report, strategy_review.",
-            TaskClassification::SystemMonitor => "For this task, call the 'system_monitor' tool. Actions: add_service, topology, health_check, log_incident, correlate, generate_runbook, impact_analysis, list_services.",
-            TaskClassification::LifePlanner => "For this task, call the 'life_planner' tool. Actions: set_energy_profile, add_deadline, log_habit, daily_plan, weekly_review, context_switch_log, balance_report, optimize_schedule.",
-            TaskClassification::PrivacyManager => "For this task, call the 'privacy_manager' tool. Actions: set_boundary, list_boundaries, audit_access, compliance_check, export_data, delete_data, encrypt_store, privacy_report.",
-            TaskClassification::SelfImprovement => "For this task, call the 'self_improvement' tool. Actions: analyze_patterns, performance_report, suggest_improvements, set_preference, get_preferences, cognitive_load, feedback, reset_baseline.",
+            TaskClassification::Music => {
+                "For this task, call the 'macos_music' tool with the appropriate action."
+            }
+            TaskClassification::Email => {
+                "For this task, call the 'macos_mail' tool with the appropriate action."
+            }
+            TaskClassification::Finder => {
+                "For this task, call the 'macos_finder' tool with the appropriate action."
+            }
+            TaskClassification::Contacts => {
+                "For this task, call the 'macos_contacts' tool with the appropriate action."
+            }
+            TaskClassification::WebSearch => {
+                "For this task, call the 'web_search' tool with {\"query\": \"your search terms\"}. Do NOT use macos_safari or shell_exec for web searches — use the dedicated web_search tool which queries DuckDuckGo."
+            }
+            TaskClassification::WebFetch => {
+                "For this task, call the 'web_fetch' tool with {\"url\": \"https://...\"} to retrieve page content. Do NOT use macos_safari or shell_exec — use the dedicated web_fetch tool."
+            }
+            TaskClassification::Safari => {
+                "For this task, call the 'macos_safari' tool with the appropriate action. Note: for simple web searches use 'web_search' instead, and for fetching page content use 'web_fetch' instead."
+            }
+            TaskClassification::Slack => {
+                "For this task, call the 'slack' tool with the appropriate action (send_message, read_messages, list_channels, reply_thread, list_users, add_reaction). Do NOT use macos_gui_scripting or macos_app_control to interact with Slack."
+            }
+            TaskClassification::Messaging => {
+                "For this task, call the appropriate iMessage tool: 'imessage_read', 'imessage_send', or 'imessage_contacts'."
+            }
+            TaskClassification::ArxivResearch => {
+                "For this task, call the 'arxiv_research' tool with {\"action\": \"search\", \"query\": \"your search terms\", \"max_results\": 10}. This tool uses the arXiv API directly — do NOT use macos_safari, shell_exec, or curl. Other actions: fetch (get by ID), analyze (LLM summary), trending (recent papers), paper_to_code, paper_to_notebook, save/library/remove, export_bibtex."
+            }
+            TaskClassification::KnowledgeGraph => {
+                "For this task, call the 'knowledge_graph' tool. Actions: add_node, get_node, update_node, remove_node, add_edge, remove_edge, neighbors, search, list, path, stats, import_arxiv, export_dot."
+            }
+            TaskClassification::ExperimentTracking => {
+                "For this task, call the 'experiment_tracker' tool. Actions: add_hypothesis, update_hypothesis, list_hypotheses, get_hypothesis, add_experiment, start_experiment, complete_experiment, fail_experiment, get_experiment, list_experiments, record_evidence, compare_experiments, summary, export_markdown."
+            }
+            TaskClassification::CodeIntelligence => {
+                "For this task, call the 'code_intelligence' tool. Actions: analyze_architecture, detect_patterns, translate_snippet, compare_implementations, tech_debt_report, api_surface, dependency_map."
+            }
+            TaskClassification::ContentEngine => {
+                "For this task, call the 'content_engine' tool. Actions: create, update, set_status, get, list, search, delete, schedule, calendar_add, calendar_list, calendar_remove, stats, adapt, export_markdown."
+            }
+            TaskClassification::SkillTracker => {
+                "For this task, call the 'skill_tracker' tool. Actions: add_skill, log_practice, assess, list_skills, knowledge_gaps, learning_path, progress_report, daily_practice."
+            }
+            TaskClassification::CareerIntel => {
+                "For this task, call the 'career_intel' tool. Actions: set_goal, log_achievement, add_portfolio, gap_analysis, market_scan, network_note, progress_report, strategy_review."
+            }
+            TaskClassification::SystemMonitor => {
+                "For this task, call the 'system_monitor' tool. Actions: add_service, topology, health_check, log_incident, correlate, generate_runbook, impact_analysis, list_services."
+            }
+            TaskClassification::LifePlanner => {
+                "For this task, call the 'life_planner' tool. Actions: set_energy_profile, add_deadline, log_habit, daily_plan, weekly_review, context_switch_log, balance_report, optimize_schedule."
+            }
+            TaskClassification::PrivacyManager => {
+                "For this task, call the 'privacy_manager' tool. Actions: set_boundary, list_boundaries, audit_access, compliance_check, export_data, delete_data, encrypt_store, privacy_report."
+            }
+            TaskClassification::SelfImprovement => {
+                "For this task, call the 'self_improvement' tool. Actions: analyze_patterns, performance_report, suggest_improvements, set_preference, get_preferences, cognitive_load, feedback, reset_baseline."
+            }
             _ => return None,
         };
 
@@ -1878,20 +2094,48 @@ impl Agent {
         }
 
         let tool_hint = match classification {
-            TaskClassification::WebSearch => "For this task, call the 'web_search' tool with {\"query\": \"your search terms\"}. Do NOT use shell_exec for web searches — use the dedicated web_search tool which queries DuckDuckGo.",
-            TaskClassification::WebFetch => "For this task, call the 'web_fetch' tool with {\"url\": \"https://...\"} to retrieve page content. Do NOT use shell_exec — use the dedicated web_fetch tool.",
-            TaskClassification::Slack => "For this task, call the 'slack' tool with the appropriate action (send_message, read_messages, list_channels, reply_thread, list_users, add_reaction). Do NOT use shell_exec to interact with Slack.",
-            TaskClassification::ArxivResearch => "For this task, call the 'arxiv_research' tool with {\"action\": \"search\", \"query\": \"your search terms\", \"max_results\": 10}. This tool uses the arXiv API directly — do NOT use shell_exec, or curl. Other actions: fetch (get by ID), analyze (LLM summary), trending (recent papers), paper_to_code, paper_to_notebook, save/library/remove, export_bibtex.",
-            TaskClassification::KnowledgeGraph => "For this task, call the 'knowledge_graph' tool. Actions: add_node, get_node, update_node, remove_node, add_edge, remove_edge, neighbors, search, list, path, stats, import_arxiv, export_dot.",
-            TaskClassification::ExperimentTracking => "For this task, call the 'experiment_tracker' tool. Actions: add_hypothesis, update_hypothesis, list_hypotheses, get_hypothesis, add_experiment, start_experiment, complete_experiment, fail_experiment, get_experiment, list_experiments, record_evidence, compare_experiments, summary, export_markdown.",
-            TaskClassification::CodeIntelligence => "For this task, call the 'code_intelligence' tool. Actions: analyze_architecture, detect_patterns, translate_snippet, compare_implementations, tech_debt_report, api_surface, dependency_map.",
-            TaskClassification::ContentEngine => "For this task, call the 'content_engine' tool. Actions: create, update, set_status, get, list, search, delete, schedule, calendar_add, calendar_list, calendar_remove, stats, adapt, export_markdown.",
-            TaskClassification::SkillTracker => "For this task, call the 'skill_tracker' tool. Actions: add_skill, log_practice, assess, list_skills, knowledge_gaps, learning_path, progress_report, daily_practice.",
-            TaskClassification::CareerIntel => "For this task, call the 'career_intel' tool. Actions: set_goal, log_achievement, add_portfolio, gap_analysis, market_scan, network_note, progress_report, strategy_review.",
-            TaskClassification::SystemMonitor => "For this task, call the 'system_monitor' tool. Actions: add_service, topology, health_check, log_incident, correlate, generate_runbook, impact_analysis, list_services.",
-            TaskClassification::LifePlanner => "For this task, call the 'life_planner' tool. Actions: set_energy_profile, add_deadline, log_habit, daily_plan, weekly_review, context_switch_log, balance_report, optimize_schedule.",
-            TaskClassification::PrivacyManager => "For this task, call the 'privacy_manager' tool. Actions: set_boundary, list_boundaries, audit_access, compliance_check, export_data, delete_data, encrypt_store, privacy_report.",
-            TaskClassification::SelfImprovement => "For this task, call the 'self_improvement' tool. Actions: analyze_patterns, performance_report, suggest_improvements, set_preference, get_preferences, cognitive_load, feedback, reset_baseline.",
+            TaskClassification::WebSearch => {
+                "For this task, call the 'web_search' tool with {\"query\": \"your search terms\"}. Do NOT use shell_exec for web searches — use the dedicated web_search tool which queries DuckDuckGo."
+            }
+            TaskClassification::WebFetch => {
+                "For this task, call the 'web_fetch' tool with {\"url\": \"https://...\"} to retrieve page content. Do NOT use shell_exec — use the dedicated web_fetch tool."
+            }
+            TaskClassification::Slack => {
+                "For this task, call the 'slack' tool with the appropriate action (send_message, read_messages, list_channels, reply_thread, list_users, add_reaction). Do NOT use shell_exec to interact with Slack."
+            }
+            TaskClassification::ArxivResearch => {
+                "For this task, call the 'arxiv_research' tool with {\"action\": \"search\", \"query\": \"your search terms\", \"max_results\": 10}. This tool uses the arXiv API directly — do NOT use shell_exec, or curl. Other actions: fetch (get by ID), analyze (LLM summary), trending (recent papers), paper_to_code, paper_to_notebook, save/library/remove, export_bibtex."
+            }
+            TaskClassification::KnowledgeGraph => {
+                "For this task, call the 'knowledge_graph' tool. Actions: add_node, get_node, update_node, remove_node, add_edge, remove_edge, neighbors, search, list, path, stats, import_arxiv, export_dot."
+            }
+            TaskClassification::ExperimentTracking => {
+                "For this task, call the 'experiment_tracker' tool. Actions: add_hypothesis, update_hypothesis, list_hypotheses, get_hypothesis, add_experiment, start_experiment, complete_experiment, fail_experiment, get_experiment, list_experiments, record_evidence, compare_experiments, summary, export_markdown."
+            }
+            TaskClassification::CodeIntelligence => {
+                "For this task, call the 'code_intelligence' tool. Actions: analyze_architecture, detect_patterns, translate_snippet, compare_implementations, tech_debt_report, api_surface, dependency_map."
+            }
+            TaskClassification::ContentEngine => {
+                "For this task, call the 'content_engine' tool. Actions: create, update, set_status, get, list, search, delete, schedule, calendar_add, calendar_list, calendar_remove, stats, adapt, export_markdown."
+            }
+            TaskClassification::SkillTracker => {
+                "For this task, call the 'skill_tracker' tool. Actions: add_skill, log_practice, assess, list_skills, knowledge_gaps, learning_path, progress_report, daily_practice."
+            }
+            TaskClassification::CareerIntel => {
+                "For this task, call the 'career_intel' tool. Actions: set_goal, log_achievement, add_portfolio, gap_analysis, market_scan, network_note, progress_report, strategy_review."
+            }
+            TaskClassification::SystemMonitor => {
+                "For this task, call the 'system_monitor' tool. Actions: add_service, topology, health_check, log_incident, correlate, generate_runbook, impact_analysis, list_services."
+            }
+            TaskClassification::LifePlanner => {
+                "For this task, call the 'life_planner' tool. Actions: set_energy_profile, add_deadline, log_habit, daily_plan, weekly_review, context_switch_log, balance_report, optimize_schedule."
+            }
+            TaskClassification::PrivacyManager => {
+                "For this task, call the 'privacy_manager' tool. Actions: set_boundary, list_boundaries, audit_access, compliance_check, export_data, delete_data, encrypt_store, privacy_report."
+            }
+            TaskClassification::SelfImprovement => {
+                "For this task, call the 'self_improvement' tool. Actions: analyze_patterns, performance_report, suggest_improvements, set_preference, get_preferences, cognitive_load, feedback, reset_baseline."
+            }
             _ => return None,
         };
 
@@ -2356,11 +2600,12 @@ impl Agent {
         &mut self,
         task: &str,
     ) -> Result<crate::plan::ExecutionPlan, RustantError> {
-        use crate::plan::{PlanStatus, PLAN_GENERATION_PROMPT};
+        use crate::plan::{PLAN_GENERATION_PROMPT, PlanStatus};
 
         // Build a prompt with available tools and the task
+        // Plan generation needs all tools — don't filter by classification
         let tool_list: Vec<String> = self
-            .tool_definitions()
+            .tool_definitions(None)
             .iter()
             .map(|t| format!("- {} — {}", t.name, t.description))
             .collect();
@@ -2454,7 +2699,7 @@ impl Agent {
                 self.memory.add_message(Message::user(&step_prompt));
 
                 let conversation = self.memory.context_messages();
-                let tools = Some(self.tool_definitions());
+                let tools = Some(self.tool_definitions(self.state.task_classification.as_ref()));
                 let response = if self.config.llm.use_streaming {
                     self.think_streaming(&conversation, tools).await
                 } else {
@@ -3555,5 +3800,111 @@ mod tests {
 
         agent2.load_scheduler_state(dir.path());
         assert_eq!(agent2.cron_scheduler().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_tools_for_classification_calendar() {
+        let set = Agent::tools_for_classification(&TaskClassification::Calendar)
+            .expect("Calendar should return Some");
+        // Should include core tools
+        assert!(set.contains("file_read"), "Missing core tool file_read");
+        assert!(set.contains("ask_user"), "Missing core tool ask_user");
+        assert!(set.contains("calculator"), "Missing core tool calculator");
+        // Should include calendar-specific tools
+        assert!(set.contains("macos_calendar"), "Missing macos_calendar");
+        assert!(
+            set.contains("macos_notification"),
+            "Missing macos_notification"
+        );
+        // Should NOT include unrelated tools
+        assert!(
+            !set.contains("macos_music"),
+            "Should not include macos_music"
+        );
+        assert!(!set.contains("git_status"), "Should not include git_status");
+        // Total: 10 core + 2 extra = 12
+        assert_eq!(set.len(), 12);
+    }
+
+    #[test]
+    fn test_tools_for_classification_general_returns_none() {
+        assert!(
+            Agent::tools_for_classification(&TaskClassification::General).is_none(),
+            "General classification should return None (all tools)"
+        );
+    }
+
+    #[test]
+    fn test_tools_for_classification_workflow_returns_none() {
+        assert!(
+            Agent::tools_for_classification(&TaskClassification::Workflow("security_scan".into()))
+                .is_none(),
+            "Workflow classification should return None (all tools)"
+        );
+    }
+
+    #[test]
+    fn test_tool_definitions_filtered() {
+        let provider = Arc::new(MockLlmProvider::new());
+        let (mut agent, _) = create_test_agent(provider);
+
+        // Register some tools that span different categories
+        for name in &[
+            "echo",
+            "file_read",
+            "macos_calendar",
+            "git_status",
+            "macos_music",
+        ] {
+            agent.register_tool(RegisteredTool {
+                definition: ToolDefinition {
+                    name: name.to_string(),
+                    description: format!("{} tool", name),
+                    parameters: serde_json::json!({"type": "object"}),
+                },
+                risk_level: RiskLevel::ReadOnly,
+                executor: Box::new(|_| Box::pin(async { Ok(ToolOutput::text("ok")) })),
+            });
+        }
+
+        // Unfiltered: should return all 5 registered + ask_user = 6
+        let all_defs = agent.tool_definitions(None);
+        assert_eq!(
+            all_defs.len(),
+            6,
+            "Unfiltered should return all tools + ask_user"
+        );
+
+        // Calendar filter: should include echo, file_read, macos_calendar but NOT git_status, macos_music
+        let calendar_defs = agent.tool_definitions(Some(&TaskClassification::Calendar));
+        let names: Vec<&str> = calendar_defs.iter().map(|d| d.name.as_str()).collect();
+        assert!(
+            names.contains(&"echo"),
+            "Calendar should include core tool echo"
+        );
+        assert!(
+            names.contains(&"file_read"),
+            "Calendar should include core tool file_read"
+        );
+        assert!(
+            names.contains(&"macos_calendar"),
+            "Calendar should include macos_calendar"
+        );
+        assert!(
+            names.contains(&"ask_user"),
+            "Should always include ask_user"
+        );
+        assert!(
+            !names.contains(&"git_status"),
+            "Calendar should NOT include git_status"
+        );
+        assert!(
+            !names.contains(&"macos_music"),
+            "Calendar should NOT include macos_music"
+        );
+
+        // General filter: should return all tools
+        let general_defs = agent.tool_definitions(Some(&TaskClassification::General));
+        assert_eq!(general_defs.len(), 6, "General should return all tools");
     }
 }

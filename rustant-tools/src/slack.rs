@@ -86,18 +86,20 @@ impl Tool for SlackTool {
 
         match action {
             "send_message" => {
-                let channel = args["channel"]
-                    .as_str()
-                    .ok_or_else(|| ToolError::InvalidArguments {
-                        name: "slack".to_string(),
-                        reason: "send_message requires 'channel' parameter".to_string(),
-                    })?;
-                let message = args["message"]
-                    .as_str()
-                    .ok_or_else(|| ToolError::InvalidArguments {
-                        name: "slack".to_string(),
-                        reason: "send_message requires 'message' parameter".to_string(),
-                    })?;
+                let channel =
+                    args["channel"]
+                        .as_str()
+                        .ok_or_else(|| ToolError::InvalidArguments {
+                            name: "slack".to_string(),
+                            reason: "send_message requires 'channel' parameter".to_string(),
+                        })?;
+                let message =
+                    args["message"]
+                        .as_str()
+                        .ok_or_else(|| ToolError::InvalidArguments {
+                            name: "slack".to_string(),
+                            reason: "send_message requires 'message' parameter".to_string(),
+                        })?;
 
                 debug!(channel = channel, "Sending Slack message");
 
@@ -122,12 +124,13 @@ impl Tool for SlackTool {
             }
 
             "read_messages" => {
-                let channel = args["channel"]
-                    .as_str()
-                    .ok_or_else(|| ToolError::InvalidArguments {
-                        name: "slack".to_string(),
-                        reason: "read_messages requires 'channel' parameter".to_string(),
-                    })?;
+                let channel =
+                    args["channel"]
+                        .as_str()
+                        .ok_or_else(|| ToolError::InvalidArguments {
+                            name: "slack".to_string(),
+                            reason: "read_messages requires 'channel' parameter".to_string(),
+                        })?;
                 let limit = args["limit"].as_u64().unwrap_or(10).min(100);
 
                 debug!(channel = channel, limit = limit, "Reading Slack messages");
@@ -171,15 +174,12 @@ impl Tool for SlackTool {
                 let channels = resp["channels"].as_array();
                 match channels {
                     Some(chs) if !chs.is_empty() => {
-                        let mut output =
-                            format!("Slack channels ({} found):\n\n", chs.len());
+                        let mut output = format!("Slack channels ({} found):\n\n", chs.len());
                         for ch in chs {
                             let name = ch["name"].as_str().unwrap_or("?");
                             let id = ch["id"].as_str().unwrap_or("?");
                             let members = ch["num_members"].as_u64().unwrap_or(0);
-                            let purpose = ch["purpose"]["value"]
-                                .as_str()
-                                .unwrap_or("");
+                            let purpose = ch["purpose"]["value"].as_str().unwrap_or("");
                             let private = if ch["is_private"].as_bool().unwrap_or(false) {
                                 " (private)"
                             } else {
@@ -201,24 +201,27 @@ impl Tool for SlackTool {
             }
 
             "reply_thread" => {
-                let channel = args["channel"]
-                    .as_str()
-                    .ok_or_else(|| ToolError::InvalidArguments {
-                        name: "slack".to_string(),
-                        reason: "reply_thread requires 'channel' parameter".to_string(),
-                    })?;
-                let thread_ts = args["thread_ts"]
-                    .as_str()
-                    .ok_or_else(|| ToolError::InvalidArguments {
-                        name: "slack".to_string(),
-                        reason: "reply_thread requires 'thread_ts' parameter".to_string(),
-                    })?;
-                let message = args["message"]
-                    .as_str()
-                    .ok_or_else(|| ToolError::InvalidArguments {
-                        name: "slack".to_string(),
-                        reason: "reply_thread requires 'message' parameter".to_string(),
-                    })?;
+                let channel =
+                    args["channel"]
+                        .as_str()
+                        .ok_or_else(|| ToolError::InvalidArguments {
+                            name: "slack".to_string(),
+                            reason: "reply_thread requires 'channel' parameter".to_string(),
+                        })?;
+                let thread_ts =
+                    args["thread_ts"]
+                        .as_str()
+                        .ok_or_else(|| ToolError::InvalidArguments {
+                            name: "slack".to_string(),
+                            reason: "reply_thread requires 'thread_ts' parameter".to_string(),
+                        })?;
+                let message =
+                    args["message"]
+                        .as_str()
+                        .ok_or_else(|| ToolError::InvalidArguments {
+                            name: "slack".to_string(),
+                            reason: "reply_thread requires 'message' parameter".to_string(),
+                        })?;
 
                 debug!(
                     channel = channel,
@@ -275,19 +278,22 @@ impl Tool for SlackTool {
             }
 
             "add_reaction" => {
-                let channel = args["channel"]
-                    .as_str()
-                    .ok_or_else(|| ToolError::InvalidArguments {
-                        name: "slack".to_string(),
-                        reason: "add_reaction requires 'channel' parameter".to_string(),
-                    })?;
-                let timestamp = args["thread_ts"]
-                    .as_str()
-                    .ok_or_else(|| ToolError::InvalidArguments {
-                        name: "slack".to_string(),
-                        reason: "add_reaction requires 'thread_ts' parameter (message timestamp)"
-                            .to_string(),
-                    })?;
+                let channel =
+                    args["channel"]
+                        .as_str()
+                        .ok_or_else(|| ToolError::InvalidArguments {
+                            name: "slack".to_string(),
+                            reason: "add_reaction requires 'channel' parameter".to_string(),
+                        })?;
+                let timestamp =
+                    args["thread_ts"]
+                        .as_str()
+                        .ok_or_else(|| ToolError::InvalidArguments {
+                            name: "slack".to_string(),
+                            reason:
+                                "add_reaction requires 'thread_ts' parameter (message timestamp)"
+                                    .to_string(),
+                        })?;
                 let emoji = args["emoji"]
                     .as_str()
                     .ok_or_else(|| ToolError::InvalidArguments {

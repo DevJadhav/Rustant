@@ -43,7 +43,7 @@ pub use intelligence::{
     MessageClassifier, MessageType, SuggestedAction,
 };
 pub use irc::{IrcChannel, IrcConfig};
-pub use manager::{build_channel_manager, ChannelManager};
+pub use manager::{ChannelManager, build_channel_manager};
 pub use normalize::MessageNormalizer;
 pub use routing::{ChannelRouter, RoutingCondition, RoutingRule};
 pub use scheduler_bridge::{FollowUpReminder, ReminderStatus, SchedulerBridge};

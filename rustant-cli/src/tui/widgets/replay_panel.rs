@@ -3,11 +3,11 @@
 //! Toggle with Ctrl+R. Shows a timeline of events on the left and
 //! event detail + cumulative metrics on the right.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
-use ratatui::Frame;
 
 use crate::tui::theme::Theme;
 use rustant_core::replay::ReplaySession;

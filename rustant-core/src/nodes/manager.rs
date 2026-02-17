@@ -1,9 +1,9 @@
 //! Node manager — registers, finds capable nodes, and executes tasks.
 
 use super::{
+    Node,
     consent::ConsentStore,
     types::{Capability, NodeCapability, NodeHealth, NodeId, NodeMessage, NodeResult, NodeTask},
-    Node,
 };
 use crate::error::{NodeError, RustantError};
 use std::collections::HashMap;

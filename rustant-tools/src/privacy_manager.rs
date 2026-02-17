@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use rustant_core::error::ToolError;
 use rustant_core::types::{RiskLevel, ToolOutput};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -1328,9 +1328,11 @@ mod tests {
             .execute(json!({"action": "delete_data", "domain": "all"}))
             .await
             .unwrap();
-        assert!(result
-            .content
-            .contains("Deleted all data except privacy config"));
+        assert!(
+            result
+                .content
+                .contains("Deleted all data except privacy config")
+        );
 
         // Career and inbox should be gone, privacy should remain
         assert!(!career_dir.exists());

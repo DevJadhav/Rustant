@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
 use tantivy::schema::*;
-use tantivy::{doc, Index, IndexReader, IndexWriter, ReloadPolicy};
+use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, doc};
 
 // ---------------------------------------------------------------------------
 // Types

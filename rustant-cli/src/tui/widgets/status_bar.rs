@@ -1,11 +1,11 @@
 //! Status bar widget showing keybinding hints and current mode.
 
 use crate::tui::theme::Theme;
+use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
 /// The current input mode of the TUI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

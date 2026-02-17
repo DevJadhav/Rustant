@@ -2,8 +2,8 @@
 
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
-use rand::rngs::OsRng;
 use rand::RngCore;
+use rand::rngs::OsRng;
 
 /// Errors that can occur during encryption/decryption.
 #[derive(Debug, thiserror::Error)]

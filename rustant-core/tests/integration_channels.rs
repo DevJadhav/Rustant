@@ -182,9 +182,11 @@ fn test_oauth_config_factories_all_providers() {
     // Gmail
     let gmail = oauth::gmail_oauth_config("test-client-id", Some("gmail-secret".into()));
     assert_eq!(gmail.provider_name, "gmail");
-    assert!(gmail
-        .scopes
-        .contains(&"https://mail.google.com/".to_string()));
+    assert!(
+        gmail
+            .scopes
+            .contains(&"https://mail.google.com/".to_string())
+    );
     assert!(!gmail.extra_auth_params.is_empty());
 }
 
@@ -443,7 +445,7 @@ fn test_channel_oauth_config_serialization_roundtrip() {
 #[tokio::test]
 #[ignore = "requires GMAIL_OAUTH_TOKEN and GMAIL_EMAIL env vars"]
 async fn test_gmail_imap_xoauth2_real_connection() {
-    use rustant_core::channels::email::{create_email_channel, EmailAuthMethod, EmailConfig};
+    use rustant_core::channels::email::{EmailAuthMethod, EmailConfig, create_email_channel};
 
     let token = std::env::var("GMAIL_OAUTH_TOKEN").expect("set GMAIL_OAUTH_TOKEN");
     let email = std::env::var("GMAIL_EMAIL").expect("set GMAIL_EMAIL");

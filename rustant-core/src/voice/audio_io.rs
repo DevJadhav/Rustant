@@ -455,7 +455,7 @@ mod tests {
         let samples = vec![0.0, 0.5, 1.0, 0.5];
         let resampled = resample(&samples, 8000, 16000);
         assert!(resampled.len() >= 7); // roughly double
-                                       // First sample should be the same
+        // First sample should be the same
         assert!((resampled[0] - 0.0).abs() < 0.01);
         // Values should be interpolated
         assert!(resampled[1] > 0.0 && resampled[1] < 0.5);

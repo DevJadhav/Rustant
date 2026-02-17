@@ -1590,15 +1590,21 @@ mod tests {
         let patterns = Analytics::detect_patterns(&refs);
 
         let kinds: Vec<_> = patterns.iter().map(|p| &p.kind).collect();
-        assert!(kinds
-            .iter()
-            .any(|k| matches!(k, PatternKind::FrequentDenial)));
-        assert!(kinds
-            .iter()
-            .any(|k| matches!(k, PatternKind::ApprovalBottleneck)));
-        assert!(kinds
-            .iter()
-            .any(|k| matches!(k, PatternKind::RepeatedError)));
+        assert!(
+            kinds
+                .iter()
+                .any(|k| matches!(k, PatternKind::FrequentDenial))
+        );
+        assert!(
+            kinds
+                .iter()
+                .any(|k| matches!(k, PatternKind::ApprovalBottleneck))
+        );
+        assert!(
+            kinds
+                .iter()
+                .any(|k| matches!(k, PatternKind::RepeatedError))
+        );
     }
 
     // 25

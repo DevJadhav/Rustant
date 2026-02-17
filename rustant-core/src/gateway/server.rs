@@ -1,24 +1,24 @@
 //! WebSocket gateway server built on axum.
 
+use super::GatewayConfig;
 use super::auth::GatewayAuth;
 use super::connection::ConnectionManager;
 use super::events::{ClientMessage, GatewayEvent, ServerMessage};
 use super::session::SessionManager;
-use super::GatewayConfig;
 use axum::{
+    Router,
     extract::{
-        ws::{Message as WsMessage, WebSocket, WebSocketUpgrade},
         Path, State,
+        ws::{Message as WsMessage, WebSocket, WebSocketUpgrade},
     },
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
-    Router,
 };
 use chrono::Utc;
 use futures::SinkExt;
 use std::sync::Arc;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{Mutex, broadcast};
 use uuid::Uuid;
 
 /// Provides channel and node status snapshots for the gateway.

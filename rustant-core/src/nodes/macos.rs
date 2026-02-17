@@ -4,8 +4,8 @@
 //! In tests, a trait abstraction allows mocking without real execution.
 
 use super::{
-    types::{Capability, NodeHealth, NodeId, NodeInfo, NodeResult, NodeTask, Platform},
     Node,
+    types::{Capability, NodeHealth, NodeId, NodeInfo, NodeResult, NodeTask, Platform},
 };
 use crate::error::{NodeError, RustantError};
 use async_trait::async_trait;

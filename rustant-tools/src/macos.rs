@@ -1743,37 +1743,45 @@ impl Tool for MacosMusicTool {
             "play" => {
                 debug!("Playing music");
                 let script = r#"tell application "Music" to play"#;
-                run_osascript(script).await.map_err(|e| ToolError::ExecutionFailed {
-                    name: "macos_music".into(),
-                    message: e,
-                })?;
+                run_osascript(script)
+                    .await
+                    .map_err(|e| ToolError::ExecutionFailed {
+                        name: "macos_music".into(),
+                        message: e,
+                    })?;
                 Ok(ToolOutput::text("Music playback started.".to_string()))
             }
             "pause" => {
                 debug!("Pausing music");
                 let script = r#"tell application "Music" to pause"#;
-                run_osascript(script).await.map_err(|e| ToolError::ExecutionFailed {
-                    name: "macos_music".into(),
-                    message: e,
-                })?;
+                run_osascript(script)
+                    .await
+                    .map_err(|e| ToolError::ExecutionFailed {
+                        name: "macos_music".into(),
+                        message: e,
+                    })?;
                 Ok(ToolOutput::text("Music paused.".to_string()))
             }
             "next" => {
                 debug!("Skipping to next track");
                 let script = r#"tell application "Music" to next track"#;
-                run_osascript(script).await.map_err(|e| ToolError::ExecutionFailed {
-                    name: "macos_music".into(),
-                    message: e,
-                })?;
+                run_osascript(script)
+                    .await
+                    .map_err(|e| ToolError::ExecutionFailed {
+                        name: "macos_music".into(),
+                        message: e,
+                    })?;
                 Ok(ToolOutput::text("Skipped to next track.".to_string()))
             }
             "previous" => {
                 debug!("Going to previous track");
                 let script = r#"tell application "Music" to previous track"#;
-                run_osascript(script).await.map_err(|e| ToolError::ExecutionFailed {
-                    name: "macos_music".into(),
-                    message: e,
-                })?;
+                run_osascript(script)
+                    .await
+                    .map_err(|e| ToolError::ExecutionFailed {
+                        name: "macos_music".into(),
+                        message: e,
+                    })?;
                 Ok(ToolOutput::text("Went to previous track.".to_string()))
             }
             "now_playing" => {
@@ -1792,14 +1800,18 @@ impl Tool for MacosMusicTool {
         return "No track is currently playing."
     end if
 end tell"#;
-                let result = run_osascript(script).await.map_err(|e| ToolError::ExecutionFailed {
-                    name: "macos_music".into(),
-                    message: e,
-                })?;
+                let result =
+                    run_osascript(script)
+                        .await
+                        .map_err(|e| ToolError::ExecutionFailed {
+                            name: "macos_music".into(),
+                            message: e,
+                        })?;
                 Ok(ToolOutput::text(result))
             }
             "search_play" => {
-                let query = sanitize_applescript_string(require_str(&args, "query", "macos_music")?);
+                let query =
+                    sanitize_applescript_string(require_str(&args, "query", "macos_music")?);
                 debug!(query = %query, "Searching and playing");
                 let script = format!(
                     r#"tell application "Music"
@@ -1813,26 +1825,32 @@ end tell"#;
     return "Now playing: " & trackName & " by " & trackArtist
 end tell"#
                 );
-                let result = run_osascript(&script).await.map_err(|e| ToolError::ExecutionFailed {
-                    name: "macos_music".into(),
-                    message: e,
-                })?;
+                let result =
+                    run_osascript(&script)
+                        .await
+                        .map_err(|e| ToolError::ExecutionFailed {
+                            name: "macos_music".into(),
+                            message: e,
+                        })?;
                 Ok(ToolOutput::text(result))
             }
             "set_volume" => {
-                let volume = args["volume"]
-                    .as_u64()
-                    .ok_or_else(|| ToolError::InvalidArguments {
-                        name: "macos_music".to_string(),
-                        reason: "missing 'volume' parameter (0-100)".to_string(),
-                    })?;
+                let volume =
+                    args["volume"]
+                        .as_u64()
+                        .ok_or_else(|| ToolError::InvalidArguments {
+                            name: "macos_music".to_string(),
+                            reason: "missing 'volume' parameter (0-100)".to_string(),
+                        })?;
                 let volume = volume.min(100);
                 debug!(volume = volume, "Setting volume");
                 let script = format!(r#"tell application "Music" to set sound volume to {volume}"#);
-                run_osascript(&script).await.map_err(|e| ToolError::ExecutionFailed {
-                    name: "macos_music".into(),
-                    message: e,
-                })?;
+                run_osascript(&script)
+                    .await
+                    .map_err(|e| ToolError::ExecutionFailed {
+                        name: "macos_music".into(),
+                        message: e,
+                    })?;
                 Ok(ToolOutput::text(format!("Volume set to {volume}.")))
             }
             other => Err(ToolError::InvalidArguments {

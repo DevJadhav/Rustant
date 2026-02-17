@@ -12,9 +12,9 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use super::LspBackend;
 use super::client::LspError;
 use super::types::{CompletionItem, Diagnostic, DiagnosticSeverity, Location};
-use super::LspBackend;
 
 // ---------------------------------------------------------------------------
 // Helper functions
@@ -997,12 +997,16 @@ mod tests {
 
         assert!(result.content.contains("Found 3 diagnostic(s):"));
         assert!(result.content.contains("[error] line 5: expected `;`"));
-        assert!(result
-            .content
-            .contains("[warning] line 12: unused variable `x`"));
-        assert!(result
-            .content
-            .contains("[info] line 20: consider using `let` binding"));
+        assert!(
+            result
+                .content
+                .contains("[warning] line 12: unused variable `x`")
+        );
+        assert!(
+            result
+                .content
+                .contains("[info] line 20: consider using `let` binding")
+        );
     }
 
     // -----------------------------------------------------------------------

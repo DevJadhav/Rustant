@@ -37,10 +37,10 @@ Start the interactive REPL by running `rustant` with no arguments:
 rustant
 ```
 
-Or use the TUI (terminal UI) interface, which is enabled by default. To disable it:
+To use the TUI (terminal UI) interface instead of the default REPL:
 
 ```bash
-rustant --no-tui
+rustant --tui
 ```
 
 ## Configuration File

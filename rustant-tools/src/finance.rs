@@ -5,7 +5,7 @@ use chrono::{DateTime, Datelike, Utc};
 use rustant_core::error::ToolError;
 use rustant_core::types::{RiskLevel, ToolOutput};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 
 use crate::registry::Tool;
@@ -134,34 +134,67 @@ impl Tool for FinanceTool {
                 if amount == 0.0 {
                     return Ok(ToolOutput::text("Please provide a non-zero amount."));
                 }
-                let category = args.get("category").and_then(|v| v.as_str()).unwrap_or("other");
-                let description = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
-                let is_income = args.get("is_income").and_then(|v| v.as_bool()).unwrap_or(false);
+                let category = args
+                    .get("category")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("other");
+                let description = args
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let is_income = args
+                    .get("is_income")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 let id = state.next_id;
                 state.next_id += 1;
                 state.transactions.push(Transaction {
-                    id, amount, category: category.to_string(),
-                    description: description.to_string(), date: Utc::now(), is_income,
+                    id,
+                    amount,
+                    category: category.to_string(),
+                    description: description.to_string(),
+                    date: Utc::now(),
+                    is_income,
                 });
                 self.save_state(&state)?;
                 let kind = if is_income { "income" } else { "expense" };
-                Ok(ToolOutput::text(format!("Added {} #{}: ${:.2} ({})", kind, id, amount, category)))
+                Ok(ToolOutput::text(format!(
+                    "Added {} #{}: ${:.2} ({})",
+                    kind, id, amount, category
+                )))
             }
             "list" => {
                 if state.transactions.is_empty() {
                     return Ok(ToolOutput::text("No transactions recorded."));
                 }
-                let lines: Vec<String> = state.transactions.iter().rev().take(20).map(|t| {
-                    let sign = if t.is_income { "+" } else { "-" };
-                    format!("  #{} {} ${:.2} [{}] {} — {}", t.id, sign, t.amount, t.category,
-                        t.description, t.date.format("%Y-%m-%d"))
-                }).collect();
-                Ok(ToolOutput::text(format!("Recent transactions:\n{}", lines.join("\n"))))
+                let lines: Vec<String> = state
+                    .transactions
+                    .iter()
+                    .rev()
+                    .take(20)
+                    .map(|t| {
+                        let sign = if t.is_income { "+" } else { "-" };
+                        format!(
+                            "  #{} {} ${:.2} [{}] {} — {}",
+                            t.id,
+                            sign,
+                            t.amount,
+                            t.category,
+                            t.description,
+                            t.date.format("%Y-%m-%d")
+                        )
+                    })
+                    .collect();
+                Ok(ToolOutput::text(format!(
+                    "Recent transactions:\n{}",
+                    lines.join("\n")
+                )))
             }
             "summary" => {
                 let mut income = 0.0;
                 let mut expenses = 0.0;
-                let mut by_category: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+                let mut by_category: std::collections::HashMap<String, f64> =
+                    std::collections::HashMap::new();
                 for t in &state.transactions {
                     if t.is_income {
                         income += t.amount;
@@ -172,28 +205,54 @@ impl Tool for FinanceTool {
                 }
                 let mut cats: Vec<_> = by_category.iter().collect();
                 cats.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
-                let cat_lines: Vec<String> = cats.iter().map(|(c, a)| format!("  {}: ${:.2}", c, a)).collect();
+                let cat_lines: Vec<String> = cats
+                    .iter()
+                    .map(|(c, a)| format!("  {}: ${:.2}", c, a))
+                    .collect();
                 Ok(ToolOutput::text(format!(
                     "Finance summary:\n  Income:   ${:.2}\n  Expenses: ${:.2}\n  Balance:  ${:.2}\n\nBy category:\n{}",
-                    income, expenses, income - expenses, cat_lines.join("\n")
+                    income,
+                    expenses,
+                    income - expenses,
+                    cat_lines.join("\n")
                 )))
             }
             "budget_check" => {
                 if state.budgets.is_empty() {
-                    return Ok(ToolOutput::text("No budgets set. Use set_budget to create one."));
+                    return Ok(ToolOutput::text(
+                        "No budgets set. Use set_budget to create one.",
+                    ));
                 }
                 let now = Utc::now();
                 let month_start = now.date_naive().with_day(1).unwrap_or(now.date_naive());
                 let mut output = String::from("Budget status:\n");
                 for budget in &state.budgets {
-                    let spent: f64 = state.transactions.iter()
-                        .filter(|t| !t.is_income && t.category == budget.category && t.date.date_naive() >= month_start)
+                    let spent: f64 = state
+                        .transactions
+                        .iter()
+                        .filter(|t| {
+                            !t.is_income
+                                && t.category == budget.category
+                                && t.date.date_naive() >= month_start
+                        })
                         .map(|t| t.amount)
                         .sum();
-                    let pct = if budget.limit > 0.0 { (spent / budget.limit * 100.0) as u32 } else { 0 };
-                    let status = if pct >= 100 { "OVER" } else if pct >= 80 { "WARNING" } else { "OK" };
-                    output.push_str(&format!("  {} [{}]: ${:.2} / ${:.2} ({}%)\n",
-                        budget.category, status, spent, budget.limit, pct));
+                    let pct = if budget.limit > 0.0 {
+                        (spent / budget.limit * 100.0) as u32
+                    } else {
+                        0
+                    };
+                    let status = if pct >= 100 {
+                        "OVER"
+                    } else if pct >= 80 {
+                        "WARNING"
+                    } else {
+                        "OK"
+                    };
+                    output.push_str(&format!(
+                        "  {} [{}]: ${:.2} / ${:.2} ({}%)\n",
+                        budget.category, status, spent, budget.limit, pct
+                    ));
                 }
                 Ok(ToolOutput::text(output))
             }
@@ -203,34 +262,60 @@ impl Tool for FinanceTool {
                 if category.is_empty() || limit <= 0.0 {
                     return Ok(ToolOutput::text("Provide category and limit > 0."));
                 }
-                let period = args.get("period").and_then(|v| v.as_str()).unwrap_or("monthly");
+                let period = args
+                    .get("period")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("monthly");
                 // Update existing or add new
                 if let Some(b) = state.budgets.iter_mut().find(|b| b.category == category) {
                     b.limit = limit;
                     b.period = period.to_string();
                 } else {
-                    state.budgets.push(Budget { category: category.to_string(), limit, period: period.to_string() });
+                    state.budgets.push(Budget {
+                        category: category.to_string(),
+                        limit,
+                        period: period.to_string(),
+                    });
                 }
                 self.save_state(&state)?;
-                Ok(ToolOutput::text(format!("Budget set: {} ${:.2}/{}", category, limit, period)))
+                Ok(ToolOutput::text(format!(
+                    "Budget set: {} ${:.2}/{}",
+                    category, limit, period
+                )))
             }
             "export_csv" => {
-                let output_str = args.get("output").and_then(|v| v.as_str()).unwrap_or("finance_export.csv");
+                let output_str = args
+                    .get("output")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("finance_export.csv");
                 let path = self.workspace.join(output_str);
                 let mut csv = String::from("id,date,type,amount,category,description\n");
                 for t in &state.transactions {
                     let kind = if t.is_income { "income" } else { "expense" };
-                    csv.push_str(&format!("{},{},{},{:.2},{},{}\n",
-                        t.id, t.date.format("%Y-%m-%d"), kind, t.amount, t.category,
-                        t.description.replace(',', ";")));
+                    csv.push_str(&format!(
+                        "{},{},{},{:.2},{},{}\n",
+                        t.id,
+                        t.date.format("%Y-%m-%d"),
+                        kind,
+                        t.amount,
+                        t.category,
+                        t.description.replace(',', ";")
+                    ));
                 }
                 std::fs::write(&path, &csv).map_err(|e| ToolError::ExecutionFailed {
                     name: "finance".to_string(),
                     message: e.to_string(),
                 })?;
-                Ok(ToolOutput::text(format!("Exported {} transactions to {}.", state.transactions.len(), output_str)))
+                Ok(ToolOutput::text(format!(
+                    "Exported {} transactions to {}.",
+                    state.transactions.len(),
+                    output_str
+                )))
             }
-            _ => Ok(ToolOutput::text(format!("Unknown action: {}. Use: add_transaction, list, summary, budget_check, set_budget, export_csv", action))),
+            _ => Ok(ToolOutput::text(format!(
+                "Unknown action: {}. Use: add_transaction, list, summary, budget_check, set_budget, export_csv",
+                action
+            ))),
         }
     }
 }

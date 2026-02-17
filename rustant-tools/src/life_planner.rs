@@ -5,7 +5,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use rustant_core::error::ToolError;
 use rustant_core::types::{RiskLevel, ToolOutput};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -849,8 +849,8 @@ impl LifePlannerTool {
             let total_hours: f64 = by_category.values().map(|v| v.1).sum();
             let mut sorted: Vec<_> = by_category.iter().collect();
             sorted.sort_by(|a, b| {
-                b.1 .1
-                    .partial_cmp(&a.1 .1)
+                b.1.1
+                    .partial_cmp(&a.1.1)
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
             for (cat, (total, hours, completed, overdue)) in &sorted {

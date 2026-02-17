@@ -1296,11 +1296,13 @@ mod tests {
         let messages = stm.to_messages();
         // First message should be the summary
         assert_eq!(messages.len(), 4); // 1 summary + 3 recent
-        assert!(messages[0]
-            .content
-            .as_text()
-            .unwrap()
-            .contains("Summary of"));
+        assert!(
+            messages[0]
+                .content
+                .as_text()
+                .unwrap()
+                .contains("Summary of")
+        );
         assert_eq!(messages[0].role, Role::System);
     }
 

@@ -276,7 +276,7 @@ mod tests {
             .with_capability(Capability::FileRead(vec![PathBuf::from("/data")]))
             .with_capability(Capability::FileWrite(vec![PathBuf::from("/output")]))
             .with_capability(Capability::NetworkAccess(vec![
-                "api.example.com".to_string()
+                "api.example.com".to_string(),
             ]))
             .with_capability(Capability::EnvironmentRead(vec![
                 "HOME".to_string(),

@@ -262,10 +262,12 @@ steps: []
         let wf = parse_workflow(yaml).unwrap();
         let result = validate_workflow(&wf);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("at least one step"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("at least one step")
+        );
     }
 
     #[test]
@@ -286,10 +288,12 @@ steps:
         let wf = parse_workflow(yaml).unwrap();
         let result = validate_workflow(&wf);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Duplicate step ID"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Duplicate step ID")
+        );
     }
 
     #[test]

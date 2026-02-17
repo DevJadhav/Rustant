@@ -5,8 +5,8 @@
 
 use super::macos::LocalExecutor;
 use super::{
-    types::{Capability, NodeHealth, NodeId, NodeInfo, NodeResult, NodeTask, Platform},
     Node,
+    types::{Capability, NodeHealth, NodeId, NodeInfo, NodeResult, NodeTask, Platform},
 };
 use crate::error::{NodeError, RustantError};
 use async_trait::async_trait;

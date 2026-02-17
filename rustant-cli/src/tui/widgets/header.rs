@@ -1,11 +1,11 @@
 //! Header bar widget showing model, approval mode, token usage, and cost.
 
 use crate::tui::theme::Theme;
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
 /// Data needed to render the header bar.
 #[derive(Debug, Clone)]
