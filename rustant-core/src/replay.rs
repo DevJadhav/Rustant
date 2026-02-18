@@ -448,6 +448,19 @@ pub fn describe_event(kind: &TraceEventKind) -> String {
         TraceEventKind::Error { message } => {
             format!("Error: {}", message)
         }
+        TraceEventKind::PersonaSwitched {
+            from,
+            to,
+            rationale,
+        } => {
+            format!("Persona switched: {} -> {} ({})", from, to, rationale)
+        }
+        TraceEventKind::CacheCreated { provider, tokens } => {
+            format!("Cache created: {} ({} tokens)", provider, tokens)
+        }
+        TraceEventKind::CacheInvalidated { provider, reason } => {
+            format!("Cache invalidated: {} ({})", provider, reason)
+        }
     }
 }
 

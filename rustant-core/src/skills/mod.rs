@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Default)]
 pub struct SkillRegistry {
     skills: HashMap<String, SkillDefinition>,
+    active_skills: Vec<String>,
 }
 
 impl SkillRegistry {
@@ -49,6 +50,52 @@ impl SkillRegistry {
     /// Whether the registry is empty.
     pub fn is_empty(&self) -> bool {
         self.skills.is_empty()
+    }
+
+    /// Activate a skill by name. Returns an error if the skill does not exist.
+    pub fn activate(&mut self, name: &str) -> Result<(), String> {
+        if !self.skills.contains_key(name) {
+            return Err(format!("Skill '{}' not found", name));
+        }
+        if !self.active_skills.iter().any(|s| s == name) {
+            self.active_skills.push(name.to_string());
+        }
+        Ok(())
+    }
+
+    /// Deactivate a skill by name.
+    pub fn deactivate(&mut self, name: &str) {
+        self.active_skills.retain(|s| s != name);
+    }
+
+    /// Get the list of currently active skill names.
+    pub fn active_skills(&self) -> &[String] {
+        &self.active_skills
+    }
+
+    /// Auto-detect skills whose trigger_patterns match the given task description.
+    /// Uses simple `contains()` matching (case-sensitive).
+    pub fn auto_detect(&self, task: &str) -> Vec<String> {
+        let task_lower = task.to_lowercase();
+        self.skills
+            .values()
+            .filter(|skill| {
+                skill
+                    .trigger_patterns
+                    .iter()
+                    .any(|pattern| task_lower.contains(&pattern.to_lowercase()))
+            })
+            .map(|skill| skill.name.clone())
+            .collect()
+    }
+
+    /// Collect system_prompts from all active skills that have one.
+    pub fn get_active_system_prompts(&self) -> Vec<&str> {
+        self.active_skills
+            .iter()
+            .filter_map(|name| self.skills.get(name))
+            .filter_map(|skill| skill.system_prompt.as_deref())
+            .collect()
     }
 }
 
@@ -116,6 +163,9 @@ mod tests {
             config: SkillConfig::default(),
             risk_level: SkillRiskLevel::Low,
             source_path: None,
+            trigger_patterns: vec![],
+            system_prompt: None,
+            required_tools: vec![],
         };
 
         registry.register(skill);
@@ -140,10 +190,88 @@ mod tests {
                 config: Default::default(),
                 risk_level: SkillRiskLevel::Low,
                 source_path: None,
+                trigger_patterns: vec![],
+                system_prompt: None,
+                required_tools: vec![],
             });
         }
         let names = registry.list_names();
         assert_eq!(names.len(), 3);
+    }
+
+    #[test]
+    fn test_skill_activate_deactivate() {
+        let mut registry = SkillRegistry::new();
+        registry.register(SkillDefinition {
+            name: "code_review".into(),
+            version: "1.0.0".into(),
+            description: "Code review skill".into(),
+            author: None,
+            requires: vec![],
+            tools: vec![],
+            config: Default::default(),
+            risk_level: SkillRiskLevel::Low,
+            source_path: None,
+            trigger_patterns: vec!["review".into(), "PR".into()],
+            system_prompt: Some("Focus on code quality and security.".into()),
+            required_tools: vec!["file_read".into()],
+        });
+
+        assert!(registry.activate("code_review").is_ok());
+        assert_eq!(registry.active_skills().len(), 1);
+        assert!(registry.activate("nonexistent").is_err());
+
+        registry.deactivate("code_review");
+        assert!(registry.active_skills().is_empty());
+    }
+
+    #[test]
+    fn test_skill_auto_detect() {
+        let mut registry = SkillRegistry::new();
+        registry.register(SkillDefinition {
+            name: "security_audit".into(),
+            version: "1.0.0".into(),
+            description: "Security skill".into(),
+            author: None,
+            requires: vec![],
+            tools: vec![],
+            config: Default::default(),
+            risk_level: SkillRiskLevel::High,
+            source_path: None,
+            trigger_patterns: vec!["security".into(), "vulnerability".into(), "CVE".into()],
+            system_prompt: Some("Enable paranoid safety mode.".into()),
+            required_tools: vec![],
+        });
+
+        let matches = registry.auto_detect("Check for security vulnerabilities");
+        assert!(matches.contains(&"security_audit".to_string()));
+
+        let matches = registry.auto_detect("Refactor the auth module");
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn test_skill_get_active_system_prompts() {
+        let mut registry = SkillRegistry::new();
+        registry.register(SkillDefinition {
+            name: "debugging".into(),
+            version: "1.0.0".into(),
+            description: "Debugging skill".into(),
+            author: None,
+            requires: vec![],
+            tools: vec![],
+            config: Default::default(),
+            risk_level: SkillRiskLevel::Low,
+            source_path: None,
+            trigger_patterns: vec![],
+            system_prompt: Some("Enable verbose tool output.".into()),
+            required_tools: vec![],
+        });
+        registry.activate("debugging").unwrap();
+
+        let prompts = registry.get_active_system_prompts();
+        assert_eq!(prompts.len(), 1);
+        assert_eq!(prompts[0], "Enable verbose tool output.");
     }
 
     #[test]

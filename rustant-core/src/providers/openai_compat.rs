@@ -264,6 +264,61 @@ impl OpenAiCompatibleProvider {
                             })
                         }
                     }
+                    Content::Image {
+                        source,
+                        media_type,
+                        detail,
+                    } => {
+                        let url = match source {
+                            crate::types::ImageSource::Base64(data) => {
+                                format!("data:{};base64,{}", media_type, data)
+                            }
+                            crate::types::ImageSource::Url(url) => url.clone(),
+                            crate::types::ImageSource::FilePath(_) => String::new(),
+                        };
+                        json!({
+                            "role": role,
+                            "content": [{
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": url,
+                                    "detail": detail.as_deref().unwrap_or("auto"),
+                                }
+                            }]
+                        })
+                    }
+                    // Extended types are rendered as text for OpenAI
+                    Content::Thinking { thinking, .. } => json!({
+                        "role": role,
+                        "content": thinking,
+                    }),
+                    Content::Citation { cited_text, .. } => json!({
+                        "role": role,
+                        "content": cited_text,
+                    }),
+                    Content::CodeExecution { code, output, error, .. } => {
+                        let text = format!(
+                            "```\n{}\n```\nOutput: {}{}",
+                            code,
+                            output.as_deref().unwrap_or("(none)"),
+                            error.as_deref().map_or(String::new(), |e| format!("\nError: {}", e))
+                        );
+                        json!({
+                            "role": role,
+                            "content": text,
+                        })
+                    }
+                    Content::SearchResult { query, results } => {
+                        let text = format!(
+                            "[Search: {}]\n{}",
+                            query,
+                            results.iter().map(|r| format!("- {}: {}", r.title, r.snippet)).collect::<Vec<_>>().join("\n")
+                        );
+                        json!({
+                            "role": role,
+                            "content": text,
+                        })
+                    }
                 }
             })
             .collect()
@@ -358,6 +413,12 @@ impl OpenAiCompatibleProvider {
 
         // Parse usage
         let usage_obj = body.get("usage");
+        // OpenAI returns cached tokens in prompt_tokens_details.cached_tokens
+        let cached_tokens = usage_obj
+            .and_then(|u| u.get("prompt_tokens_details"))
+            .and_then(|d| d.get("cached_tokens"))
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0) as usize;
         let usage = TokenUsage {
             input_tokens: usage_obj
                 .and_then(|u| u.get("prompt_tokens"))
@@ -367,6 +428,8 @@ impl OpenAiCompatibleProvider {
                 .and_then(|u| u.get("completion_tokens"))
                 .and_then(|t| t.as_u64())
                 .unwrap_or(0) as usize,
+            cache_read_tokens: cached_tokens,
+            cache_creation_tokens: 0, // OpenAI caching is automatic
         };
 
         let resp_model = body
@@ -558,6 +621,49 @@ impl LlmProvider for OpenAiCompatibleProvider {
             body["tools"] = json!(Self::tools_to_json(tools));
         }
 
+        // Structured output / response format
+        if let Some(ref format) = request.response_format {
+            match format {
+                crate::types::ResponseFormat::JsonObject => {
+                    body["response_format"] = json!({"type": "json_object"});
+                }
+                crate::types::ResponseFormat::JsonSchema {
+                    name,
+                    schema,
+                    strict,
+                } => {
+                    body["response_format"] = json!({
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": name,
+                            "schema": schema,
+                            "strict": strict,
+                        }
+                    });
+                }
+                crate::types::ResponseFormat::Text => {}
+            }
+        }
+
+        // Tool choice
+        match &request.tool_choice {
+            crate::types::ToolChoice::Auto => {}
+            crate::types::ToolChoice::Required => {
+                body["tool_choice"] = json!("required");
+            }
+            crate::types::ToolChoice::None => {
+                body["tool_choice"] = json!("none");
+            }
+            crate::types::ToolChoice::Specific(name) => {
+                body["tool_choice"] = json!({"type": "function", "function": {"name": name}});
+            }
+        }
+
+        // Seed for deterministic outputs
+        if let Some(seed) = request.seed {
+            body["seed"] = json!(seed);
+        }
+
         debug!(url = %url, model = %self.model, "Sending OpenAI completion request");
 
         let response = self
@@ -617,6 +723,48 @@ impl LlmProvider for OpenAiCompatibleProvider {
             body["tools"] = json!(Self::tools_to_json(tools));
         }
 
+        // Structured output / response format (streaming)
+        if let Some(ref format) = request.response_format {
+            match format {
+                crate::types::ResponseFormat::JsonObject => {
+                    body["response_format"] = json!({"type": "json_object"});
+                }
+                crate::types::ResponseFormat::JsonSchema {
+                    name,
+                    schema,
+                    strict,
+                } => {
+                    body["response_format"] = json!({
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": name,
+                            "schema": schema,
+                            "strict": strict,
+                        }
+                    });
+                }
+                crate::types::ResponseFormat::Text => {}
+            }
+        }
+
+        // Tool choice (streaming)
+        match &request.tool_choice {
+            crate::types::ToolChoice::Auto => {}
+            crate::types::ToolChoice::Required => {
+                body["tool_choice"] = json!("required");
+            }
+            crate::types::ToolChoice::None => {
+                body["tool_choice"] = json!("none");
+            }
+            crate::types::ToolChoice::Specific(name) => {
+                body["tool_choice"] = json!({"type": "function", "function": {"name": name}});
+            }
+        }
+
+        if let Some(seed) = request.seed {
+            body["seed"] = json!(seed);
+        }
+
         let response = self
             .client
             .post(&url)
@@ -638,6 +786,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
         let mut usage = TokenUsage {
             input_tokens: 0,
             output_tokens: 0,
+            ..Default::default()
         };
         // Track active tool calls for streaming
         let mut active_tool_calls: std::collections::HashMap<usize, (String, String)> =
@@ -663,6 +812,12 @@ impl LlmProvider for OpenAiCompatibleProvider {
                         u.get("prompt_tokens").and_then(|t| t.as_u64()).unwrap_or(0) as usize;
                     usage.output_tokens = u
                         .get("completion_tokens")
+                        .and_then(|t| t.as_u64())
+                        .unwrap_or(0) as usize;
+                    // Parse OpenAI cached tokens from prompt_tokens_details
+                    usage.cache_read_tokens = u
+                        .get("prompt_tokens_details")
+                        .and_then(|d| d.get("cached_tokens"))
                         .and_then(|t| t.as_u64())
                         .unwrap_or(0) as usize;
                 }
@@ -752,6 +907,39 @@ impl LlmProvider for OpenAiCompatibleProvider {
 
     fn model_name(&self) -> &str {
         &self.model
+    }
+
+    /// OpenAI supports automatic prompt caching.
+    fn supports_caching(&self) -> bool {
+        true
+    }
+
+    /// OpenAI cache pricing: reads at 50% discount, no creation cost premium.
+    fn cache_cost_per_token(&self) -> (f64, f64) {
+        let (input, _) = self.cost_per_token();
+        (input * 0.5, input) // 50% discount on cached reads, normal price for creation
+    }
+
+    fn supports_vision(&self) -> bool {
+        // GPT-4o, GPT-4-turbo, and GPT-4V support vision. Also Ollama multimodal models.
+        let m = &self.model;
+        m.contains("gpt-4o")
+            || m.contains("gpt-4-turbo")
+            || m.contains("gpt-4-vision")
+            || m.contains("llava")
+            || m.contains("qwen2.5-vl")
+            || m.contains("qwen-vl")
+    }
+
+    fn supports_structured_output(&self) -> bool {
+        // GPT-4o and newer, plus Ollama models with JSON mode
+        let m = &self.model;
+        m.contains("gpt-4o")
+            || m.contains("gpt-4-turbo")
+            || m.contains("o1")
+            || m.contains("o3")
+            || m.contains("llama3")
+            || m.contains("qwen2.5")
     }
 }
 

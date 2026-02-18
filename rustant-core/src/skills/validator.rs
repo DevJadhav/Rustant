@@ -136,6 +136,9 @@ mod tests {
             config: Default::default(),
             risk_level: SkillRiskLevel::Low,
             source_path: None,
+            trigger_patterns: Vec::new(),
+            system_prompt: None,
+            required_tools: Vec::new(),
         }
     }
 

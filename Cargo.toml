@@ -70,11 +70,9 @@ open = "5"
 url = "2"
 urlencoding = "2"
 
-# CLI & TUI
+# CLI & REPL
 clap = { version = "4.5", features = ["derive"] }
-ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
 crossterm = { version = "0.28", features = ["event-stream", "bracketed-paste"] }
-tui-textarea = { version = "0.7", features = ["crossterm", "search"] }
 syntect = { version = "5.2", default-features = false, features = ["default-fancy"] }
 textwrap = "0.16"
 unicode-width = "0.2"

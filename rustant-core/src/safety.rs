@@ -1436,6 +1436,66 @@ impl SafetyGuardian {
     }
 }
 
+/// Fine-grained permission controls for tool and resource access.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PermissionPolicy {
+    /// If set, only these tools are allowed. All others are denied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_allowlist: Option<Vec<String>>,
+    /// These tools are always denied, regardless of allowlist.
+    #[serde(default)]
+    pub tool_denylist: Vec<String>,
+    /// Glob patterns for allowed file read paths.
+    #[serde(default)]
+    pub file_read_patterns: Vec<String>,
+    /// Glob patterns for allowed file write paths.
+    #[serde(default)]
+    pub file_write_patterns: Vec<String>,
+    /// Allowed network domains.
+    #[serde(default)]
+    pub network_allowlist: Vec<String>,
+    /// Maximum dollar cost per task.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_cost_per_task: Option<f64>,
+    /// Maximum iterations per task.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_iterations_per_task: Option<usize>,
+    /// Whether to force thinking mode for destructive operations.
+    #[serde(default)]
+    pub require_thinking_for_destructive: bool,
+}
+
+impl PermissionPolicy {
+    /// Check if a tool is allowed by this policy.
+    pub fn is_tool_allowed(&self, tool_name: &str) -> bool {
+        // Denylist always takes priority
+        if self.tool_denylist.iter().any(|t| t == tool_name) {
+            return false;
+        }
+        // If allowlist is set, tool must be in it
+        if let Some(ref allowlist) = self.tool_allowlist {
+            return allowlist.iter().any(|t| t == tool_name);
+        }
+        true
+    }
+
+    /// Check if cost would exceed the per-task limit.
+    pub fn is_within_cost_limit(&self, current_cost: f64) -> bool {
+        match self.max_cost_per_task {
+            Some(limit) => current_cost <= limit,
+            None => true,
+        }
+    }
+
+    /// Check if iterations would exceed the per-task limit.
+    pub fn is_within_iteration_limit(&self, current_iterations: usize) -> bool {
+        match self.max_iterations_per_task {
+            Some(limit) => current_iterations <= limit,
+            None => true,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2714,5 +2774,73 @@ mod tests {
         );
         let result = guardian.check_permission(&action);
         assert!(matches!(result, PermissionResult::Denied { .. }));
+    }
+
+    // --- PermissionPolicy Tests ---
+
+    #[test]
+    fn test_permission_policy_tool_allowed() {
+        let policy = PermissionPolicy {
+            tool_allowlist: Some(vec!["file_read".into(), "shell_exec".into()]),
+            tool_denylist: vec!["dangerous_tool".into()],
+            ..Default::default()
+        };
+        assert!(policy.is_tool_allowed("file_read"));
+        assert!(!policy.is_tool_allowed("file_write"));
+        assert!(!policy.is_tool_allowed("dangerous_tool"));
+    }
+
+    #[test]
+    fn test_permission_policy_denylist_priority() {
+        let policy = PermissionPolicy {
+            tool_allowlist: Some(vec!["shell_exec".into()]),
+            tool_denylist: vec!["shell_exec".into()], // Also denied
+            ..Default::default()
+        };
+        // Denylist takes priority
+        assert!(!policy.is_tool_allowed("shell_exec"));
+    }
+
+    #[test]
+    fn test_permission_policy_no_allowlist() {
+        let policy = PermissionPolicy::default();
+        assert!(policy.is_tool_allowed("any_tool"));
+    }
+
+    #[test]
+    fn test_permission_policy_cost_limit() {
+        let policy = PermissionPolicy {
+            max_cost_per_task: Some(1.0),
+            ..Default::default()
+        };
+        assert!(policy.is_within_cost_limit(0.5));
+        assert!(policy.is_within_cost_limit(1.0));
+        assert!(!policy.is_within_cost_limit(1.5));
+    }
+
+    #[test]
+    fn test_permission_policy_iteration_limit() {
+        let policy = PermissionPolicy {
+            max_iterations_per_task: Some(10),
+            ..Default::default()
+        };
+        assert!(policy.is_within_iteration_limit(5));
+        assert!(policy.is_within_iteration_limit(10));
+        assert!(!policy.is_within_iteration_limit(11));
+    }
+
+    #[test]
+    fn test_permission_policy_serde() {
+        let policy = PermissionPolicy {
+            tool_allowlist: Some(vec!["file_read".into()]),
+            tool_denylist: vec!["shell_exec".into()],
+            max_cost_per_task: Some(5.0),
+            require_thinking_for_destructive: true,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&policy).unwrap();
+        let restored: PermissionPolicy = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.tool_allowlist.unwrap().len(), 1);
+        assert!(restored.require_thinking_for_destructive);
     }
 }

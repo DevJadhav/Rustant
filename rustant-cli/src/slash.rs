@@ -1,4 +1,4 @@
-//! Slash command registry for REPL and TUI command discovery.
+//! Slash command registry for REPL command discovery.
 //!
 //! Provides structured metadata for all `/command` slash commands,
 //! enabling categorized help, alias resolution, and tab completion.
@@ -57,8 +57,6 @@ pub struct CommandInfo {
     pub usage: &'static str,
     /// Category for grouping in /help.
     pub category: CommandCategory,
-    /// Whether this command is only available in TUI mode.
-    pub tui_only: bool,
     /// Detailed help text shown by `/help <command>`. Includes examples and explanation.
     pub detailed_help: Option<&'static str>,
 }
@@ -98,7 +96,7 @@ impl CommandRegistry {
             description: "Exit Rustant",
             usage: "/quit",
             category: CommandCategory::Session,
-            tui_only: false,
+
             detailed_help: None,
         });
         self.register(CommandInfo {
@@ -107,7 +105,7 @@ impl CommandRegistry {
             description: "Clear the screen",
             usage: "/clear",
             category: CommandCategory::Session,
-            tui_only: false,
+
             detailed_help: None,
         });
         self.register(CommandInfo {
@@ -116,7 +114,7 @@ impl CommandRegistry {
             description: "Save, load, or list sessions",
             usage: "/session save|load|list [name]",
             category: CommandCategory::Session,
-            tui_only: false,
+
             detailed_help: None,
         });
         self.register(CommandInfo {
@@ -125,7 +123,7 @@ impl CommandRegistry {
             description: "Resume a saved session (latest if no name)",
             usage: "/resume [name]",
             category: CommandCategory::Session,
-            tui_only: false,
+
             detailed_help: None,
         });
         self.register(CommandInfo {
@@ -134,7 +132,7 @@ impl CommandRegistry {
             description: "List, search, tag, or filter saved sessions",
             usage: "/sessions [search <q> | tag <name> <tag> | filter <tag>]",
             category: CommandCategory::Session,
-            tui_only: false,
+
             detailed_help: Some("Manage saved sessions.\n\nSubcommands:\n  /sessions              - List recent sessions\n  /sessions search <q>   - Search sessions by name, goal, or summary\n  /sessions tag <n> <t>  - Add a tag to a session\n  /sessions filter <tag> - List sessions with a specific tag\n\nExamples:\n  /sessions search auth  - Find sessions related to auth\n  /sessions tag my-proj bugfix - Tag session 'my-proj' with 'bugfix'\n  /sessions filter refactor    - List all refactoring sessions"),
         });
 
@@ -145,7 +143,7 @@ impl CommandRegistry {
             description: "Show token usage and cost",
             usage: "/cost",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: None,
         });
         self.register(CommandInfo {
@@ -154,7 +152,7 @@ impl CommandRegistry {
             description: "List available tools",
             usage: "/tools",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: None,
         });
         self.register(CommandInfo {
@@ -163,7 +161,7 @@ impl CommandRegistry {
             description: "Show agent status, task, and iteration count",
             usage: "/status",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: None,
         });
         self.register(CommandInfo {
@@ -172,7 +170,7 @@ impl CommandRegistry {
             description: "Compress conversation context to free memory",
             usage: "/compact",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: None,
         });
         self.register(CommandInfo {
@@ -181,7 +179,7 @@ impl CommandRegistry {
             description: "Show context window usage breakdown",
             usage: "/context",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: None,
         });
         self.register(CommandInfo {
@@ -190,7 +188,7 @@ impl CommandRegistry {
             description: "Show memory system stats",
             usage: "/memory",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: None,
         });
         self.register(CommandInfo {
@@ -199,7 +197,7 @@ impl CommandRegistry {
             description: "Pin message #n (survives compression) or list pinned",
             usage: "/pin [n]",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: None,
         });
         self.register(CommandInfo {
@@ -208,7 +206,7 @@ impl CommandRegistry {
             description: "Unpin message #n",
             usage: "/unpin <n>",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: None,
         });
 
@@ -219,7 +217,7 @@ impl CommandRegistry {
             description: "Show current safety mode and stats",
             usage: "/safety",
             category: CommandCategory::Safety,
-            tui_only: false,
+
             detailed_help: None,
         });
         self.register(CommandInfo {
@@ -228,7 +226,7 @@ impl CommandRegistry {
             description: "View or set approval mode (safe/cautious/paranoid/yolo)",
             usage: "/permissions [mode]",
             category: CommandCategory::Safety,
-            tui_only: false,
+
             detailed_help: Some("Control how the agent asks for permission before executing actions.\n\nModes:\n  safe     - Auto-approve read-only operations, ask for writes/executes (default)\n  cautious - Auto-approve reads and reversible writes, ask for executes\n  paranoid - Ask for approval on every single action\n  yolo     - Auto-approve everything (use with caution!)\n\nExamples:\n  /permissions          - Show current mode\n  /permissions cautious - Switch to cautious mode"),
         });
         self.register(CommandInfo {
@@ -237,7 +235,7 @@ impl CommandRegistry {
             description: "Show, query, export, or verify audit trail",
             usage: "/audit [show [n] | verify | export [fmt] | query <tool>]",
             category: CommandCategory::Safety,
-            tui_only: false,
+
             detailed_help: None,
         });
 
@@ -248,7 +246,7 @@ impl CommandRegistry {
             description: "Undo last file operation via git checkpoint",
             usage: "/undo",
             category: CommandCategory::Development,
-            tui_only: false,
+
             detailed_help: None,
         });
         self.register(CommandInfo {
@@ -257,7 +255,7 @@ impl CommandRegistry {
             description: "Show recent file changes",
             usage: "/diff",
             category: CommandCategory::Development,
-            tui_only: false,
+
             detailed_help: None,
         });
         self.register(CommandInfo {
@@ -266,7 +264,7 @@ impl CommandRegistry {
             description: "Review all session file changes",
             usage: "/review",
             category: CommandCategory::Development,
-            tui_only: false,
+
             detailed_help: None,
         });
 
@@ -277,7 +275,7 @@ impl CommandRegistry {
             description: "Show help (use /help <topic> for details)",
             usage: "/help [topic]",
             category: CommandCategory::System,
-            tui_only: false,
+
             detailed_help: Some("Show all commands or detailed help for a specific topic.\n\nExamples:\n  /help           - Show all available commands\n  /help safety    - Show safety-related commands and explanation\n  /help session   - Show session management commands\n  /help compact   - Show help for /compact command\n\nTopics match command names (without /) or category names."),
         });
         self.register(CommandInfo {
@@ -286,7 +284,7 @@ impl CommandRegistry {
             description: "View or modify runtime configuration",
             usage: "/config [key] [value]",
             category: CommandCategory::System,
-            tui_only: false,
+
             detailed_help: None,
         });
         self.register(CommandInfo {
@@ -295,7 +293,7 @@ impl CommandRegistry {
             description: "Run diagnostic checks (LLM, tools, workspace)",
             usage: "/doctor",
             category: CommandCategory::System,
-            tui_only: false,
+
             detailed_help: None,
         });
         self.register(CommandInfo {
@@ -304,7 +302,7 @@ impl CommandRegistry {
             description: "Re-run provider setup wizard",
             usage: "/setup",
             category: CommandCategory::System,
-            tui_only: false,
+
             detailed_help: None,
         });
         self.register(CommandInfo {
@@ -313,7 +311,7 @@ impl CommandRegistry {
             description: "List available workflow templates",
             usage: "/workflows",
             category: CommandCategory::System,
-            tui_only: false,
+
             detailed_help: None,
         });
 
@@ -324,7 +322,7 @@ impl CommandRegistry {
             description: "Show safety trust dashboard with per-tool approval stats",
             usage: "/trust",
             category: CommandCategory::Safety,
-            tui_only: false,
+
             detailed_help: Some("Display a trust calibration dashboard showing:\n  - Current approval mode with plain-English explanation\n  - Per-tool approval/denial statistics from the audit log\n  - Suggestions for adjusting trust based on your usage patterns\n\nThe dashboard helps you understand why you are being prompted and\nmake informed decisions about adjusting your approval mode."),
         });
 
@@ -335,7 +333,7 @@ impl CommandRegistry {
             description: "Show keyboard shortcuts (TUI: F1 for overlay)",
             usage: "/keys",
             category: CommandCategory::System,
-            tui_only: false,
+
             detailed_help: Some("Show all keyboard shortcuts grouped by context.\n\nIn TUI mode, press F1 for a floating overlay.\n\nGlobal:    Ctrl+C/D quit, Ctrl+L scroll to bottom\nOverlays:  Ctrl+E explanation panel, Ctrl+T task board\nApproval:  y=approve, n=deny, a=approve all, d=diff, ?=help\nVim mode:  i/a=insert, Esc=normal, /=search, q=quit"),
         });
 
@@ -346,7 +344,7 @@ impl CommandRegistry {
             description: "Toggle verbose output (show/hide tool execution details)",
             usage: "/verbose",
             category: CommandCategory::Ui,
-            tui_only: false,
+
             detailed_help: Some(
                 "Toggle verbose mode on or off.\n\n\
                  When verbose is OFF (default):\n  \
@@ -363,71 +361,6 @@ impl CommandRegistry {
             ),
         });
 
-        // TUI-only commands
-        self.register(CommandInfo {
-            name: "/theme",
-            aliases: &[],
-            description: "Switch color theme",
-            usage: "/theme dark|light",
-            category: CommandCategory::Ui,
-            tui_only: true,
-            detailed_help: None,
-        });
-        self.register(CommandInfo {
-            name: "/sidebar",
-            aliases: &[],
-            description: "Toggle sidebar visibility",
-            usage: "/sidebar",
-            category: CommandCategory::Ui,
-            tui_only: true,
-            detailed_help: None,
-        });
-        self.register(CommandInfo {
-            name: "/vim",
-            aliases: &[],
-            description: "Toggle vim mode",
-            usage: "/vim",
-            category: CommandCategory::Ui,
-            tui_only: true,
-            detailed_help: None,
-        });
-        self.register(CommandInfo {
-            name: "/save",
-            aliases: &[],
-            description: "Save session (shorthand for /session save)",
-            usage: "/save <name>",
-            category: CommandCategory::Session,
-            tui_only: true,
-            detailed_help: None,
-        });
-        self.register(CommandInfo {
-            name: "/load",
-            aliases: &[],
-            description: "Load session (shorthand for /session load)",
-            usage: "/load <name>",
-            category: CommandCategory::Session,
-            tui_only: true,
-            detailed_help: None,
-        });
-        self.register(CommandInfo {
-            name: "/analytics",
-            aliases: &[],
-            description: "Show session analytics dashboard",
-            usage: "/analytics",
-            category: CommandCategory::Agent,
-            tui_only: true,
-            detailed_help: None,
-        });
-        self.register(CommandInfo {
-            name: "/replay",
-            aliases: &[],
-            description: "Replay execution traces",
-            usage: "/replay [next|prev|timeline|reset]",
-            category: CommandCategory::Agent,
-            tui_only: true,
-            detailed_help: None,
-        });
-
         // Channel Intelligence commands
         self.register(CommandInfo {
             name: "/digest",
@@ -435,7 +368,7 @@ impl CommandRegistry {
             description: "Show or generate channel digest",
             usage: "/digest [history]",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "Show the latest channel digest or generate one on demand.\n\n\
                  Usage:\n  /digest          — Show the latest digest\n  \
@@ -450,7 +383,7 @@ impl CommandRegistry {
             description: "Manage pending auto-reply drafts",
             usage: "/replies [approve|reject|edit <id>]",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "View and manage pending auto-reply drafts.\n\n\
                  Usage:\n  /replies               — List all pending replies\n  \
@@ -466,7 +399,7 @@ impl CommandRegistry {
             description: "Manage follow-up reminders",
             usage: "/reminders [dismiss|complete <id>]",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "View and manage scheduled follow-up reminders.\n\n\
                  Usage:\n  /reminders               — List active reminders\n  \
@@ -482,7 +415,7 @@ impl CommandRegistry {
             description: "Channel intelligence status and control",
             usage: "/intelligence [on|off|status]",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "View or control the channel intelligence layer.\n\n\
                  Usage:\n  /intelligence          — Show intelligence status\n  \
@@ -501,7 +434,7 @@ impl CommandRegistry {
             description: "Meeting recording and transcription",
             usage: "/meeting [detect|record|stop|status]",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "Record, transcribe, and summarize meetings.\n\n\
                  Usage:\n  /meeting detect  — Check for active meeting apps\n  \
@@ -520,7 +453,7 @@ impl CommandRegistry {
             description: "Generate daily briefing (calendar, reminders, weather)",
             usage: "/briefing [morning|evening]",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "Generate a daily briefing combining calendar, reminders, and weather.\n\n\
                  Usage:\n  /briefing          — Morning briefing (default)\n  \
@@ -537,7 +470,7 @@ impl CommandRegistry {
             description: "Show why the agent made recent decisions",
             usage: "/why [index]",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "Show the reasoning behind recent agent decisions.\n\n\
                  Usage:\n  /why         -- Show most recent decision\n  \
@@ -555,7 +488,7 @@ impl CommandRegistry {
             description: "Manage messaging channels",
             usage: "/channel list|setup [name]|test <name>",
             category: CommandCategory::System,
-            tui_only: false,
+
             detailed_help: Some(
                 "Manage messaging channel integrations.\n\n\
                  Usage:\n  /channel list          — List all configured channels\n  \
@@ -570,7 +503,7 @@ impl CommandRegistry {
             description: "Manage workflows (list, show, run)",
             usage: "/workflow list|show|run <name> [key=val]",
             category: CommandCategory::System,
-            tui_only: false,
+
             detailed_help: Some(
                 "Manage and run workflow templates.\n\n\
                  Usage:\n  /workflow list              — List available workflows\n  \
@@ -588,7 +521,7 @@ impl CommandRegistry {
             description: "Synthesize text to speech",
             usage: "/voice speak <text> [-v voice]",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "Synthesize text to speech via OpenAI TTS.\n\n\
                  Usage:\n  /voice speak <text>         — Speak text with default voice\n  \
@@ -602,7 +535,7 @@ impl CommandRegistry {
             description: "Browser automation operations",
             usage: "/browser test|launch|connect|status",
             category: CommandCategory::System,
-            tui_only: false,
+
             detailed_help: Some(
                 "Control browser automation.\n\n\
                  Usage:\n  /browser test [url]     — Test by navigating to a URL\n  \
@@ -618,7 +551,7 @@ impl CommandRegistry {
             description: "Manage OAuth authentication",
             usage: "/auth status|login|logout <provider>",
             category: CommandCategory::System,
-            tui_only: false,
+
             detailed_help: Some(
                 "Manage OAuth authentication for LLM providers and channels.\n\n\
                  Usage:\n  /auth status            — Show auth status for all providers\n  \
@@ -633,7 +566,7 @@ impl CommandRegistry {
             description: "Canvas operations (push, clear, snapshot)",
             usage: "/canvas push <type> <content>|clear|snapshot",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "Push content to or manage the canvas.\n\n\
                  Usage:\n  /canvas push <type> <content> — Push content to canvas\n  \
@@ -649,7 +582,7 @@ impl CommandRegistry {
             description: "Manage skills (SKILL.md files)",
             usage: "/skill list|info|validate <path>",
             category: CommandCategory::System,
-            tui_only: false,
+
             detailed_help: Some(
                 "Manage SKILL.md skill definitions.\n\n\
                  Usage:\n  /skill list              — List loaded skills\n  \
@@ -664,7 +597,7 @@ impl CommandRegistry {
             description: "Manage plugins",
             usage: "/plugin list|info <name>",
             category: CommandCategory::System,
-            tui_only: false,
+
             detailed_help: Some(
                 "Manage native plugins.\n\n\
                  Usage:\n  /plugin list        — List discovered plugins\n  \
@@ -678,7 +611,7 @@ impl CommandRegistry {
             description: "Check for or install updates",
             usage: "/update check|install",
             category: CommandCategory::System,
-            tui_only: false,
+
             detailed_help: Some(
                 "Check for and install Rustant updates.\n\n\
                  Usage:\n  /update check    — Check for available updates\n  \
@@ -694,7 +627,7 @@ impl CommandRegistry {
             description: "Manage scheduled tasks and cron jobs",
             usage: "/schedule [list|add|remove|enable|disable]",
             category: CommandCategory::System,
-            tui_only: false,
+
             detailed_help: Some(
                 "Manage background scheduled tasks (cron jobs).\n\n\
                  Usage:\n  /schedule list              — List all scheduled jobs\n  \
@@ -716,7 +649,7 @@ impl CommandRegistry {
             description: "Multi-model LLM council deliberation",
             usage: "/council [question|status|detect]",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "Run multi-model deliberation for planning tasks.\n\n\
                  Usage:\n  /council <question>    — Run council deliberation\n  \
@@ -736,7 +669,7 @@ impl CommandRegistry {
             description: "Toggle plan mode or manage plans",
             usage: "/plan [on|off|show]",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "Enable plan mode to generate a step-by-step plan before execution.\n\n\
                  When plan mode is on, every task you enter will:\n\
@@ -766,7 +699,7 @@ impl CommandRegistry {
             usage:
                 "/arxiv search <query> | fetch <id> | trending [category] | library | analyze <id>",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "Search, fetch, and manage academic papers from arXiv.\n\n\
                  Usage:\n  /arxiv search <query>       — Search for papers by topic\n  \
@@ -794,7 +727,7 @@ impl CommandRegistry {
             description: "Manage knowledge graph of concepts and relationships",
             usage: "/knowledge search <query> | add <name> | import <arxiv_id> | stats",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "Build and query a local knowledge graph of concepts, papers, methods, and people.\n\n\
                  Usage:\n  /knowledge add <name>         — Add a concept node\n  \
@@ -813,7 +746,7 @@ impl CommandRegistry {
             description: "Track hypotheses, experiments, and results",
             usage: "/experiment add <title> | list | start <id> | complete <id>",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "Track scientific hypotheses and experiments with evidence recording.\n\n\
                  Usage:\n  /experiment add <title>       — Add a new hypothesis\n  \
@@ -832,7 +765,7 @@ impl CommandRegistry {
             description: "Analyze codebase architecture, patterns, and tech debt",
             usage: "/codeintel architecture | debt | patterns | translate | api | deps",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "Cross-language codebase analysis and intelligence.\n\n\
                  Usage:\n  /codeintel architecture       — Analyze project structure\n  \
@@ -851,7 +784,7 @@ impl CommandRegistry {
             description: "Content creation and publishing pipeline",
             usage: "/content create <title> | list | calendar | adapt <id> | stats",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "Multi-platform content pipeline with lifecycle tracking.\n\n\
                  Usage:\n  /content create <title>       — Create new content piece\n  \
@@ -870,7 +803,7 @@ impl CommandRegistry {
             description: "Track skill development and learning paths",
             usage: "/skills add <name> | gaps | practice | progress | daily",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "Track skill progression, knowledge gaps, and practice sessions.\n\n\
                  Usage:\n  /skills add <name>            — Add a skill to track\n  \
@@ -888,7 +821,7 @@ impl CommandRegistry {
             description: "Career strategy, achievements, and portfolio management",
             usage: "/career goals | achieve <title> | portfolio | gaps | network",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "Career goal tracking, achievement logging, and portfolio management.\n\n\
                  Usage:\n  /career goals                 — List career goals\n  \
@@ -906,7 +839,7 @@ impl CommandRegistry {
             description: "Service monitoring, health checks, and incident tracking",
             usage: "/monitor add <name> | topology | check | incident | impact <id>",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "Service topology management and health monitoring.\n\n\
                  Usage:\n  /monitor add <name> <url>     — Register a service\n  \
@@ -924,7 +857,7 @@ impl CommandRegistry {
             description: "Life planning with energy-aware scheduling and habits",
             usage: "/planner deadline <title> | habits | daily | review | energy",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "Energy-aware scheduling, deadline tracking, and habit management.\n\n\
                  Usage:\n  /planner deadline <title>     — Add a deadline\n  \
@@ -942,7 +875,7 @@ impl CommandRegistry {
             description: "Privacy management, data boundaries, and compliance",
             usage: "/privacy boundaries | audit | compliance | export | delete <domain>",
             category: CommandCategory::Safety,
-            tui_only: false,
+
             detailed_help: Some(
                 "Data boundary management, access auditing, and privacy controls.\n\n\
                  Usage:\n  /privacy boundaries           — List data boundaries\n  \
@@ -961,7 +894,7 @@ impl CommandRegistry {
             description: "Change Data Capture: background channel polling and auto-reply",
             usage: "/cdc [status|on|off|interval <channel> <secs>|enable <channel>|disable <channel>|cursors|style]",
             category: CommandCategory::System,
-            tui_only: false,
+
             detailed_help: Some(
                 "Manage background channel polling.\n\n\
                  Subcommands:\n  status   — Show polling state and intervals\n  \
@@ -979,7 +912,7 @@ impl CommandRegistry {
             description: "Self-improvement: usage patterns, performance, and preferences",
             usage: "/improve patterns | performance | preferences | feedback | load",
             category: CommandCategory::Agent,
-            tui_only: false,
+
             detailed_help: Some(
                 "Analyze usage patterns and optimize agent performance.\n\n\
                  Usage:\n  /improve patterns             — Analyze tool usage patterns\n  \
@@ -997,7 +930,7 @@ impl CommandRegistry {
             description: "Toggle voice command mode (listen→transcribe→respond)",
             usage: "/voicecmd [on|off|status]",
             category: CommandCategory::System,
-            tui_only: false,
+
             detailed_help: Some(
                 "Start or stop background voice command listening.\n\n\
                  Usage:\n  /voicecmd on      — Start voice command session\n  \
@@ -1014,7 +947,7 @@ impl CommandRegistry {
             description: "Toggle meeting recording with auto-transcription",
             usage: "/record [start|stop|status] [title]",
             category: CommandCategory::System,
-            tui_only: false,
+
             detailed_help: Some(
                 "Start or stop meeting recording with transcription.\n\n\
                  Usage:\n  /record start [title]  — Start recording (macOS only)\n  \
@@ -1024,6 +957,221 @@ impl CommandRegistry {
                  Requires OPENAI_API_KEY for Whisper transcription.\n\
                  Audio recorded via afrecord, silence auto-stop supported.\n\
                  TUI shortcut: Ctrl+M",
+            ),
+        });
+
+        // ── Prompt Caching ──
+        self.register(CommandInfo {
+            name: "/cache",
+            aliases: &[],
+            description: "Show prompt cache state, hit rate, and savings",
+            usage: "/cache [status|clear]",
+            category: CommandCategory::System,
+
+            detailed_help: Some(
+                "Display and manage provider-level prompt caching.\n\n\
+                 Usage:\n  /cache          — Show cache state, TTL, hit rate, savings\n  \
+                 /cache status   — Same as /cache\n  \
+                 /cache clear    — Reset cache metrics\n\n\
+                 Prompt caching reduces latency and cost by reusing cached prefixes.\n\
+                 Supported providers: Anthropic (cache_control), OpenAI (automatic), Gemini (CachedContent).",
+            ),
+        });
+
+        // ── Personas ──
+        self.register(CommandInfo {
+            name: "/persona",
+            aliases: &[],
+            description: "Manage adaptive expert personas",
+            usage: "/persona [status|list|set <name>|auto|stats]",
+            category: CommandCategory::Agent,
+
+            detailed_help: Some(
+                "View and control the adaptive persona system.\n\n\
+                 Usage:\n  /persona          — Show active persona and selection rationale\n  \
+                 /persona status   — Same as /persona\n  \
+                 /persona list     — List all available personas with metrics\n  \
+                 /persona set <n>  — Manually set persona (architect, security, mlops, general)\n  \
+                 /persona auto     — Re-enable auto-detection from task classification\n  \
+                 /persona stats    — Per-persona success rates and task distribution\n\n\
+                 Personas adjust system prompts, tool preferences, and safety thresholds.",
+            ),
+        });
+
+        // ── Extended Thinking ──
+        self.register(CommandInfo {
+            name: "/think",
+            aliases: &[],
+            description: "Toggle extended thinking mode or set budget",
+            usage: "/think [on|off|budget <N>]",
+            category: CommandCategory::Agent,
+
+            detailed_help: Some(
+                "Control extended thinking (chain-of-thought reasoning) for LLM responses.\n\n\
+                 Usage:\n  /think          — Show thinking mode status\n  \
+                 /think on       — Enable extended thinking\n  \
+                 /think off      — Disable extended thinking\n  \
+                 /think budget <N> — Set thinking token budget (e.g., 4096)\n\n\
+                 When enabled, the LLM shows its reasoning process before answering.\n\
+                 Requires a provider that supports thinking (Anthropic, Gemini).\n\
+                 Auto-enabled for destructive operations in safety modes.",
+            ),
+        });
+
+        // ── Vision ──
+        self.register(CommandInfo {
+            name: "/vision",
+            aliases: &["/img"],
+            description: "Send an image to the LLM for analysis",
+            usage: "/vision <path> [prompt]",
+            category: CommandCategory::Agent,
+
+            detailed_help: Some(
+                "Analyze images using the LLM's vision capabilities.\n\n\
+                 Usage:\n  /vision /path/to/image.png         — Describe the image\n  \
+                 /vision /path/to/screenshot.png What do you see? — Custom prompt\n\n\
+                 Supported formats: PNG, JPEG, GIF, WebP\n\
+                 Max file size: 20MB\n\
+                 Requires a provider with vision support (Anthropic, OpenAI, Gemini).",
+            ),
+        });
+
+        // ── Grounding ──
+        self.register(CommandInfo {
+            name: "/ground",
+            aliases: &[],
+            description: "Toggle Gemini grounding with Google Search",
+            usage: "/ground [on|off]",
+            category: CommandCategory::Agent,
+
+            detailed_help: Some(
+                "Enable or disable Gemini grounding with Google Search.\n\n\
+                 Usage:\n  /ground          — Show grounding status\n  \
+                 /ground on       — Enable Google Search grounding\n  \
+                 /ground off      — Disable grounding\n\n\
+                 When enabled, Gemini uses Google Search to ground responses\n\
+                 with real-time web data. Sources are displayed with responses.\n\
+                 Only available with Gemini provider.",
+            ),
+        });
+
+        // ── Structured Output ──
+        self.register(CommandInfo {
+            name: "/structured",
+            aliases: &["/json"],
+            description: "Set JSON schema for structured output mode",
+            usage: "/structured [off|<schema_json>]",
+            category: CommandCategory::Agent,
+
+            detailed_help: Some(
+                "Control structured output mode with JSON schema enforcement.\n\n\
+                 Usage:\n  /structured off                    — Disable structured output\n  \
+                 /structured {\"type\":\"object\",...}  — Set JSON schema\n\n\
+                 When a schema is set, the LLM will return responses conforming\n\
+                 to the specified JSON schema. Supported by OpenAI and Gemini.\n\
+                 Use /structured off to return to normal text output.",
+            ),
+        });
+
+        // ── Provider Capabilities ──
+        self.register(CommandInfo {
+            name: "/capabilities",
+            aliases: &["/caps"],
+            description: "Show current provider capabilities",
+            usage: "/capabilities",
+            category: CommandCategory::System,
+
+            detailed_help: Some(
+                "Display the capabilities of the current LLM provider.\n\n\
+                 Shows:\n  - Vision (image analysis)\n  \
+                 - Extended thinking (chain-of-thought)\n  \
+                 - Structured output (JSON schema)\n  \
+                 - Citations (source references)\n  \
+                 - Code execution (sandbox)\n  \
+                 - Grounding (web search)\n  \
+                 - Prompt caching support\n  \
+                 - Context window size and pricing\n\n\
+                 Useful for understanding what features are available\n\
+                 with your current provider configuration.",
+            ),
+        });
+
+        // ── Hooks ──
+        self.register(CommandInfo {
+            name: "/hooks",
+            aliases: &[],
+            description: "Manage agent lifecycle hooks",
+            usage: "/hooks [list|add|remove|enable|disable]",
+            category: CommandCategory::System,
+
+            detailed_help: Some(
+                "Manage event-driven hooks that execute on agent lifecycle events.\n\n\
+                 Usage:\n  /hooks list                        — List all registered hooks\n  \
+                 /hooks add <event> <command>        — Add a new hook\n  \
+                 /hooks remove <event>               — Remove hooks for an event\n  \
+                 /hooks enable <event>               — Enable hooks for an event\n  \
+                 /hooks disable <event>              — Disable hooks for an event\n\n\
+                 Events: session_start, session_end, task_start, task_complete,\n\
+                 pre_tool_use, post_tool_use, safety_denial, error_occurred, etc.\n\n\
+                 Configure in .rustant/config.toml under [hooks].",
+            ),
+        });
+
+        // ── Agent Teams ──
+        self.register(CommandInfo {
+            name: "/team",
+            aliases: &[],
+            description: "Manage coordinated agent teams",
+            usage: "/team [create|list|run|status] <name>",
+            category: CommandCategory::Agent,
+
+            detailed_help: Some(
+                "Create and manage coordinated agent teams.\n\n\
+                 Usage:\n  /team create <name> --members <a>,<b>  — Create a team\n  \
+                 /team list                               — List teams\n  \
+                 /team run <name> <task>                  — Run a team task\n  \
+                 /team status <name>                      — Show team status\n  \
+                 /team remove <name>                      — Remove a team\n\n\
+                 Coordination strategies: sequential, parallel, review_chain,\n\
+                 plan_execute_verify. Each member can use different providers.",
+            ),
+        });
+
+        // ── Batch Operations ──
+        self.register(CommandInfo {
+            name: "/batch",
+            aliases: &[],
+            description: "Submit and manage batch LLM operations",
+            usage: "/batch [submit|status|results|cancel] [args]",
+            category: CommandCategory::Agent,
+
+            detailed_help: Some(
+                "Submit bulk operations for batch processing (50% cost savings).\n\n\
+                 Usage:\n  /batch submit <tasks...>  — Submit tasks for batch processing\n  \
+                 /batch status             — Check batch status\n  \
+                 /batch results            — Retrieve batch results\n  \
+                 /batch cancel             — Cancel pending batch\n\n\
+                 Batch processing runs asynchronously at lower cost.\n\
+                 Currently supported with Anthropic (Message Batches API).",
+            ),
+        });
+
+        // ── Code Index ──
+        self.register(CommandInfo {
+            name: "/index",
+            aliases: &[],
+            description: "Manage the semantic code index",
+            usage: "/index [status|rebuild|stats]",
+            category: CommandCategory::Agent,
+
+            detailed_help: Some(
+                "View and manage the project's semantic code index.\n\n\
+                 Usage:\n  /index          — Show indexing status and statistics\n  \
+                 /index status   — Same as /index\n  \
+                 /index rebuild  — Force a full re-index of the workspace\n  \
+                 /index stats    — Show stale files, coverage, vector count\n\n\
+                 The index enables semantic code search via the codebase_search tool.\n\
+                 Incremental re-indexing detects changed files automatically.",
             ),
         });
     }
@@ -1058,10 +1206,9 @@ impl CommandRegistry {
                 } else {
                     format!(" ({})", cmd.aliases.join(", "))
                 };
-                let tui_marker = if cmd.tui_only { " (TUI)" } else { "" };
                 output.push_str(&format!(
-                    "    {:<24} {}{}{}\n",
-                    cmd.usage, cmd.description, aliases, tui_marker
+                    "    {:<24} {}{}\n",
+                    cmd.usage, cmd.description, aliases
                 ));
             }
         }
@@ -1122,9 +1269,6 @@ impl CommandRegistry {
             if !cmd.aliases.is_empty() {
                 output.push_str(&format!("Aliases: {}\n", cmd.aliases.join(", ")));
             }
-            if cmd.tui_only {
-                output.push_str("Note: This command is only available in TUI mode.\n");
-            }
             if let Some(detailed) = cmd.detailed_help {
                 output.push('\n');
                 output.push_str(detailed);
@@ -1146,11 +1290,7 @@ impl CommandRegistry {
                 }
                 let mut output = format!("{} Commands:\n\n", cat.label());
                 for cmd in cmds {
-                    let tui_marker = if cmd.tui_only { " (TUI)" } else { "" };
-                    output.push_str(&format!(
-                        "  {:<24} {}{}\n",
-                        cmd.usage, cmd.description, tui_marker
-                    ));
+                    output.push_str(&format!("  {:<24} {}\n", cmd.usage, cmd.description));
                 }
                 return Some(output);
             }
@@ -1221,10 +1361,10 @@ mod tests {
     #[test]
     fn test_register_defaults_populates() {
         let registry = CommandRegistry::with_defaults();
-        // We have 43+ commands registered (25 core + 7 TUI-only + 9 CLI parity + 1 arxiv + 1 cdc)
+        // We have 53+ commands registered (45 original + 8 new: think/vision/ground/structured/capabilities/hooks/team/batch)
         assert!(
-            registry.len() >= 46,
-            "Expected at least 46 commands, got {}",
+            registry.len() >= 53,
+            "Expected at least 53 commands, got {}",
             registry.len()
         );
     }
@@ -1410,30 +1550,11 @@ mod tests {
     }
 
     #[test]
-    fn test_tui_only_commands_exist() {
-        let registry = CommandRegistry::with_defaults();
-        for name in &[
-            "/theme",
-            "/sidebar",
-            "/vim",
-            "/save",
-            "/load",
-            "/analytics",
-            "/replay",
-        ] {
-            let cmd = registry.lookup(name);
-            assert!(cmd.is_some(), "Missing TUI command: {}", name);
-            assert!(cmd.unwrap().tui_only, "{} should be TUI-only", name);
-        }
-    }
-
-    #[test]
-    fn test_core_commands_not_tui_only() {
+    fn test_core_commands_present() {
         let registry = CommandRegistry::with_defaults();
         for name in &["/help", "/quit", "/compact", "/status", "/config"] {
             let cmd = registry.lookup(name);
             assert!(cmd.is_some(), "Missing core command: {}", name);
-            assert!(!cmd.unwrap().tui_only, "{} should NOT be TUI-only", name);
         }
     }
 
@@ -1445,16 +1566,16 @@ mod tests {
             .iter()
             .filter(|c| c.category == CommandCategory::Ui)
             .count();
-        assert!(count >= 3, "UI category should have at least 3 commands");
+        assert!(count >= 1, "UI category should have at least 1 command");
     }
 
     #[test]
-    fn test_help_text_marks_tui_commands() {
+    fn test_help_text_has_no_tui_markers() {
         let registry = CommandRegistry::with_defaults();
         let help = registry.help_text();
         assert!(
-            help.contains("(TUI)"),
-            "Help text should contain (TUI) markers for TUI-only commands"
+            !help.contains("(TUI)"),
+            "Help text should not contain (TUI) markers since TUI was removed"
         );
     }
 }

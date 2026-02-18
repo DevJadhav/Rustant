@@ -7,6 +7,8 @@
 use crate::project_detect::{ProjectInfo, detect_project};
 use crate::search::{HybridSearchEngine, SearchConfig, SearchResult};
 use ignore::WalkBuilder;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info};
 
@@ -473,6 +475,333 @@ fn extract_c_signature(line: &str) -> Option<String> {
         Some(line.trim_end_matches('{').trim().to_string())
     } else {
         None
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Code Block Extraction
+// ---------------------------------------------------------------------------
+
+/// The kind of a code block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CodeBlockKind {
+    Function,
+    Method,
+    Struct,
+    Enum,
+    Trait,
+    Class,
+    Interface,
+    Module,
+    Import,
+    Constant,
+    TypeAlias,
+}
+
+impl std::fmt::Display for CodeBlockKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CodeBlockKind::Function => write!(f, "function"),
+            CodeBlockKind::Method => write!(f, "method"),
+            CodeBlockKind::Struct => write!(f, "struct"),
+            CodeBlockKind::Enum => write!(f, "enum"),
+            CodeBlockKind::Trait => write!(f, "trait"),
+            CodeBlockKind::Class => write!(f, "class"),
+            CodeBlockKind::Interface => write!(f, "interface"),
+            CodeBlockKind::Module => write!(f, "module"),
+            CodeBlockKind::Import => write!(f, "import"),
+            CodeBlockKind::Constant => write!(f, "constant"),
+            CodeBlockKind::TypeAlias => write!(f, "type_alias"),
+        }
+    }
+}
+
+/// A parsed code block extracted from a source file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodeBlock {
+    /// Kind of block (function, struct, etc.).
+    pub kind: CodeBlockKind,
+    /// Name of the block (function name, struct name, etc.).
+    pub name: String,
+    /// File path relative to workspace.
+    pub file_path: String,
+    /// Starting line number (1-based).
+    pub line_start: usize,
+    /// Signature or header line.
+    pub signature: String,
+    /// Detected language.
+    pub language: String,
+}
+
+/// Extract code blocks from source content with richer structure than `extract_signatures`.
+pub fn extract_code_blocks(content: &str, path: &str) -> Vec<CodeBlock> {
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+
+    let language = match ext {
+        "rs" => "rust",
+        "py" => "python",
+        "js" | "jsx" => "javascript",
+        "ts" | "tsx" => "typescript",
+        "go" => "go",
+        "java" => "java",
+        "rb" => "ruby",
+        "c" | "h" => "c",
+        "cpp" | "cc" | "hpp" => "cpp",
+        _ => return Vec::new(),
+    };
+
+    let mut blocks = Vec::new();
+
+    for (i, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        let block = match ext {
+            "rs" => classify_rust_block(trimmed),
+            "py" => classify_python_block(trimmed),
+            "js" | "jsx" | "ts" | "tsx" => classify_js_block(trimmed),
+            "go" => classify_go_block(trimmed),
+            "java" | "kt" | "scala" => classify_java_block(trimmed),
+            "rb" => classify_ruby_block(trimmed),
+            _ => None,
+        };
+
+        if let Some((kind, name)) = block {
+            blocks.push(CodeBlock {
+                kind,
+                name,
+                file_path: path.to_string(),
+                line_start: i + 1,
+                signature: trimmed.trim_end_matches('{').trim().to_string(),
+                language: language.to_string(),
+            });
+        }
+    }
+
+    blocks
+}
+
+fn classify_rust_block(line: &str) -> Option<(CodeBlockKind, String)> {
+    if let Some(name) = extract_name_after(line, "pub fn ")
+        .or_else(|| extract_name_after(line, "fn "))
+        .or_else(|| extract_name_after(line, "pub async fn "))
+        .or_else(|| extract_name_after(line, "async fn "))
+    {
+        return Some((CodeBlockKind::Function, name));
+    }
+    if let Some(name) =
+        extract_name_after(line, "pub struct ").or_else(|| extract_name_after(line, "struct "))
+    {
+        return Some((CodeBlockKind::Struct, name));
+    }
+    if let Some(name) =
+        extract_name_after(line, "pub enum ").or_else(|| extract_name_after(line, "enum "))
+    {
+        return Some((CodeBlockKind::Enum, name));
+    }
+    if let Some(name) =
+        extract_name_after(line, "pub trait ").or_else(|| extract_name_after(line, "trait "))
+    {
+        return Some((CodeBlockKind::Trait, name));
+    }
+    if let Some(name) =
+        extract_name_after(line, "pub mod ").or_else(|| extract_name_after(line, "mod "))
+    {
+        return Some((CodeBlockKind::Module, name));
+    }
+    if let Some(name) =
+        extract_name_after(line, "pub type ").or_else(|| extract_name_after(line, "type "))
+    {
+        return Some((CodeBlockKind::TypeAlias, name));
+    }
+    if let Some(name) =
+        extract_name_after(line, "pub const ").or_else(|| extract_name_after(line, "const "))
+    {
+        return Some((CodeBlockKind::Constant, name));
+    }
+    None
+}
+
+fn classify_python_block(line: &str) -> Option<(CodeBlockKind, String)> {
+    if let Some(name) =
+        extract_name_after(line, "def ").or_else(|| extract_name_after(line, "async def "))
+    {
+        return Some((CodeBlockKind::Function, name));
+    }
+    if let Some(name) = extract_name_after(line, "class ") {
+        return Some((CodeBlockKind::Class, name));
+    }
+    None
+}
+
+fn classify_js_block(line: &str) -> Option<(CodeBlockKind, String)> {
+    if let Some(name) = extract_name_after(line, "function ")
+        .or_else(|| extract_name_after(line, "async function "))
+        .or_else(|| extract_name_after(line, "export function "))
+        .or_else(|| extract_name_after(line, "export async function "))
+        .or_else(|| extract_name_after(line, "export default function "))
+    {
+        return Some((CodeBlockKind::Function, name));
+    }
+    if let Some(name) =
+        extract_name_after(line, "class ").or_else(|| extract_name_after(line, "export class "))
+    {
+        return Some((CodeBlockKind::Class, name));
+    }
+    if let Some(name) = extract_name_after(line, "interface ")
+        .or_else(|| extract_name_after(line, "export interface "))
+    {
+        return Some((CodeBlockKind::Interface, name));
+    }
+    None
+}
+
+fn classify_go_block(line: &str) -> Option<(CodeBlockKind, String)> {
+    if let Some(name) = extract_name_after(line, "func ") {
+        return Some((CodeBlockKind::Function, name));
+    }
+    if let Some(name) = extract_name_after(line, "type ") {
+        if line.contains("struct") {
+            return Some((CodeBlockKind::Struct, name));
+        } else if line.contains("interface") {
+            return Some((CodeBlockKind::Interface, name));
+        }
+    }
+    None
+}
+
+fn classify_java_block(line: &str) -> Option<(CodeBlockKind, String)> {
+    if line.contains("class ") {
+        return extract_name_after(line, "class ").map(|n| (CodeBlockKind::Class, n));
+    }
+    if line.contains("interface ") {
+        return extract_name_after(line, "interface ").map(|n| (CodeBlockKind::Interface, n));
+    }
+    if line.contains('(') && !line.starts_with("//") {
+        // Extract method name before the '('
+        let before_paren = line.split('(').next().unwrap_or("");
+        let name = before_paren
+            .split_whitespace()
+            .last()
+            .unwrap_or("")
+            .to_string();
+        if !name.is_empty() && name.chars().next().unwrap_or(' ').is_alphabetic() {
+            return Some((CodeBlockKind::Method, name));
+        }
+    }
+    None
+}
+
+fn classify_ruby_block(line: &str) -> Option<(CodeBlockKind, String)> {
+    if let Some(name) = extract_name_after(line, "def ") {
+        return Some((CodeBlockKind::Method, name));
+    }
+    if let Some(name) = extract_name_after(line, "class ") {
+        return Some((CodeBlockKind::Class, name));
+    }
+    if let Some(name) = extract_name_after(line, "module ") {
+        return Some((CodeBlockKind::Module, name));
+    }
+    None
+}
+
+/// Extract the identifier name after a keyword prefix.
+fn extract_name_after(line: &str, prefix: &str) -> Option<String> {
+    if let Some(rest) = line.strip_prefix(prefix) {
+        let name: String = rest
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        if !name.is_empty() {
+            return Some(name);
+        }
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
+// Incremental Re-indexing
+// ---------------------------------------------------------------------------
+
+/// Registry tracking file hashes for incremental re-indexing.
+///
+/// Persists SHA-256 hashes per file to `.rustant/index_hashes.json`.
+/// On re-index, only changed/new files are processed; deleted files are removed.
+pub struct FileHashRegistry {
+    hashes: HashMap<String, String>,
+    state_path: PathBuf,
+}
+
+impl FileHashRegistry {
+    /// Create or load from a workspace.
+    pub fn load(workspace: &Path) -> Self {
+        let state_path = workspace.join(".rustant").join("index_hashes.json");
+        let hashes = if state_path.exists() {
+            std::fs::read_to_string(&state_path)
+                .ok()
+                .and_then(|data| serde_json::from_str(&data).ok())
+                .unwrap_or_default()
+        } else {
+            HashMap::new()
+        };
+        Self { hashes, state_path }
+    }
+
+    /// Check if a file has changed since last index.
+    pub fn is_changed(&self, rel_path: &str, content: &str) -> bool {
+        let hash = Self::hash_content(content);
+        match self.hashes.get(rel_path) {
+            Some(stored) => *stored != hash,
+            None => true, // New file
+        }
+    }
+
+    /// Record a file's current hash.
+    pub fn record(&mut self, rel_path: &str, content: &str) {
+        let hash = Self::hash_content(content);
+        self.hashes.insert(rel_path.to_string(), hash);
+    }
+
+    /// Remove a file's hash (file was deleted).
+    pub fn remove(&mut self, rel_path: &str) {
+        self.hashes.remove(rel_path);
+    }
+
+    /// Get all tracked file paths.
+    pub fn tracked_files(&self) -> Vec<String> {
+        self.hashes.keys().cloned().collect()
+    }
+
+    /// Save the hash registry to disk (atomic write).
+    pub fn save(&self) -> std::io::Result<()> {
+        if let Some(parent) = self.state_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(&self.hashes).map_err(std::io::Error::other)?;
+        let tmp = self.state_path.with_extension("json.tmp");
+        std::fs::write(&tmp, &json)?;
+        std::fs::rename(&tmp, &self.state_path)?;
+        Ok(())
+    }
+
+    /// Number of tracked files.
+    pub fn len(&self) -> usize {
+        self.hashes.len()
+    }
+
+    /// Whether the registry is empty.
+    pub fn is_empty(&self) -> bool {
+        self.hashes.is_empty()
+    }
+
+    fn hash_content(content: &str) -> String {
+        use std::hash::{Hash, Hasher};
+        // Use a fast non-crypto hash for file change detection (not security-critical)
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        content.hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
     }
 }
 

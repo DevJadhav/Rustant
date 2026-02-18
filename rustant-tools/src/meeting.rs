@@ -257,12 +257,9 @@ end tell"#
     run_osascript(&script).await
 }
 
-/// Get the OpenAI API key from the environment.
+/// Get the OpenAI API key via centralized credential resolution.
 fn get_api_key() -> Result<String, String> {
-    std::env::var("OPENAI_API_KEY").map_err(|_| {
-        "OPENAI_API_KEY not set. Please set it in your environment to use transcription."
-            .to_string()
-    })
+    rustant_core::resolve_api_key_by_env("OPENAI_API_KEY")
 }
 
 /// Announce a message via macOS text-to-speech (`say` command).

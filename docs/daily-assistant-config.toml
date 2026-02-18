@@ -50,7 +50,6 @@ enable_persistence = true
 theme = "dark"
 vim_mode = false
 show_cost = true
-use_tui = false
 
 [tools]
 enable_builtins = true

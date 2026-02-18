@@ -172,6 +172,7 @@ impl PlanningCouncil {
         let mut total_usage = TokenUsage {
             input_tokens: 0,
             output_tokens: 0,
+            ..Default::default()
         };
         let mut total_cost = 0.0;
 
@@ -231,6 +232,7 @@ impl PlanningCouncil {
                         max_tokens: Some(max_tokens),
                         stop_sequences: vec![],
                         model: Some(model.clone()),
+                        ..Default::default()
                     };
 
                     let result = provider.complete(request).await;
@@ -349,6 +351,7 @@ impl PlanningCouncil {
                     max_tokens: Some(512),
                     stop_sequences: vec![],
                     model: Some(cfg.model.clone()),
+                    ..Default::default()
                 };
 
                 match provider.complete(request).await {
@@ -442,6 +445,7 @@ impl PlanningCouncil {
             max_tokens: Some(self.config.max_member_tokens * 2),
             stop_sequences: vec![],
             model: Some(chairman_cfg.model.clone()),
+            ..Default::default()
         };
 
         let response = chairman_provider.complete(request).await?;

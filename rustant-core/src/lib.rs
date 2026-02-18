@@ -8,15 +8,19 @@ pub mod agent;
 pub mod audit;
 pub mod brain;
 pub mod browser;
+pub mod cache;
 pub mod canvas;
 pub mod channels;
 pub mod config;
 pub mod council;
 pub mod credentials;
+pub mod embeddings;
 pub mod encryption;
 pub mod error;
+pub mod evaluation;
 pub mod explanation;
 pub mod gateway;
+pub mod hooks;
 pub mod indexer;
 pub mod injection;
 pub mod memory;
@@ -26,6 +30,7 @@ pub mod multi;
 pub mod nodes;
 pub mod oauth;
 pub mod pairing;
+pub mod personas;
 pub mod plan;
 pub mod project_detect;
 pub mod providers;
@@ -80,6 +85,7 @@ pub use council::{
     CouncilMemberResponse, CouncilResult, DetectedProvider, PeerReview, PlanningCouncil,
     detect_available_providers, should_use_council,
 };
+pub use hooks::{HookDefinition, HookEvent, HookRegistry, HookResult};
 pub use plan::{
     ExecutionPlan, PlanAlternative, PlanConfig, PlanDecision, PlanStatus, PlanStep, StepStatus,
 };
@@ -110,7 +116,8 @@ pub use merkle::{AuditNode, MerkleChain, VerificationResult};
 pub use multi::AgentStatus as MultiAgentStatus;
 pub use multi::{
     AgentContext, AgentEnvelope, AgentOrchestrator, AgentPayload, AgentRoute, AgentRouter,
-    AgentSpawner, MessageBus, MessagePriority, ResourceLimits, TaskHandler,
+    AgentSpawner, AgentTeam, CoordinationStrategy, MessageBus, MessagePriority, ResourceLimits,
+    SharedContext, TaskHandler, TeamDecision, TeamMember, TeamRegistry, TeamTask, TeamTaskStatus,
 };
 pub use nodes::{
     Capability, ConsentEntry, ConsentStore, DiscoveredNode, Node, NodeCapability, NodeDiscovery,
@@ -123,12 +130,13 @@ pub use project_detect::{
 };
 pub use providers::{
     CircuitBreaker, CircuitState, FailoverProvider, GeminiProvider, ModelInfo,
-    create_council_members, create_provider, create_provider_with_auth,
+    create_council_members, create_provider, create_provider_with_auth, is_ollama_available,
+    list_ollama_models, resolve_api_key_by_env,
 };
 pub use safety::{
     AdaptiveTrust, ApprovalContext, ApprovalDecision, BehavioralFingerprint, ContractEnforcer,
-    Invariant, Predicate, ResourceBounds, ReversibilityInfo, SafetyContract, SafetyGuardian,
-    ToolRateLimiter,
+    Invariant, PermissionPolicy, Predicate, ResourceBounds, ReversibilityInfo, SafetyContract,
+    SafetyGuardian, ToolRateLimiter,
 };
 pub use sandbox::SandboxedFs;
 pub use scheduler::{
@@ -145,9 +153,10 @@ pub use skills::{
 };
 pub use summarizer::{ContextSummarizer, ContextSummary, TokenAlert, TokenCostDisplay};
 pub use types::{
-    AgentState, AgentStatus, Artifact, CompletionRequest, CompletionResponse, Content,
-    CostEstimate, Message, ProgressUpdate, RiskLevel, Role, StreamEvent, TaskClassification,
-    TokenUsage, ToolDefinition, ToolOutput,
+    AgentState, AgentStatus, Artifact, CitationSource, CompletionRequest, CompletionResponse,
+    Content, CostEstimate, GroundingResult, GroundingTool, ImageSource, Message, ProgressUpdate,
+    ResponseFormat, RiskLevel, Role, StreamEvent, TaskClassification, ThinkingConfig, TokenUsage,
+    ToolChoice, ToolDefinition, ToolOutput,
 };
 pub use voice::{
     AudioChunk, AudioFormat, MeetingRecordingSession, MeetingResult, MeetingStatus,

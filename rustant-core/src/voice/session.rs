@@ -31,8 +31,10 @@ impl VoiceCommandSession {
         _workspace: PathBuf,
         on_transcription: Arc<dyn Fn(String) + Send + Sync>,
     ) -> Result<Self, VoiceError> {
-        let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| VoiceError::AuthFailed {
-            provider: "openai".into(),
+        let api_key = crate::providers::resolve_api_key_by_env("OPENAI_API_KEY").map_err(|_| {
+            VoiceError::AuthFailed {
+                provider: "openai".into(),
+            }
         })?;
 
         let (cancel_tx, cancel_rx) = watch::channel(false);

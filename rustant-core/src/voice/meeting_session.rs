@@ -175,7 +175,7 @@ impl MeetingRecordingSession {
             .num_seconds() as u64;
 
         // Transcribe using core's own OpenAiSttProvider.
-        let transcript = match std::env::var("OPENAI_API_KEY") {
+        let transcript = match crate::providers::resolve_api_key_by_env("OPENAI_API_KEY") {
             Ok(api_key) if std::path::Path::new(&state.audio_path).exists() => {
                 match transcribe_file(&state.audio_path, &api_key).await {
                     Ok(text) => text,

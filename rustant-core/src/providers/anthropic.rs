@@ -122,8 +122,17 @@ impl AnthropicProvider {
         });
 
         // Add system message as top-level field if present.
+        // When caching is enabled, use array-of-content-blocks format with cache_control.
         if let Some(system) = &system_text {
-            body["system"] = Value::String(system.clone());
+            if request.cache_hint.enable_prompt_cache {
+                body["system"] = serde_json::json!([{
+                    "type": "text",
+                    "text": system,
+                    "cache_control": {"type": "ephemeral"}
+                }]);
+            } else {
+                body["system"] = Value::String(system.clone());
+            }
         }
 
         // Add stop sequences if provided.
@@ -133,8 +142,43 @@ impl AnthropicProvider {
 
         // Add tools if provided.
         if let Some(tools) = &request.tools {
-            let tools_json: Vec<Value> = tools.iter().map(Self::tool_definition_to_json).collect();
+            let mut tools_json: Vec<Value> =
+                tools.iter().map(Self::tool_definition_to_json).collect();
+            // When caching is enabled, mark the last tool with cache_control
+            // so the tool definitions prefix is also cached.
+            if request.cache_hint.enable_prompt_cache
+                && let Some(last) = tools_json.last_mut()
+            {
+                last["cache_control"] = serde_json::json!({"type": "ephemeral"});
+            }
             body["tools"] = Value::Array(tools_json);
+        }
+
+        // Enable extended thinking if configured.
+        if let Some(ref thinking) = request.thinking
+            && thinking.enabled
+        {
+            let budget = thinking.budget_tokens.unwrap_or(10000);
+            body["thinking"] = serde_json::json!({
+                "type": "enabled",
+                "budget_tokens": budget
+            });
+            // Anthropic requires temperature = 1.0 for thinking mode
+            body["temperature"] = serde_json::json!(1.0);
+        }
+
+        // Set tool_choice if not Auto
+        match &request.tool_choice {
+            crate::types::ToolChoice::Auto => {}
+            crate::types::ToolChoice::Required => {
+                body["tool_choice"] = serde_json::json!({"type": "any"});
+            }
+            crate::types::ToolChoice::None => {
+                body["tool_choice"] = serde_json::json!({"type": "none"});
+            }
+            crate::types::ToolChoice::Specific(name) => {
+                body["tool_choice"] = serde_json::json!({"type": "tool", "name": name});
+            }
         }
 
         // Enable streaming if requested.
@@ -239,6 +283,77 @@ impl AnthropicProvider {
                     })
                     .collect();
                 Value::Array(blocks)
+            }
+            Content::Image {
+                source, media_type, ..
+            } => {
+                let source_json = match source {
+                    crate::types::ImageSource::Base64(data) => serde_json::json!({
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": data,
+                    }),
+                    crate::types::ImageSource::Url(url) => serde_json::json!({
+                        "type": "url",
+                        "url": url,
+                    }),
+                    crate::types::ImageSource::FilePath(_) => {
+                        // File paths should be converted to base64 before reaching here
+                        serde_json::json!({"type": "base64", "media_type": media_type, "data": ""})
+                    }
+                };
+                serde_json::json!([{
+                    "type": "image",
+                    "source": source_json,
+                }])
+            }
+            Content::Thinking {
+                thinking,
+                signature,
+            } => {
+                let mut block = serde_json::json!({
+                    "type": "thinking",
+                    "thinking": thinking,
+                });
+                if let Some(sig) = signature {
+                    block["signature"] = Value::String(sig.clone());
+                }
+                serde_json::json!([block])
+            }
+            Content::Citation { cited_text, .. } => {
+                // Citations are rendered as text references in the Anthropic format
+                serde_json::json!([{
+                    "type": "text",
+                    "text": cited_text,
+                }])
+            }
+            Content::CodeExecution {
+                code,
+                output,
+                error,
+                ..
+            } => {
+                let text = format!(
+                    "[Code Execution]\n```\n{}\n```\nOutput: {}\n{}",
+                    code,
+                    output.as_deref().unwrap_or("(none)"),
+                    error
+                        .as_deref()
+                        .map_or(String::new(), |e| format!("Error: {}", e))
+                );
+                serde_json::json!([{"type": "text", "text": text}])
+            }
+            Content::SearchResult { query, results } => {
+                let text = format!(
+                    "[Search: {}]\n{}",
+                    query,
+                    results
+                        .iter()
+                        .map(|r| format!("- {} ({}): {}", r.title, r.url, r.snippet))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
+                serde_json::json!([{"type": "text", "text": text}])
             }
         }
     }
@@ -375,6 +490,12 @@ impl AnthropicProvider {
         let usage = TokenUsage {
             input_tokens: body["usage"]["input_tokens"].as_u64().unwrap_or(0) as usize,
             output_tokens: body["usage"]["output_tokens"].as_u64().unwrap_or(0) as usize,
+            cache_read_tokens: body["usage"]["cache_read_input_tokens"]
+                .as_u64()
+                .unwrap_or(0) as usize,
+            cache_creation_tokens: body["usage"]["cache_creation_input_tokens"]
+                .as_u64()
+                .unwrap_or(0) as usize,
         };
 
         let content_blocks = body["content"]
@@ -418,6 +539,14 @@ impl AnthropicProvider {
                         id,
                         name,
                         arguments: input,
+                    });
+                }
+                "thinking" => {
+                    let thinking = block["thinking"].as_str().unwrap_or("").to_string();
+                    let signature = block["signature"].as_str().map(|s| s.to_string());
+                    parts.push(Content::Thinking {
+                        thinking,
+                        signature,
                     });
                 }
                 other => {
@@ -553,6 +682,7 @@ impl AnthropicProvider {
                 Ok(Some(TokenUsage {
                     input_tokens: 0,
                     output_tokens,
+                    ..Default::default()
                 }))
             }
             "message_stop" => {
@@ -583,21 +713,29 @@ impl AnthropicProvider {
 impl LlmProvider for AnthropicProvider {
     /// Perform a full (non-streaming) completion via the Anthropic Messages API.
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, LlmError> {
+        let caching_enabled = request.cache_hint.enable_prompt_cache;
         let body = self.build_request_body(&request, false);
         let url = format!("{}/messages", self.base_url);
 
         debug!(
             model = self.model.as_str(),
             url = url.as_str(),
+            caching = caching_enabled,
             "Sending Anthropic completion request"
         );
 
-        let response = self
+        let mut req_builder = self
             .client
             .post(&url)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
-            .header("content-type", "application/json")
+            .header("content-type", "application/json");
+
+        if caching_enabled {
+            req_builder = req_builder.header("anthropic-beta", "prompt-caching-2024-07-31");
+        }
+
+        let response = req_builder
             .json(&body)
             .send()
             .await
@@ -631,21 +769,29 @@ impl LlmProvider for AnthropicProvider {
         request: CompletionRequest,
         tx: mpsc::Sender<StreamEvent>,
     ) -> Result<(), LlmError> {
+        let caching_enabled = request.cache_hint.enable_prompt_cache;
         let body = self.build_request_body(&request, true);
         let url = format!("{}/messages", self.base_url);
 
         debug!(
             model = self.model.as_str(),
             url = url.as_str(),
+            caching = caching_enabled,
             "Sending Anthropic streaming request"
         );
 
-        let response = self
+        let mut req_builder = self
             .client
             .post(&url)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
-            .header("content-type", "application/json")
+            .header("content-type", "application/json");
+
+        if caching_enabled {
+            req_builder = req_builder.header("anthropic-beta", "prompt-caching-2024-07-31");
+        }
+
+        let response = req_builder
             .json(&body)
             .send()
             .await
@@ -669,6 +815,7 @@ impl LlmProvider for AnthropicProvider {
         let mut total_usage = TokenUsage {
             input_tokens: 0,
             output_tokens: 0,
+            ..Default::default()
         };
 
         // Parse SSE events from the response body.
@@ -709,12 +856,19 @@ impl LlmProvider for AnthropicProvider {
                         }
                     }
 
-                    // Extract input tokens from message_start event.
-                    if event_type == "message_start"
-                        && let Some(input_tokens) =
-                            data_json["message"]["usage"]["input_tokens"].as_u64()
-                    {
-                        total_usage.input_tokens = input_tokens as usize;
+                    // Extract input tokens and cache usage from message_start event.
+                    if event_type == "message_start" {
+                        let usage = &data_json["message"]["usage"];
+                        if let Some(input_tokens) = usage["input_tokens"].as_u64() {
+                            total_usage.input_tokens = input_tokens as usize;
+                        }
+                        if let Some(cache_read) = usage["cache_read_input_tokens"].as_u64() {
+                            total_usage.cache_read_tokens = cache_read as usize;
+                        }
+                        if let Some(cache_creation) = usage["cache_creation_input_tokens"].as_u64()
+                        {
+                            total_usage.cache_creation_tokens = cache_creation as usize;
+                        }
                     }
                 }
 
@@ -751,6 +905,35 @@ impl LlmProvider for AnthropicProvider {
     /// Return the model name.
     fn model_name(&self) -> &str {
         &self.model
+    }
+
+    /// Anthropic supports prompt caching via cache_control breakpoints.
+    fn supports_caching(&self) -> bool {
+        true
+    }
+
+    /// Anthropic cache pricing: reads at 10% of input cost, writes at 125% of input cost.
+    fn cache_cost_per_token(&self) -> (f64, f64) {
+        (self.cost_input * 0.1, self.cost_input * 1.25)
+    }
+
+    fn supports_vision(&self) -> bool {
+        // All Claude 3+ models support vision
+        self.model.contains("claude-3") || self.model.contains("claude-4")
+    }
+
+    fn supports_thinking(&self) -> bool {
+        // Extended thinking available on Claude 3.5+ and Claude 4+
+        self.model.contains("claude-3-5")
+            || self.model.contains("claude-3.5")
+            || self.model.contains("claude-4")
+    }
+
+    fn supports_citations(&self) -> bool {
+        // Citations available on Claude 3.5+ models
+        self.model.contains("claude-3-5")
+            || self.model.contains("claude-3.5")
+            || self.model.contains("claude-4")
     }
 }
 
@@ -1363,6 +1546,7 @@ mod tests {
             max_tokens: Some(1024),
             stop_sequences: vec![],
             model: None,
+            ..Default::default()
         };
 
         let body = provider.build_request_body(&request, false);
@@ -1389,6 +1573,7 @@ mod tests {
             max_tokens: None,
             stop_sequences: vec![],
             model: None,
+            ..Default::default()
         };
 
         let body = provider.build_request_body(&request, true);
@@ -1419,6 +1604,7 @@ mod tests {
             max_tokens: None,
             stop_sequences: vec![],
             model: None,
+            ..Default::default()
         };
 
         let body = provider.build_request_body(&request, false);
@@ -1440,6 +1626,7 @@ mod tests {
             max_tokens: None,
             stop_sequences: vec!["STOP".to_string(), "END".to_string()],
             model: None,
+            ..Default::default()
         };
 
         let body = provider.build_request_body(&request, false);
@@ -1460,6 +1647,7 @@ mod tests {
             max_tokens: None,
             stop_sequences: vec![],
             model: Some("claude-3-5-haiku-20241022".to_string()),
+            ..Default::default()
         };
 
         let body = provider.build_request_body(&request, false);

@@ -132,6 +132,36 @@ pub fn resolve_api_key(
     })
 }
 
+/// Resolve an API key by environment variable name.
+///
+/// This is a simplified helper for modules that need an API key but don't have
+/// access to a full `LlmConfig` (e.g., voice, embeddings, meeting tools).
+/// Checks the OS keychain first (via `keyring`), then the environment variable.
+///
+/// # Arguments
+/// * `env_var` - Environment variable name (e.g., "OPENAI_API_KEY")
+///
+/// # Returns
+/// The API key string, or an error message if not found.
+pub fn resolve_api_key_by_env(env_var: &str) -> Result<String, String> {
+    // 1. Try OS keychain (uses same key naming as credential store)
+    let keychain_key = format!("rustant_{}", env_var.to_lowercase());
+    if let Ok(entry) = keyring::Entry::new("rustant", &keychain_key)
+        && let Ok(key) = entry.get_password()
+        && !key.is_empty()
+    {
+        return Ok(key);
+    }
+
+    // 2. Fall back to environment variable
+    std::env::var(env_var).map_err(|_| {
+        format!(
+            "{} not set. Set the environment variable or store it via `rustant auth login`.",
+            env_var
+        )
+    })
+}
+
 /// Resolve authentication for a provider, supporting both API keys and OAuth tokens.
 ///
 /// If `config.auth_method` is `"oauth"`, loads and (if needed) refreshes the OAuth
@@ -179,6 +209,17 @@ fn create_single_provider(config: &LlmConfig) -> Result<Arc<dyn LlmProvider>, Ll
     match config.provider.as_str() {
         "anthropic" => Ok(Arc::new(AnthropicProvider::new(config)?)),
         "gemini" => Ok(Arc::new(GeminiProvider::new(config)?)),
+        "ollama" => {
+            // Ensure Ollama has the right defaults
+            let mut ollama_config = config.clone();
+            if ollama_config.base_url.is_none() {
+                ollama_config.base_url = Some("http://localhost:11434/v1".to_string());
+            }
+            if ollama_config.api_key.is_none() {
+                ollama_config.api_key = Some("ollama".to_string());
+            }
+            Ok(Arc::new(OpenAiCompatibleProvider::new(&ollama_config)?))
+        }
         _ => Ok(Arc::new(OpenAiCompatibleProvider::new(config)?)),
     }
 }
@@ -191,10 +232,58 @@ fn create_single_provider_with_key(
     match config.provider.as_str() {
         "anthropic" => Ok(Arc::new(AnthropicProvider::new_with_key(config, api_key)?)),
         "gemini" => Ok(Arc::new(GeminiProvider::new_with_key(config, api_key)?)),
+        "ollama" => {
+            let mut ollama_config = config.clone();
+            if ollama_config.base_url.is_none() {
+                ollama_config.base_url = Some("http://localhost:11434/v1".to_string());
+            }
+            Ok(Arc::new(OpenAiCompatibleProvider::new_with_key(
+                &ollama_config,
+                api_key,
+            )?))
+        }
         _ => Ok(Arc::new(OpenAiCompatibleProvider::new_with_key(
             config, api_key,
         )?)),
     }
+}
+
+/// List models available from an Ollama instance.
+///
+/// Queries the Ollama `/api/tags` endpoint and returns a list of model names.
+/// Returns an empty vec if Ollama is unreachable or the response is invalid.
+pub async fn list_ollama_models(base_url: Option<&str>) -> Vec<String> {
+    let base = base_url.unwrap_or("http://localhost:11434");
+    let url = format!("{}/api/tags", base);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap_or_default();
+    match client.get(&url).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            if let Ok(json) = resp.json::<serde_json::Value>().await
+                && let Some(models) = json["models"].as_array()
+            {
+                return models
+                    .iter()
+                    .filter_map(|m| m["name"].as_str().map(|s| s.to_string()))
+                    .collect();
+            }
+            Vec::new()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Check if Ollama is running and reachable.
+pub async fn is_ollama_available(base_url: Option<&str>) -> bool {
+    let base = base_url.unwrap_or("http://localhost:11434");
+    let url = format!("{}/api/tags", base);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap_or_default();
+    matches!(client.get(&url).send().await, Ok(resp) if resp.status().is_success())
 }
 
 /// Create an LLM provider based on the configuration.

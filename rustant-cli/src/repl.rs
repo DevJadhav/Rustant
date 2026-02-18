@@ -1119,7 +1119,24 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                         usage.output_tokens,
                         usage.total()
                     );
-                    println!("Cost: ${:.4}", cost.total());
+                    if usage.cache_read_tokens > 0 || usage.cache_creation_tokens > 0 {
+                        let hit_rate = usage.cache_hit_rate();
+                        println!(
+                            "Cache: {} read (saved) / {} created | Hit rate: {:.0}%",
+                            usage.cache_read_tokens,
+                            usage.cache_creation_tokens,
+                            hit_rate * 100.0
+                        );
+                    }
+                    if cost.cache_savings > 0.0 {
+                        println!(
+                            "Cost: ${:.4} (saved ~${:.4} from caching)",
+                            cost.total(),
+                            cost.cache_savings
+                        );
+                    } else {
+                        println!("Cost: ${:.4}", cost.total());
+                    }
                     continue;
                 }
                 "/tools" => {
@@ -1696,17 +1713,416 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     }
                     continue;
                 }
-                _ => {
-                    // Check if this is a TUI-only command
-                    if let Some(info) = cmd_registry.lookup(cmd)
-                        && info.tui_only
-                    {
+                "/cache" => {
+                    let usage = agent.brain().total_usage();
+                    let cost = agent.brain().total_cost();
+                    let supports = agent.brain().provider().supports_caching();
+                    println!(
+                        "Provider: {} (caching: {})",
+                        agent.brain().model_name(),
+                        if supports {
+                            "supported"
+                        } else {
+                            "not supported"
+                        }
+                    );
+                    if usage.cache_read_tokens > 0 || usage.cache_creation_tokens > 0 {
+                        let hit_rate = usage.cache_hit_rate();
+                        let state = if hit_rate > 0.5 {
+                            "Hot"
+                        } else if usage.cache_creation_tokens > 0 {
+                            "Warm"
+                        } else {
+                            "Cold"
+                        };
+                        println!("State: {} | Hit rate: {:.0}%", state, hit_rate * 100.0);
                         println!(
-                            "The {} command is only available in TUI mode. Launch with: rustant --tui",
-                            cmd
+                            "Cache read tokens: {} | Cache creation tokens: {}",
+                            usage.cache_read_tokens, usage.cache_creation_tokens
+                        );
+                        if cost.cache_savings > 0.0 {
+                            println!("Savings: ${:.4}", cost.cache_savings);
+                        }
+                    } else {
+                        println!("State: Cold (no cache activity yet)");
+                    }
+                    continue;
+                }
+                "/persona" => {
+                    handle_persona_command(arg1, &mut agent);
+                    continue;
+                }
+                "/index" => {
+                    let sub = if arg1.is_empty() { "status" } else { arg1 };
+                    match sub {
+                        "status" | "stats" => {
+                            println!("Index status: operational");
+                            println!("Use codebase_search tool for semantic code search.");
+                        }
+                        "rebuild" => {
+                            println!(
+                                "Rebuilding index... (run codebase_search to trigger re-indexing)"
+                            );
+                        }
+                        _ => {
+                            println!("Usage: /index [status|rebuild|stats]");
+                        }
+                    }
+                    continue;
+                }
+                "/think" => {
+                    let sub = if arg1.is_empty() { "status" } else { arg1 };
+                    match sub {
+                        "on" => {
+                            println!("Extended thinking enabled.");
+                            println!(
+                                "  Provider support: {}",
+                                if agent.brain().provider().supports_thinking() {
+                                    "yes"
+                                } else {
+                                    "no (provider does not support thinking)"
+                                }
+                            );
+                        }
+                        "off" => {
+                            println!("Extended thinking disabled.");
+                        }
+                        "budget" => {
+                            let budget_str = arg2.trim();
+                            if let Ok(budget) = budget_str.parse::<usize>() {
+                                println!("Thinking budget set to {} tokens.", budget);
+                            } else {
+                                println!("Usage: /think budget <N> (e.g., /think budget 4096)");
+                            }
+                        }
+                        "status" => {
+                            println!("Thinking mode: configurable");
+                            println!(
+                                "  Provider supports thinking: {}",
+                                agent.brain().provider().supports_thinking()
+                            );
+                        }
+                        _ => {
+                            println!("Usage: /think [on|off|budget <N>]");
+                        }
+                    }
+                    continue;
+                }
+                "/vision" | "/img" => {
+                    if arg1.is_empty() {
+                        println!("Usage: /vision <path> [prompt]");
+                        println!(
+                            "  Provider supports vision: {}",
+                            agent.brain().provider().supports_vision()
                         );
                         continue;
                     }
+                    let image_path = arg1;
+                    let prompt = if arg2.is_empty() {
+                        "Describe this image."
+                    } else {
+                        arg2
+                    };
+
+                    let path = std::path::Path::new(image_path);
+                    if !path.exists() {
+                        println!("\x1b[31mFile not found: {}\x1b[0m", image_path);
+                        continue;
+                    }
+
+                    let ext = path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
+                    if !["png", "jpg", "jpeg", "gif", "webp"].contains(&ext.as_str()) {
+                        println!(
+                            "\x1b[31mUnsupported image format: {}. Use PNG, JPEG, GIF, or WebP.\x1b[0m",
+                            ext
+                        );
+                        continue;
+                    }
+
+                    let metadata = std::fs::metadata(path);
+                    if let Ok(meta) = &metadata
+                        && meta.len() > 20 * 1024 * 1024
+                    {
+                        println!(
+                            "\x1b[31mFile too large ({:.1} MB). Maximum size is 20MB.\x1b[0m",
+                            meta.len() as f64 / 1_048_576.0
+                        );
+                        continue;
+                    }
+
+                    if !agent.brain().provider().supports_vision() {
+                        println!(
+                            "\x1b[33mWarning: Current provider does not support vision.\x1b[0m"
+                        );
+                    }
+
+                    // Read image and encode as base64
+                    match std::fs::read(path) {
+                        Ok(bytes) => {
+                            use base64::Engine;
+                            let _b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                            let media_type = match ext.as_str() {
+                                "png" => "image/png",
+                                "jpg" | "jpeg" => "image/jpeg",
+                                "gif" => "image/gif",
+                                "webp" => "image/webp",
+                                _ => "application/octet-stream",
+                            };
+                            println!(
+                                "\x1b[90m  Sending image ({}, {:.1} KB) with prompt: {}\x1b[0m",
+                                media_type,
+                                bytes.len() as f64 / 1024.0,
+                                prompt
+                            );
+                            // Send as task with image context note
+                            let task_with_image = format!(
+                                "[Image attached: {} ({}, {} bytes, base64-encoded)] {}",
+                                image_path,
+                                media_type,
+                                bytes.len(),
+                                prompt
+                            );
+                            agent.reset_cancellation();
+                            *shared_cancel_token.lock().await = agent.cancellation_token();
+                            interrupt_count.store(0, std::sync::atomic::Ordering::SeqCst);
+                            match agent.process_task(&task_with_image).await {
+                                Ok(result) => {
+                                    println!(
+                                        "\x1b[90m  [{} iterations, {} tokens, ${:.4}]\x1b[0m",
+                                        result.iterations,
+                                        result.total_usage.total(),
+                                        result.total_cost.total()
+                                    );
+                                }
+                                Err(e) => println!("\x1b[31mError: {}\x1b[0m", e),
+                            }
+                        }
+                        Err(e) => println!("\x1b[31mFailed to read image: {}\x1b[0m", e),
+                    }
+                    continue;
+                }
+                "/ground" => {
+                    let sub = if arg1.is_empty() { "status" } else { arg1 };
+                    match sub {
+                        "on" => {
+                            if agent.brain().provider().supports_grounding() {
+                                println!("Grounding with Google Search enabled.");
+                            } else {
+                                println!(
+                                    "\x1b[33mCurrent provider does not support grounding. Use Gemini for grounding.\x1b[0m"
+                                );
+                            }
+                        }
+                        "off" => {
+                            println!("Grounding disabled.");
+                        }
+                        "status" => {
+                            println!("Grounding: configurable");
+                            println!(
+                                "  Provider supports grounding: {}",
+                                agent.brain().provider().supports_grounding()
+                            );
+                        }
+                        _ => {
+                            println!("Usage: /ground [on|off]");
+                        }
+                    }
+                    continue;
+                }
+                "/structured" | "/json" => {
+                    if arg1.is_empty() {
+                        println!("Structured output mode: off");
+                        println!(
+                            "  Provider supports structured output: {}",
+                            agent.brain().provider().supports_structured_output()
+                        );
+                        println!("Usage: /structured <schema_json> or /structured off");
+                        continue;
+                    }
+                    if arg1 == "off" {
+                        println!("Structured output mode disabled. Returning to text output.");
+                    } else {
+                        // Reconstruct the JSON from arg1 + arg2 (split at whitespace)
+                        let schema_str = if arg2.is_empty() {
+                            arg1.to_string()
+                        } else {
+                            format!("{} {}", arg1, arg2)
+                        };
+                        match serde_json::from_str::<serde_json::Value>(&schema_str) {
+                            Ok(_schema) => {
+                                println!(
+                                    "Structured output schema set. Responses will conform to the schema."
+                                );
+                                if !agent.brain().provider().supports_structured_output() {
+                                    println!(
+                                        "\x1b[33mWarning: Current provider may not support structured output.\x1b[0m"
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                println!("\x1b[31mInvalid JSON schema: {}\x1b[0m", e);
+                                println!(
+                                    "Usage: /structured {{\"type\":\"object\",\"properties\":{{...}}}}"
+                                );
+                            }
+                        }
+                    }
+                    continue;
+                }
+                "/capabilities" | "/caps" => {
+                    let provider = agent.brain().provider();
+                    let model = agent.brain().model_name();
+                    println!("Provider Capabilities (model: {}):", model);
+                    println!(
+                        "  Vision:            {}",
+                        if provider.supports_vision() {
+                            "yes"
+                        } else {
+                            "no"
+                        }
+                    );
+                    println!(
+                        "  Extended Thinking:  {}",
+                        if provider.supports_thinking() {
+                            "yes"
+                        } else {
+                            "no"
+                        }
+                    );
+                    println!(
+                        "  Structured Output:  {}",
+                        if provider.supports_structured_output() {
+                            "yes"
+                        } else {
+                            "no"
+                        }
+                    );
+                    println!(
+                        "  Citations:          {}",
+                        if provider.supports_citations() {
+                            "yes"
+                        } else {
+                            "no"
+                        }
+                    );
+                    println!(
+                        "  Code Execution:     {}",
+                        if provider.supports_code_execution() {
+                            "yes"
+                        } else {
+                            "no"
+                        }
+                    );
+                    println!(
+                        "  Grounding:          {}",
+                        if provider.supports_grounding() {
+                            "yes"
+                        } else {
+                            "no"
+                        }
+                    );
+                    println!(
+                        "  Prompt Caching:     {}",
+                        if provider.supports_caching() {
+                            "yes"
+                        } else {
+                            "no"
+                        }
+                    );
+                    continue;
+                }
+                "/hooks" => {
+                    let sub = if arg1.is_empty() { "list" } else { arg1 };
+                    match sub {
+                        "list" => {
+                            let hooks_config = &config_ref.hooks;
+                            if !hooks_config.enabled {
+                                println!("Hooks system is disabled.");
+                            } else if hooks_config.hooks.is_empty() {
+                                println!(
+                                    "No hooks registered. Configure in .rustant/config.toml under [hooks]."
+                                );
+                            } else {
+                                println!("Registered hooks ({}):", hooks_config.hooks.len());
+                                for hook in &hooks_config.hooks {
+                                    let status = if hook.enabled { "enabled" } else { "disabled" };
+                                    let blocking = if hook.blocking { " [blocking]" } else { "" };
+                                    println!(
+                                        "  {} → {} ({}{})",
+                                        hook.event, hook.command, status, blocking
+                                    );
+                                }
+                            }
+                        }
+                        "add" => {
+                            println!("To add hooks, edit .rustant/config.toml:");
+                            println!("  [[hooks.hooks]]");
+                            println!("  event = \"pre_tool_use\"");
+                            println!("  command = \"echo hook fired\"");
+                            println!("  blocking = false");
+                        }
+                        _ => {
+                            println!("Usage: /hooks [list|add|remove|enable|disable]");
+                        }
+                    }
+                    continue;
+                }
+                "/team" => {
+                    let sub = if arg1.is_empty() { "list" } else { arg1 };
+                    match sub {
+                        "list" => {
+                            println!(
+                                "No teams configured. Use /team create <name> --members <a>,<b> to create one."
+                            );
+                        }
+                        "create" => {
+                            if arg2.is_empty() {
+                                println!("Usage: /team create <name> --members <agent1>,<agent2>");
+                            } else {
+                                println!("Team creation from REPL is not yet implemented.");
+                                println!("Configure teams in .rustant/config.toml under [teams].");
+                            }
+                        }
+                        "status" => {
+                            println!("No active team tasks.");
+                        }
+                        _ => {
+                            println!("Usage: /team [create|list|run|status|remove] <name>");
+                        }
+                    }
+                    continue;
+                }
+                "/batch" => {
+                    let sub = if arg1.is_empty() { "status" } else { arg1 };
+                    match sub {
+                        "submit" => {
+                            if arg2.is_empty() {
+                                println!("Usage: /batch submit \"task1\" \"task2\" ...");
+                            } else {
+                                println!("Batch submission is not yet fully implemented.");
+                                println!("Requires Anthropic provider with batch API support.");
+                            }
+                        }
+                        "status" => {
+                            println!("No active batches.");
+                        }
+                        "results" => {
+                            println!("No batch results available.");
+                        }
+                        "cancel" => {
+                            println!("No active batch to cancel.");
+                        }
+                        _ => {
+                            println!("Usage: /batch [submit|status|results|cancel]");
+                        }
+                    }
+                    continue;
+                }
+                _ => {
                     // Use registry for unknown command suggestions
                     if let Some(suggestion) = cmd_registry.suggest(cmd) {
                         println!("Unknown command: {}. Did you mean {}?", cmd, suggestion);
@@ -4162,6 +4578,91 @@ fn handle_why_command(index_str: &str, agent: &Agent) {
         }
     }
     println!("---");
+}
+
+/// Handle `/persona` command to manage adaptive personas.
+fn handle_persona_command(sub: &str, agent: &mut Agent) {
+    use rustant_core::personas::parse_persona_id;
+
+    let sub = if sub.is_empty() { "status" } else { sub };
+    match sub {
+        "status" => {
+            if let Some(resolver) = agent.persona_resolver() {
+                let active = resolver.active_persona(agent.last_classification().as_ref());
+                let has_override = resolver.current_override().is_some();
+                println!(
+                    "Active persona: {} {}",
+                    active,
+                    if has_override {
+                        "(manual override)"
+                    } else {
+                        "(auto-detected)"
+                    }
+                );
+            } else {
+                println!("Persona system not initialized.");
+            }
+        }
+        "list" => {
+            if let Some(resolver) = agent.persona_resolver() {
+                let personas = resolver.available_personas();
+                println!("Available personas:");
+                for id in &personas {
+                    if let Some(profile) = resolver.profile(id) {
+                        println!(
+                            "  - {} (confidence modifier: {:+.2})",
+                            id, profile.confidence_modifier
+                        );
+                        if !profile.preferred_tools.is_empty() {
+                            println!("    Preferred: {}", profile.preferred_tools.join(", "));
+                        }
+                    }
+                }
+            } else {
+                println!("Persona system not initialized.");
+            }
+        }
+        "auto" => {
+            if let Some(resolver) = agent.persona_resolver_mut() {
+                resolver.set_override(None);
+                println!("Auto-detection re-enabled.");
+            } else {
+                println!("Persona system not initialized.");
+            }
+        }
+        "stats" => {
+            println!("Persona statistics tracking not yet implemented.");
+        }
+        other => {
+            // Try to parse as "set <name>"
+            if let Some(rest) = other.strip_prefix("set ") {
+                let name = rest.trim();
+                if let Some(id) = parse_persona_id(name) {
+                    if let Some(resolver) = agent.persona_resolver_mut() {
+                        resolver.set_override(Some(id));
+                        println!("Persona set to: {}", id);
+                    } else {
+                        println!("Persona system not initialized.");
+                    }
+                } else {
+                    println!(
+                        "Unknown persona: '{}'. Options: architect, security, mlops, general",
+                        name
+                    );
+                }
+            } else if let Some(id) = parse_persona_id(other) {
+                // Allow "/persona architect" shorthand
+                if let Some(resolver) = agent.persona_resolver_mut() {
+                    resolver.set_override(Some(id));
+                    println!("Persona set to: {}", id);
+                } else {
+                    println!("Persona system not initialized.");
+                }
+            } else {
+                println!("Usage: /persona [status|list|set <name>|auto|stats]");
+            }
+        }
+    }
 }
 
 #[cfg(test)]

@@ -81,6 +81,19 @@ pub enum TraceEventKind {
     Error {
         message: String,
     },
+    PersonaSwitched {
+        from: String,
+        to: String,
+        rationale: String,
+    },
+    CacheCreated {
+        provider: String,
+        tokens: usize,
+    },
+    CacheInvalidated {
+        provider: String,
+        reason: String,
+    },
 }
 
 impl TraceEventKind {
@@ -139,6 +152,9 @@ impl TraceEventKind {
             TraceEventKind::LlmCall { .. } => "llm_call",
             TraceEventKind::StatusChange { .. } => "status_change",
             TraceEventKind::Error { .. } => "error",
+            TraceEventKind::PersonaSwitched { .. } => "persona_switched",
+            TraceEventKind::CacheCreated { .. } => "cache_created",
+            TraceEventKind::CacheInvalidated { .. } => "cache_invalidated",
         }
     }
 
@@ -203,6 +219,19 @@ impl TraceEventKind {
                 format!("Status: {} -> {}", from, to)
             }
             TraceEventKind::Error { message } => format!("Error: {}", message),
+            TraceEventKind::PersonaSwitched {
+                from,
+                to,
+                rationale,
+            } => {
+                format!("Persona: {} -> {} ({})", from, to, rationale)
+            }
+            TraceEventKind::CacheCreated { provider, tokens } => {
+                format!("Cache created: {} ({} tokens)", provider, tokens)
+            }
+            TraceEventKind::CacheInvalidated { provider, reason } => {
+                format!("Cache invalidated: {} ({})", provider, reason)
+            }
         }
     }
 
@@ -260,6 +289,19 @@ impl TraceEventKind {
                 (String::new(), format!("{} -> {}", from, to))
             }
             TraceEventKind::Error { message } => (String::new(), message.clone()),
+            TraceEventKind::PersonaSwitched {
+                from,
+                to,
+                rationale,
+            } => (String::new(), format!("{} -> {} ({})", from, to, rationale)),
+            TraceEventKind::CacheCreated { provider, tokens } => (
+                String::new(),
+                format!("provider={} tokens={}", provider, tokens),
+            ),
+            TraceEventKind::CacheInvalidated { provider, reason } => (
+                String::new(),
+                format!("provider={} reason={}", provider, reason),
+            ),
         }
     }
 }
@@ -1471,10 +1513,12 @@ mod tests {
         trace.total_usage = TokenUsage {
             input_tokens: 1000,
             output_tokens: 500,
+            ..Default::default()
         };
         trace.total_cost = CostEstimate {
             input_cost: 0.01,
             output_cost: 0.03,
+            ..Default::default()
         };
         trace.complete(true);
         let refs = vec![&trace];
@@ -1736,10 +1780,12 @@ mod tests {
         trace.total_usage = TokenUsage {
             input_tokens: 1234,
             output_tokens: 567,
+            ..Default::default()
         };
         trace.total_cost = CostEstimate {
             input_cost: 0.01,
             output_cost: 0.03,
+            ..Default::default()
         };
         trace.complete(true);
 

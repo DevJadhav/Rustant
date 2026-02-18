@@ -155,9 +155,76 @@ impl GeminiProvider {
         if let Some(tools) = &request.tools {
             let function_declarations: Vec<Value> =
                 tools.iter().map(Self::tool_definition_to_json).collect();
-            body["tools"] = serde_json::json!([{
+            let mut tools_array = vec![serde_json::json!({
                 "functionDeclarations": function_declarations
-            }]);
+            })];
+            // Add grounding tools (Google Search, etc.)
+            for gt in &request.grounding_tools {
+                match gt {
+                    crate::types::GroundingTool::GoogleSearch => {
+                        tools_array.push(serde_json::json!({"googleSearch": {}}));
+                    }
+                    crate::types::GroundingTool::UrlContext { urls } => {
+                        tools_array.push(serde_json::json!({"urlContext": {"urls": urls}}));
+                    }
+                }
+            }
+            body["tools"] = Value::Array(tools_array);
+        } else if !request.grounding_tools.is_empty() {
+            // Grounding tools without function tools
+            let tools_array: Vec<Value> = request
+                .grounding_tools
+                .iter()
+                .map(|gt| match gt {
+                    crate::types::GroundingTool::GoogleSearch => {
+                        serde_json::json!({"googleSearch": {}})
+                    }
+                    crate::types::GroundingTool::UrlContext { urls } => {
+                        serde_json::json!({"urlContext": {"urls": urls}})
+                    }
+                })
+                .collect();
+            body["tools"] = Value::Array(tools_array);
+        }
+
+        // Add code execution tool if enabled
+        if request.enable_code_execution {
+            let tools = body["tools"].as_array_mut().map(|a| {
+                a.push(serde_json::json!({"codeExecution": {}}));
+            });
+            if tools.is_none() {
+                body["tools"] = serde_json::json!([{"codeExecution": {}}]);
+            }
+        }
+
+        // Enable thinking mode if configured
+        if let Some(ref thinking) = request.thinking
+            && thinking.enabled
+        {
+            if let Some(budget) = thinking.budget_tokens {
+                body["generationConfig"]["thinkingConfig"] =
+                    serde_json::json!({"thinkingBudget": budget});
+            }
+            if let Some(ref level) = thinking.level {
+                body["generationConfig"]["thinkingConfig"] =
+                    serde_json::json!({"thinkingLevel": level});
+            }
+        }
+
+        // Structured output (JSON mode)
+        if let Some(ref response_format) = request.response_format {
+            match response_format {
+                crate::types::ResponseFormat::JsonObject => {
+                    body["generationConfig"]["responseMimeType"] =
+                        Value::String("application/json".into());
+                }
+                crate::types::ResponseFormat::JsonSchema { schema, .. } => {
+                    body["generationConfig"]["responseMimeType"] =
+                        Value::String("application/json".into());
+                    body["generationConfig"]["responseSchema"] = schema.clone();
+                }
+                crate::types::ResponseFormat::Text => {}
+            }
         }
 
         body
@@ -269,6 +336,68 @@ impl GeminiProvider {
                     })
                     .collect();
                 Value::Array(gemini_parts)
+            }
+            Content::Image {
+                source, media_type, ..
+            } => {
+                match source {
+                    crate::types::ImageSource::Base64(data) => {
+                        serde_json::json!([{
+                            "inlineData": {
+                                "mimeType": media_type,
+                                "data": data,
+                            }
+                        }])
+                    }
+                    crate::types::ImageSource::Url(url) => {
+                        serde_json::json!([{
+                            "fileData": {
+                                "mimeType": media_type,
+                                "fileUri": url,
+                            }
+                        }])
+                    }
+                    crate::types::ImageSource::FilePath(_) => {
+                        // File paths should be resolved to base64 before reaching provider
+                        serde_json::json!([{"text": "[Image: file path not resolved]"}])
+                    }
+                }
+            }
+            Content::Thinking { thinking, .. } => {
+                // Gemini uses "thought" parts
+                serde_json::json!([{"text": thinking}])
+            }
+            Content::Citation { cited_text, .. } => {
+                serde_json::json!([{"text": cited_text}])
+            }
+            Content::CodeExecution {
+                code,
+                output,
+                error,
+                ..
+            } => {
+                let mut parts = vec![
+                    serde_json::json!({"executableCode": {"code": code, "language": "PYTHON"}}),
+                ];
+                if let Some(out) = output {
+                    parts.push(serde_json::json!({"codeExecutionResult": {"output": out, "outcome": "OUTCOME_OK"}}));
+                }
+                if let Some(err) = error {
+                    parts.push(serde_json::json!({"codeExecutionResult": {"output": err, "outcome": "OUTCOME_FAILED"}}));
+                }
+                Value::Array(parts)
+            }
+            Content::SearchResult { query, results } => {
+                let text = format!(
+                    "[Search: {}]\n{}",
+                    query,
+                    results
+                        .iter()
+                        .map(|r| format!("- {}: {}", r.title, r.snippet))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
+                serde_json::json!([{"text": text}])
             }
         }
     }
@@ -509,6 +638,10 @@ impl GeminiProvider {
         let usage = TokenUsage {
             input_tokens: usage_metadata["promptTokenCount"].as_u64().unwrap_or(0) as usize,
             output_tokens: usage_metadata["candidatesTokenCount"].as_u64().unwrap_or(0) as usize,
+            cache_read_tokens: usage_metadata["cachedContentTokenCount"]
+                .as_u64()
+                .unwrap_or(0) as usize,
+            cache_creation_tokens: 0,
         };
 
         let model = body["modelVersion"]
@@ -666,6 +799,10 @@ impl GeminiProvider {
                 input_tokens: usage_metadata["promptTokenCount"].as_u64().unwrap_or(0) as usize,
                 output_tokens: usage_metadata["candidatesTokenCount"].as_u64().unwrap_or(0)
                     as usize,
+                cache_read_tokens: usage_metadata["cachedContentTokenCount"]
+                    .as_u64()
+                    .unwrap_or(0) as usize,
+                cache_creation_tokens: 0,
             };
             return Ok(Some(usage));
         }
@@ -760,6 +897,7 @@ impl LlmProvider for GeminiProvider {
         let mut total_usage = TokenUsage {
             input_tokens: 0,
             output_tokens: 0,
+            ..Default::default()
         };
         let mut line_buffer = String::new();
 
@@ -863,6 +1001,41 @@ impl LlmProvider for GeminiProvider {
     /// Return the model name.
     fn model_name(&self) -> &str {
         &self.model
+    }
+
+    /// Gemini supports caching via the CachedContent API.
+    fn supports_caching(&self) -> bool {
+        true
+    }
+
+    /// Gemini cache pricing: reads at 25% of input cost, no creation premium.
+    fn cache_cost_per_token(&self) -> (f64, f64) {
+        (self.cost_input * 0.25, self.cost_input)
+    }
+
+    fn supports_vision(&self) -> bool {
+        // Gemini Pro and Flash models support vision
+        self.model.contains("gemini-1.5") || self.model.contains("gemini-2")
+    }
+
+    fn supports_thinking(&self) -> bool {
+        // Gemini 2.0+ models support thinking
+        self.model.contains("gemini-2")
+    }
+
+    fn supports_structured_output(&self) -> bool {
+        // Gemini 1.5+ supports JSON mode
+        self.model.contains("gemini-1.5") || self.model.contains("gemini-2")
+    }
+
+    fn supports_code_execution(&self) -> bool {
+        // Gemini 1.5+ supports code execution
+        self.model.contains("gemini-1.5") || self.model.contains("gemini-2")
+    }
+
+    fn supports_grounding(&self) -> bool {
+        // Gemini 1.5+ supports Google Search grounding
+        self.model.contains("gemini-1.5") || self.model.contains("gemini-2")
     }
 }
 
@@ -1271,6 +1444,7 @@ mod tests {
             max_tokens: Some(1024),
             stop_sequences: vec![],
             model: None,
+            ..Default::default()
         };
 
         let body = provider.build_request_body(&request, false);
@@ -1310,6 +1484,7 @@ mod tests {
             max_tokens: None,
             stop_sequences: vec![],
             model: None,
+            ..Default::default()
         };
 
         let body = provider.build_request_body(&request, false);
@@ -1332,6 +1507,7 @@ mod tests {
             max_tokens: None,
             stop_sequences: vec!["STOP".to_string(), "END".to_string()],
             model: None,
+            ..Default::default()
         };
 
         let body = provider.build_request_body(&request, false);

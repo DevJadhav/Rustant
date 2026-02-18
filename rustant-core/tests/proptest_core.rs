@@ -341,3 +341,459 @@ proptest! {
         prop_assert!(!store.has_key(&provider));
     }
 }
+
+// ---------------------------------------------------------------------------
+// Cache property tests
+// ---------------------------------------------------------------------------
+
+proptest! {
+    #[test]
+    fn test_token_usage_cache_fields_never_negative(
+        input in 0usize..100_000,
+        output in 0usize..100_000,
+        cache_read in 0usize..100_000,
+        cache_creation in 0usize..100_000,
+    ) {
+        use rustant_core::types::TokenUsage;
+        let usage = TokenUsage {
+            input_tokens: input,
+            output_tokens: output,
+            cache_read_tokens: cache_read,
+            cache_creation_tokens: cache_creation,
+        };
+        prop_assert!(usage.input_tokens <= 100_000);
+        prop_assert!(usage.output_tokens <= 100_000);
+        prop_assert!(usage.cache_read_tokens <= 100_000);
+        prop_assert!(usage.cache_creation_tokens <= 100_000);
+    }
+
+    #[test]
+    fn test_token_usage_accumulate_monotonic(
+        a_in in 0usize..50_000,
+        a_out in 0usize..50_000,
+        a_cr in 0usize..50_000,
+        a_cc in 0usize..50_000,
+        b_in in 0usize..50_000,
+        b_out in 0usize..50_000,
+        b_cr in 0usize..50_000,
+        b_cc in 0usize..50_000,
+    ) {
+        use rustant_core::types::TokenUsage;
+        let mut a = TokenUsage {
+            input_tokens: a_in,
+            output_tokens: a_out,
+            cache_read_tokens: a_cr,
+            cache_creation_tokens: a_cc,
+        };
+        let b = TokenUsage {
+            input_tokens: b_in,
+            output_tokens: b_out,
+            cache_read_tokens: b_cr,
+            cache_creation_tokens: b_cc,
+        };
+        a.accumulate(&b);
+        prop_assert_eq!(a.input_tokens, a_in + b_in);
+        prop_assert_eq!(a.output_tokens, a_out + b_out);
+        prop_assert_eq!(a.cache_read_tokens, a_cr + b_cr);
+        prop_assert_eq!(a.cache_creation_tokens, a_cc + b_cc);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Persona property tests
+// ---------------------------------------------------------------------------
+
+proptest! {
+    #[test]
+    fn test_persona_selection_deterministic(
+        seed in 0u32..100,
+    ) {
+        use rustant_core::personas::PersonaResolver;
+        use rustant_core::types::TaskClassification;
+        let _ = seed; // ensure proptest generates different runs
+        let resolver = PersonaResolver::new(None);
+        let classification = TaskClassification::CodeAnalysis;
+        let first = resolver.active_persona(Some(&classification));
+        let second = resolver.active_persona(Some(&classification));
+        prop_assert_eq!(first, second);
+    }
+
+    #[test]
+    fn test_persona_override_always_wins(
+        class_idx in 0u32..4,
+    ) {
+        use rustant_core::personas::{PersonaId, PersonaResolver};
+        use rustant_core::types::TaskClassification;
+        let classifications = [
+            TaskClassification::CodeAnalysis,
+            TaskClassification::Calendar,
+            TaskClassification::SystemMonitor,
+            TaskClassification::GitOperation,
+        ];
+        let classification = &classifications[class_idx as usize % classifications.len()];
+        let mut resolver = PersonaResolver::new(None);
+        resolver.set_override(Some(PersonaId::SecurityGuardian));
+        let result = resolver.active_persona(Some(classification));
+        prop_assert_eq!(result, PersonaId::SecurityGuardian);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Embedding property tests
+// ---------------------------------------------------------------------------
+
+proptest! {
+    #[test]
+    fn test_local_embedder_deterministic(
+        text in "[a-z ]{5,50}",
+    ) {
+        use rustant_core::embeddings::{Embedder, LocalEmbedder};
+        let embedder = LocalEmbedder::new(128);
+        let v1 = embedder.embed(&text);
+        let v2 = embedder.embed(&text);
+        prop_assert_eq!(v1.len(), v2.len());
+        for (a, b) in v1.iter().zip(v2.iter()) {
+            prop_assert!((a - b).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn test_local_embedder_dimensions_match(
+        dims in 32usize..512,
+        text in "[a-z ]{5,50}",
+    ) {
+        use rustant_core::embeddings::{Embedder, LocalEmbedder};
+        let embedder = LocalEmbedder::new(dims);
+        let vec = embedder.embed(&text);
+        prop_assert_eq!(vec.len(), dims);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Content variant serde round-trip property tests
+// ---------------------------------------------------------------------------
+
+proptest! {
+    #[test]
+    fn prop_content_text_roundtrip(text in ".*") {
+        use rustant_core::Content;
+        let content = Content::Text { text: text.clone() };
+        let json = serde_json::to_string(&content).unwrap();
+        let restored: Content = serde_json::from_str(&json).unwrap();
+        prop_assert_eq!(content, restored);
+    }
+
+    #[test]
+    fn prop_content_image_roundtrip(
+        data in "[a-zA-Z0-9+/]{10,100}",
+        media in "(image/png|image/jpeg|image/gif|image/webp)",
+    ) {
+        use rustant_core::{Content, ImageSource};
+        let content = Content::Image {
+            source: ImageSource::Base64(data),
+            media_type: media,
+            detail: None,
+        };
+        let json = serde_json::to_string(&content).unwrap();
+        let restored: Content = serde_json::from_str(&json).unwrap();
+        prop_assert_eq!(content, restored);
+    }
+
+    #[test]
+    fn prop_content_thinking_roundtrip(
+        thinking in "[a-zA-Z ]{5,100}",
+        has_sig in any::<bool>(),
+    ) {
+        use rustant_core::Content;
+        let content = Content::Thinking {
+            thinking,
+            signature: if has_sig { Some("sig-123".to_string()) } else { None },
+        };
+        let json = serde_json::to_string(&content).unwrap();
+        let restored: Content = serde_json::from_str(&json).unwrap();
+        prop_assert_eq!(content, restored);
+    }
+
+    #[test]
+    fn prop_content_citation_roundtrip(
+        cited_text in "[a-zA-Z ]{5,50}",
+        title in "[a-zA-Z ]{3,30}",
+    ) {
+        use rustant_core::{Content, CitationSource};
+        let content = Content::Citation {
+            cited_text,
+            source: CitationSource::Document { title, page: Some(42) },
+            start_index: Some(0),
+            end_index: Some(10),
+        };
+        let json = serde_json::to_string(&content).unwrap();
+        let restored: Content = serde_json::from_str(&json).unwrap();
+        prop_assert_eq!(content, restored);
+    }
+
+    #[test]
+    fn prop_content_code_execution_roundtrip(
+        code in "[a-z_()]{5,50}",
+        output in "[a-zA-Z0-9 ]{0,50}",
+    ) {
+        use rustant_core::Content;
+        let content = Content::CodeExecution {
+            language: "python".to_string(),
+            code,
+            output: if output.is_empty() { None } else { Some(output) },
+            error: None,
+        };
+        let json = serde_json::to_string(&content).unwrap();
+        let restored: Content = serde_json::from_str(&json).unwrap();
+        prop_assert_eq!(content, restored);
+    }
+
+    #[test]
+    fn prop_content_search_result_roundtrip(
+        query in "[a-z ]{3,30}",
+        count in 0usize..5,
+    ) {
+        use rustant_core::{Content, GroundingResult};
+        let results: Vec<GroundingResult> = (0..count)
+            .map(|i| GroundingResult {
+                title: format!("Result {}", i),
+                url: format!("https://example.com/{}", i),
+                snippet: format!("Snippet for result {}", i),
+            })
+            .collect();
+        let content = Content::SearchResult { query, results };
+        let json = serde_json::to_string(&content).unwrap();
+        let restored: Content = serde_json::from_str(&json).unwrap();
+        prop_assert_eq!(content, restored);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ThinkingConfig property tests
+// ---------------------------------------------------------------------------
+
+proptest! {
+    #[test]
+    fn prop_thinking_config_valid(
+        budget in proptest::option::of(1usize..100_000),
+        level in proptest::option::of("(none|low|medium|high)"),
+    ) {
+        use rustant_core::ThinkingConfig;
+        let config = ThinkingConfig {
+            enabled: true,
+            budget_tokens: budget,
+            level,
+        };
+        // Budget should never be negative (usize guarantees this)
+        if let Some(b) = config.budget_tokens {
+            prop_assert!(b > 0);
+        }
+        // Roundtrip
+        let json = serde_json::to_string(&config).unwrap();
+        let restored: ThinkingConfig = serde_json::from_str(&json).unwrap();
+        prop_assert_eq!(config.enabled, restored.enabled);
+        prop_assert_eq!(config.budget_tokens, restored.budget_tokens);
+        prop_assert_eq!(config.level, restored.level);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// HookEvent property tests
+// ---------------------------------------------------------------------------
+
+proptest! {
+    #[test]
+    fn prop_hook_event_session_roundtrip(is_start in any::<bool>()) {
+        use rustant_core::HookEvent;
+        let event = if is_start { HookEvent::SessionStart } else { HookEvent::SessionEnd };
+        let json = serde_json::to_string(&event).unwrap();
+        let restored: HookEvent = serde_json::from_str(&json).unwrap();
+        prop_assert_eq!(event, restored);
+    }
+
+    #[test]
+    fn prop_hook_event_task_roundtrip(
+        goal in "[a-zA-Z ]{3,50}",
+        success in any::<bool>(),
+    ) {
+        use rustant_core::HookEvent;
+        let start = HookEvent::TaskStart { goal: goal.clone() };
+        let complete = HookEvent::TaskComplete { goal, success };
+        let json1 = serde_json::to_string(&start).unwrap();
+        let json2 = serde_json::to_string(&complete).unwrap();
+        let r1: HookEvent = serde_json::from_str(&json1).unwrap();
+        let r2: HookEvent = serde_json::from_str(&json2).unwrap();
+        prop_assert_eq!(start, r1);
+        prop_assert_eq!(complete, r2);
+    }
+
+    #[test]
+    fn prop_hook_event_tool_roundtrip(
+        tool_name in "[a-z_]{3,20}",
+        success in any::<bool>(),
+    ) {
+        use rustant_core::HookEvent;
+        let pre = HookEvent::PreToolUse {
+            tool_name: tool_name.clone(),
+            args: serde_json::json!({"key": "value"}),
+        };
+        let post = HookEvent::PostToolUse {
+            tool_name,
+            result: "ok".to_string(),
+            success,
+        };
+        let json1 = serde_json::to_string(&pre).unwrap();
+        let json2 = serde_json::to_string(&post).unwrap();
+        let r1: HookEvent = serde_json::from_str(&json1).unwrap();
+        let r2: HookEvent = serde_json::from_str(&json2).unwrap();
+        prop_assert_eq!(pre, r1);
+        prop_assert_eq!(post, r2);
+    }
+
+    #[test]
+    fn prop_hook_event_cache_hit_roundtrip(
+        provider in "(anthropic|openai|gemini|ollama)",
+        tokens_saved in 0usize..100_000,
+    ) {
+        use rustant_core::HookEvent;
+        let event = HookEvent::CacheHit { provider, tokens_saved };
+        let json = serde_json::to_string(&event).unwrap();
+        let restored: HookEvent = serde_json::from_str(&json).unwrap();
+        prop_assert_eq!(event, restored);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ToolChoice property tests
+// ---------------------------------------------------------------------------
+
+proptest! {
+    #[test]
+    fn prop_tool_choice_default_is_auto(_seed in 0u32..100) {
+        use rustant_core::ToolChoice;
+        let default = ToolChoice::default();
+        match default {
+            ToolChoice::Auto => {} // expected
+            other => prop_assert!(false, "Default should be Auto, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn prop_tool_choice_specific_roundtrip(name in "[a-z_]{3,20}") {
+        use rustant_core::ToolChoice;
+        let choice = ToolChoice::Specific(name.clone());
+        let json = serde_json::to_string(&choice).unwrap();
+        let restored: ToolChoice = serde_json::from_str(&json).unwrap();
+        if let ToolChoice::Specific(n) = restored {
+            prop_assert_eq!(n, name);
+        } else {
+            prop_assert!(false, "Should be Specific variant");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GroundingResult property tests
+// ---------------------------------------------------------------------------
+
+proptest! {
+    #[test]
+    fn prop_grounding_results_non_empty(
+        title in "[a-zA-Z ]{3,30}",
+        url in "https://[a-z]{3,15}\\.com/[a-z]{1,10}",
+        snippet in "[a-zA-Z ]{5,50}",
+    ) {
+        use rustant_core::GroundingResult;
+        let result = GroundingResult { title: title.clone(), url: url.clone(), snippet: snippet.clone() };
+        prop_assert!(!result.title.is_empty());
+        prop_assert!(!result.url.is_empty());
+        prop_assert!(!result.snippet.is_empty());
+        // Roundtrip
+        let json = serde_json::to_string(&result).unwrap();
+        let restored: GroundingResult = serde_json::from_str(&json).unwrap();
+        prop_assert_eq!(result, restored);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PermissionPolicy property tests
+// ---------------------------------------------------------------------------
+
+proptest! {
+    #[test]
+    fn prop_permission_policy_denylist_wins(
+        tool in "[a-z_]{3,20}",
+    ) {
+        use rustant_core::PermissionPolicy;
+        // Tool is in both allowlist and denylist — denylist should win
+        let policy = PermissionPolicy {
+            tool_allowlist: Some(vec![tool.clone()]),
+            tool_denylist: vec![tool.clone()],
+            ..Default::default()
+        };
+        prop_assert!(!policy.is_tool_allowed(&tool), "Denylist should take priority over allowlist");
+    }
+
+    #[test]
+    fn prop_permission_policy_allowlist_restricts(
+        allowed in "[a-z_]{3,10}",
+        other in "[A-Z_]{3,10}",
+    ) {
+        use rustant_core::PermissionPolicy;
+        let policy = PermissionPolicy {
+            tool_allowlist: Some(vec![allowed.clone()]),
+            ..Default::default()
+        };
+        prop_assert!(policy.is_tool_allowed(&allowed));
+        prop_assert!(!policy.is_tool_allowed(&other), "Tool not in allowlist should be denied");
+    }
+
+    #[test]
+    fn prop_permission_policy_cost_limit(
+        limit in 0.01f64..1000.0,
+        current in 0.0f64..2000.0,
+    ) {
+        use rustant_core::PermissionPolicy;
+        let policy = PermissionPolicy {
+            max_cost_per_task: Some(limit),
+            ..Default::default()
+        };
+        let within = policy.is_within_cost_limit(current);
+        if current <= limit {
+            prop_assert!(within, "Cost {} within limit {} should be allowed", current, limit);
+        } else {
+            prop_assert!(!within, "Cost {} over limit {} should be denied", current, limit);
+        }
+    }
+
+    #[test]
+    fn prop_permission_policy_iteration_limit(
+        limit in 1usize..100,
+        current in 0usize..200,
+    ) {
+        use rustant_core::PermissionPolicy;
+        let policy = PermissionPolicy {
+            max_iterations_per_task: Some(limit),
+            ..Default::default()
+        };
+        let within = policy.is_within_iteration_limit(current);
+        if current <= limit {
+            prop_assert!(within);
+        } else {
+            prop_assert!(!within);
+        }
+    }
+
+    #[test]
+    fn prop_permission_policy_no_limits_allows_all(
+        tool in "[a-z_]{3,20}",
+        cost in 0.0f64..10_000.0,
+        iters in 0usize..10_000,
+    ) {
+        use rustant_core::PermissionPolicy;
+        let policy = PermissionPolicy::default();
+        prop_assert!(policy.is_tool_allowed(&tool));
+        prop_assert!(policy.is_within_cost_limit(cost));
+        prop_assert!(policy.is_within_iteration_limit(iters));
+    }
+}

@@ -8,7 +8,6 @@ mod repl;
 mod repl_input;
 pub(crate) mod setup;
 pub(crate) mod slash;
-mod tui;
 
 use clap::Parser;
 use std::path::PathBuf;
@@ -34,10 +33,6 @@ struct Cli {
     /// Configuration file path
     #[arg(short, long)]
     config: Option<PathBuf>,
-
-    /// Enable TUI mode (default is REPL)
-    #[arg(long)]
-    tui: bool,
 
     /// Approval mode: safe, cautious, paranoid, yolo
     #[arg(short = 'a', long)]
@@ -568,7 +563,7 @@ async fn main() -> anyhow::Result<()> {
         "Config loaded — approval mode"
     );
 
-    // Start voice mode, TUI, REPL, or execute single task
+    // Start voice mode, REPL, or execute single task
     if cli.voice {
         #[cfg(feature = "voice")]
         {
@@ -582,8 +577,6 @@ async fn main() -> anyhow::Result<()> {
         }
     } else if let Some(task) = cli.task {
         repl::run_single_task(&task, config, workspace).await
-    } else if cli.tui || config.ui.use_tui {
-        tui::run(config, workspace).await
     } else {
         repl::run_interactive(config, workspace).await
     }

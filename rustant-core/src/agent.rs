@@ -249,6 +249,10 @@ pub struct Agent {
     plan_mode: bool,
     /// The current plan being generated, reviewed, or executed.
     current_plan: Option<crate::plan::ExecutionPlan>,
+    /// Adaptive persona resolver for modulating agent behavior.
+    persona_resolver: Option<crate::personas::PersonaResolver>,
+    /// Most recent task classification (for persona auto-detection).
+    last_classification: Option<crate::types::TaskClassification>,
 }
 
 impl Agent {
@@ -291,6 +295,17 @@ impl Agent {
         let job_manager = JobManager::new(max_bg_jobs);
         let plan_mode_enabled = config.plan.as_ref().map(|p| p.enabled).unwrap_or(false);
 
+        // Initialize persona resolver if enabled
+        let persona_resolver = {
+            let persona_config = config.persona.as_ref();
+            let disabled = persona_config.as_ref().is_some_and(|p| !p.enabled);
+            if disabled {
+                None
+            } else {
+                Some(crate::personas::PersonaResolver::new(persona_config))
+            }
+        };
+
         Self {
             brain,
             memory,
@@ -311,6 +326,8 @@ impl Agent {
             recent_explanations: Vec::new(),
             plan_mode: plan_mode_enabled,
             current_plan: None,
+            persona_resolver,
+            last_classification: None,
         }
     }
 
@@ -521,11 +538,22 @@ impl Agent {
         // Appended to the knowledge addendum (system prompt) instead of persisted
         // in memory, so it never gets displaced by compression and can't end up
         // between tool_call and tool_result messages.
-        if let Some(ref classification) = self.state.task_classification
-            && let Some(hint) = Self::tool_routing_hint_from_classification(classification)
-        {
-            knowledge_addendum.push_str("\n\n");
-            knowledge_addendum.push_str(&hint);
+        if let Some(ref classification) = self.state.task_classification {
+            // Inject persona addendum based on task classification
+            if let Some(ref resolver) = self.persona_resolver {
+                let addendum = resolver.prompt_addendum(Some(classification));
+                if !addendum.is_empty() {
+                    knowledge_addendum.push_str("\n\n");
+                    knowledge_addendum.push_str(&addendum);
+                }
+            }
+            self.last_classification = Some(classification.clone());
+
+            // Inject a tool-routing hint
+            if let Some(hint) = Self::tool_routing_hint_from_classification(classification) {
+                knowledge_addendum.push_str("\n\n");
+                knowledge_addendum.push_str(&hint);
+            }
         }
         self.brain.set_knowledge_addendum(knowledge_addendum);
 
@@ -662,6 +690,7 @@ impl Agent {
                 &CostEstimate {
                     input_cost: response.usage.input_tokens as f64 * input_rate,
                     output_cost: response.usage.output_tokens as f64 * output_rate,
+                    ..Default::default()
                 },
             );
             self.callback
@@ -863,6 +892,30 @@ impl Agent {
                     warn!("Received unexpected ToolResult from LLM");
                     break;
                 }
+                Content::Thinking { thinking, .. } => {
+                    // Thinking-only response: display and continue
+                    info!(task_id = %task_id, "Agent produced thinking block");
+                    self.callback
+                        .on_assistant_message(&format!(
+                            "[Thinking] {}",
+                            &thinking[..thinking.len().min(200)]
+                        ))
+                        .await;
+                    self.memory.add_message(response.message.clone());
+                    // Thinking alone doesn't complete the task; continue loop
+                }
+                Content::Image { .. }
+                | Content::Citation { .. }
+                | Content::CodeExecution { .. }
+                | Content::SearchResult { .. } => {
+                    // Extended content types from LLM — treat as informational text
+                    let summary = format!("{:?}", &response.message.content);
+                    self.callback
+                        .on_assistant_message(&summary[..summary.len().min(500)])
+                        .await;
+                    self.memory.add_message(response.message.clone());
+                    break;
+                }
             }
         }
 
@@ -983,6 +1036,7 @@ impl Agent {
             max_tokens: None,
             stop_sequences: Vec::new(),
             model: None,
+            ..Default::default()
         };
 
         // Run the streaming completion in a background task so the producer
@@ -1030,6 +1084,18 @@ impl Agent {
                 }
                 StreamEvent::ToolCallEnd { id: _ } => {
                     // Tool call complete — arguments are now fully accumulated
+                }
+                StreamEvent::ThinkingDelta(delta) => {
+                    // Accumulate thinking text (displayed in verbose mode by callback)
+                    self.callback
+                        .on_token(&format!("[Thinking] {}", delta))
+                        .await;
+                }
+                StreamEvent::ThinkingComplete { .. } => {
+                    // Thinking phase complete — no action needed for streaming
+                }
+                StreamEvent::CitationBlock(_) | StreamEvent::CodeExecutionResult { .. } => {
+                    // These are handled at response parse time, not during streaming
                 }
                 StreamEvent::Done { usage: u } => {
                     usage = u;
@@ -2315,8 +2381,26 @@ impl Agent {
             }
         }
 
+        // Add active persona as context
+        if let Some(ref resolver) = self.persona_resolver {
+            let persona = resolver.active_persona(self.last_classification.as_ref());
+            builder.set_persona(
+                &persona.to_string(),
+                "Auto-detected from task classification",
+            );
+        }
+
         // Improved confidence scoring using multiple signals
-        let confidence = self.calculate_tool_confidence(tool_name, risk_level);
+        let mut confidence = self.calculate_tool_confidence(tool_name, risk_level);
+
+        // Apply persona confidence modifier
+        if let Some(ref resolver) = self.persona_resolver {
+            let persona = resolver.active_persona(self.last_classification.as_ref());
+            if let Some(profile) = resolver.profile(&persona) {
+                confidence = (confidence + profile.confidence_modifier).clamp(0.0, 1.0);
+            }
+        }
+
         builder.set_confidence(confidence);
 
         builder.build()
@@ -2519,6 +2603,21 @@ impl Agent {
         &self.recent_explanations
     }
 
+    /// Get a reference to the persona resolver, if initialized.
+    pub fn persona_resolver(&self) -> Option<&crate::personas::PersonaResolver> {
+        self.persona_resolver.as_ref()
+    }
+
+    /// Get a mutable reference to the persona resolver, if initialized.
+    pub fn persona_resolver_mut(&mut self) -> Option<&mut crate::personas::PersonaResolver> {
+        self.persona_resolver.as_mut()
+    }
+
+    /// Get the most recent task classification.
+    pub fn last_classification(&self) -> &Option<crate::types::TaskClassification> {
+        &self.last_classification
+    }
+
     /// Get per-tool token usage breakdown (tool_name -> estimated tokens).
     pub fn tool_token_breakdown(&self) -> &HashMap<String, usize> {
         &self.tool_token_usage
@@ -2631,6 +2730,7 @@ impl Agent {
             &CostEstimate {
                 input_cost: 0.0,
                 output_cost: 0.0,
+                ..Default::default()
             },
         );
 

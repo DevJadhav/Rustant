@@ -36,6 +36,27 @@ pub struct DecisionExplanation {
     pub confidence: f32,
     /// Contextual factors that influenced the decision.
     pub context_factors: Vec<ContextFactor>,
+    /// Active persona at the time of this decision (if any).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_persona: Option<String>,
+    /// Rationale for persona selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persona_selection_rationale: Option<String>,
+    /// Current cache state (Cold/Warm/Hot).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_state: Option<String>,
+    /// Condensed summary of extended thinking, if thinking was used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_summary: Option<String>,
+    /// Citations/sources referenced in the decision.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub citations_used: Vec<String>,
+    /// Web/grounding sources used for factual claims.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub grounding_sources: Vec<String>,
+    /// Which provider capabilities were leveraged for this decision.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities_used: Vec<String>,
 }
 
 /// The category of decision the agent made.
@@ -121,6 +142,13 @@ pub struct ExplanationBuilder {
     considered_alternatives: Vec<AlternativeAction>,
     confidence: f32,
     context_factors: Vec<ContextFactor>,
+    active_persona: Option<String>,
+    persona_selection_rationale: Option<String>,
+    cache_state: Option<String>,
+    thinking_summary: Option<String>,
+    citations_used: Vec<String>,
+    grounding_sources: Vec<String>,
+    capabilities_used: Vec<String>,
 }
 
 impl ExplanationBuilder {
@@ -134,6 +162,13 @@ impl ExplanationBuilder {
             considered_alternatives: Vec::new(),
             confidence: 0.5,
             context_factors: Vec::new(),
+            active_persona: None,
+            persona_selection_rationale: None,
+            cache_state: None,
+            thinking_summary: None,
+            citations_used: Vec::new(),
+            grounding_sources: Vec::new(),
+            capabilities_used: Vec::new(),
         }
     }
 
@@ -180,6 +215,43 @@ impl ExplanationBuilder {
         self
     }
 
+    /// Set the active persona and selection rationale.
+    pub fn set_persona(&mut self, persona: &str, rationale: &str) -> &mut Self {
+        self.active_persona = Some(persona.to_string());
+        self.persona_selection_rationale = Some(rationale.to_string());
+        self
+    }
+
+    /// Set the current cache state.
+    pub fn set_cache_state(&mut self, state: &str) -> &mut Self {
+        self.cache_state = Some(state.to_string());
+        self
+    }
+
+    /// Set thinking summary.
+    pub fn set_thinking_summary(&mut self, summary: &str) -> &mut Self {
+        self.thinking_summary = Some(summary.to_string());
+        self
+    }
+
+    /// Add a citation.
+    pub fn add_citation(&mut self, citation: &str) -> &mut Self {
+        self.citations_used.push(citation.to_string());
+        self
+    }
+
+    /// Add a grounding source.
+    pub fn add_grounding_source(&mut self, source: &str) -> &mut Self {
+        self.grounding_sources.push(source.to_string());
+        self
+    }
+
+    /// Add a capability that was used.
+    pub fn add_capability_used(&mut self, capability: &str) -> &mut Self {
+        self.capabilities_used.push(capability.to_string());
+        self
+    }
+
     /// Consume the builder and produce the final [`DecisionExplanation`].
     pub fn build(self) -> DecisionExplanation {
         DecisionExplanation {
@@ -190,6 +262,13 @@ impl ExplanationBuilder {
             considered_alternatives: self.considered_alternatives,
             confidence: self.confidence,
             context_factors: self.context_factors,
+            active_persona: self.active_persona,
+            persona_selection_rationale: self.persona_selection_rationale,
+            cache_state: self.cache_state,
+            thinking_summary: self.thinking_summary,
+            citations_used: self.citations_used,
+            grounding_sources: self.grounding_sources,
+            capabilities_used: self.capabilities_used,
         }
     }
 }
@@ -497,5 +576,54 @@ mod tests {
             evidence: None,
         };
         assert!(step.evidence.is_none());
+    }
+
+    #[test]
+    fn test_decision_explanation_with_thinking() {
+        let mut builder = ExplanationBuilder::new(DecisionType::ToolSelection {
+            selected_tool: "shell_exec".into(),
+        });
+        builder.set_thinking_summary(
+            "Analyzed the user's request for file deletion and verified the path is safe",
+        );
+        builder.add_capability_used("extended_thinking");
+        let explanation = builder.build();
+
+        assert!(explanation.thinking_summary.is_some());
+        assert_eq!(explanation.capabilities_used.len(), 1);
+    }
+
+    #[test]
+    fn test_decision_explanation_with_citations() {
+        let mut builder = ExplanationBuilder::new(DecisionType::ToolSelection {
+            selected_tool: "file_read".into(),
+        });
+        builder
+            .add_citation("docs/api.md:42")
+            .add_citation("README.md:10")
+            .add_grounding_source("https://docs.rs/tokio/latest");
+        let explanation = builder.build();
+
+        assert_eq!(explanation.citations_used.len(), 2);
+        assert_eq!(explanation.grounding_sources.len(), 1);
+    }
+
+    #[test]
+    fn test_decision_explanation_backward_compat() {
+        // Old JSON without new fields should still deserialize
+        let json = r#"{
+            "decision_id": "00000000-0000-0000-0000-000000000000",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "decision_type": {"ToolSelection": {"selected_tool": "file_read"}},
+            "reasoning_chain": [],
+            "considered_alternatives": [],
+            "confidence": 0.8,
+            "context_factors": []
+        }"#;
+        let explanation: DecisionExplanation = serde_json::from_str(json).unwrap();
+        assert!(explanation.thinking_summary.is_none());
+        assert!(explanation.citations_used.is_empty());
+        assert!(explanation.grounding_sources.is_empty());
+        assert!(explanation.capabilities_used.is_empty());
     }
 }

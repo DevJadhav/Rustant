@@ -12,6 +12,7 @@
 use dialoguer::{Input, Password, Select};
 use rustant_core::credentials::{CredentialStore, KeyringCredentialStore};
 use rustant_core::providers::models::{ModelInfo, list_models};
+use rustant_core::providers::{is_ollama_available, list_ollama_models};
 use std::path::Path;
 
 /// A provider option presented during the setup wizard.
@@ -45,6 +46,12 @@ pub fn available_providers() -> Vec<ProviderChoice> {
             display_name: "Google Gemini".to_string(),
 
             api_key_env: "GEMINI_API_KEY".to_string(),
+        },
+        ProviderChoice {
+            name: "ollama".to_string(),
+            display_name: "Ollama (local)".to_string(),
+
+            api_key_env: "".to_string(),
         },
         ProviderChoice {
             name: "custom".to_string(),
@@ -111,7 +118,12 @@ pub fn update_config(
     config.llm.model = model.id.clone();
     config.llm.api_key_env = provider.api_key_env.clone();
     config.llm.base_url = base_url.map(|s| s.to_string());
-    config.llm.credential_store_key = Some(provider.name.clone());
+    if provider.name == "ollama" {
+        config.llm.credential_store_key = None;
+        config.llm.api_key = Some("ollama".to_string());
+    } else {
+        config.llm.credential_store_key = Some(provider.name.clone());
+    }
     config.llm.auth_method = auth_method.to_string();
     if let Some(ctx) = model.context_window {
         config.llm.context_window = ctx;
@@ -155,6 +167,11 @@ pub async fn run_setup(workspace: &Path) -> anyhow::Result<()> {
         .default(0)
         .interact()?;
     let chosen_provider = &providers[selection];
+
+    // Special handling for Ollama (no API key needed)
+    if chosen_provider.name == "ollama" {
+        return run_setup_ollama(workspace).await;
+    }
 
     // Step 2: Auth method selection (OAuth or API key)
     let supports_oauth = rustant_core::oauth::provider_supports_oauth(&chosen_provider.name);
@@ -374,6 +391,94 @@ pub async fn run_setup(workspace: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Run the Ollama-specific setup flow.
+///
+/// Detects if Ollama is running, lists available models, lets the user select one,
+/// and saves the config without requiring an API key.
+async fn run_setup_ollama(workspace: &Path) -> anyhow::Result<()> {
+    println!("\n  Checking if Ollama is running...");
+
+    let base_url_default = "http://localhost:11434";
+
+    if !is_ollama_available(None).await {
+        println!("  Ollama is not reachable at {}", base_url_default);
+        let custom_url: String = Input::new()
+            .with_prompt("Enter Ollama base URL (or press Enter to abort)")
+            .default(base_url_default.to_string())
+            .interact_text()?;
+
+        if !is_ollama_available(Some(&custom_url)).await {
+            anyhow::bail!(
+                "Ollama is not reachable at {}. Please ensure Ollama is running (`ollama serve`) and try again.",
+                custom_url
+            );
+        }
+
+        return run_setup_ollama_with_url(workspace, &custom_url).await;
+    }
+
+    run_setup_ollama_with_url(workspace, base_url_default).await
+}
+
+/// Run the Ollama setup with a confirmed base URL.
+async fn run_setup_ollama_with_url(workspace: &Path, base_url: &str) -> anyhow::Result<()> {
+    println!("  Ollama detected at {}", base_url);
+    println!("  Fetching available models...\n");
+
+    let models = list_ollama_models(Some(base_url)).await;
+
+    if models.is_empty() {
+        anyhow::bail!(
+            "No models found in Ollama. Pull a model first with: ollama pull <model-name>\n\
+             Popular models: llama3.2, qwen2.5, mistral, deepseek-coder-v2, codellama"
+        );
+    }
+
+    println!("  Found {} model(s).\n", models.len());
+
+    let model_selection = Select::new()
+        .with_prompt("Select a model")
+        .items(&models)
+        .default(0)
+        .interact()?;
+
+    let selected_model = &models[model_selection];
+    // Strip the `:latest` tag suffix if present for cleaner config
+    let model_id = selected_model
+        .strip_suffix(":latest")
+        .unwrap_or(selected_model)
+        .to_string();
+
+    let provider = ProviderChoice {
+        name: "ollama".to_string(),
+        display_name: "Ollama (local)".to_string(),
+        api_key_env: String::new(),
+    };
+
+    let model_info = ModelInfo {
+        id: model_id.clone(),
+        name: model_id.clone(),
+        context_window: None,
+        is_chat_model: true,
+        input_cost_per_million: None,
+        output_cost_per_million: None,
+    };
+
+    let api_url = format!("{}/v1", base_url);
+    update_config(workspace, &provider, &model_info, Some(&api_url), "none")?;
+
+    println!(
+        "  Configuration saved to {}",
+        workspace.join(".rustant").join("config.toml").display()
+    );
+    println!(
+        "\n  Setup complete! Using Ollama with model {}.\n",
+        model_id
+    );
+
+    Ok(())
+}
+
 /// Fallback: run the API key setup flow when OAuth fails.
 async fn run_setup_api_key(workspace: &Path, provider: &ProviderChoice) -> anyhow::Result<()> {
     let cred_store = KeyringCredentialStore::new();
@@ -492,10 +597,11 @@ mod tests {
     #[test]
     fn test_provider_choices_available() {
         let providers = available_providers();
-        assert!(providers.len() >= 4);
+        assert!(providers.len() >= 5);
         assert!(providers.iter().any(|p| p.name == "openai"));
         assert!(providers.iter().any(|p| p.name == "anthropic"));
         assert!(providers.iter().any(|p| p.name == "gemini"));
+        assert!(providers.iter().any(|p| p.name == "ollama"));
         assert!(providers.iter().any(|p| p.name == "custom"));
     }
 
@@ -617,6 +723,45 @@ mod tests {
         assert_eq!(config.llm.model, "gpt-4o");
         assert_eq!(config.llm.credential_store_key, Some("openai".to_string()));
         assert_eq!(config.llm.context_window, 128_000);
+    }
+
+    #[test]
+    fn test_update_config_with_ollama() {
+        let dir = TempDir::new().unwrap();
+        let model = ModelInfo {
+            id: "llama3.2".to_string(),
+            name: "llama3.2".to_string(),
+            context_window: None,
+            is_chat_model: true,
+            input_cost_per_million: None,
+            output_cost_per_million: None,
+        };
+        let provider = ProviderChoice {
+            name: "ollama".to_string(),
+            display_name: "Ollama (local)".to_string(),
+            api_key_env: String::new(),
+        };
+
+        update_config(
+            dir.path(),
+            &provider,
+            &model,
+            Some("http://localhost:11434/v1"),
+            "none",
+        )
+        .unwrap();
+
+        let config_path = dir.path().join(".rustant").join("config.toml");
+        let config: rustant_core::AgentConfig =
+            toml::from_str(&std::fs::read_to_string(config_path).unwrap()).unwrap();
+        assert_eq!(config.llm.provider, "ollama");
+        assert_eq!(config.llm.model, "llama3.2");
+        assert_eq!(
+            config.llm.base_url,
+            Some("http://localhost:11434/v1".to_string())
+        );
+        assert_eq!(config.llm.api_key, Some("ollama".to_string()));
+        assert_eq!(config.llm.credential_store_key, None);
     }
 
     #[test]

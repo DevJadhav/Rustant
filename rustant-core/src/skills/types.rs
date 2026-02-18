@@ -85,6 +85,15 @@ pub struct SkillDefinition {
     /// Source file path.
     #[serde(default)]
     pub source_path: Option<String>,
+    /// Regex patterns for auto-activation when task description matches.
+    #[serde(default)]
+    pub trigger_patterns: Vec<String>,
+    /// System prompt addendum injected when this skill is active.
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+    /// Tool names this skill needs to be available.
+    #[serde(default)]
+    pub required_tools: Vec<String>,
 }
 
 fn default_risk() -> SkillRiskLevel {
@@ -122,6 +131,9 @@ mod tests {
             config: SkillConfig::default(),
             risk_level: SkillRiskLevel::Medium,
             source_path: None,
+            trigger_patterns: vec!["test".into()],
+            system_prompt: Some("Test prompt".into()),
+            required_tools: vec!["shell_exec".into()],
         };
 
         let json = serde_json::to_string(&skill).unwrap();

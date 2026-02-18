@@ -126,6 +126,20 @@ impl SimpleEmbedder {
     }
 }
 
+impl crate::embeddings::Embedder for SimpleEmbedder {
+    fn embed(&self, text: &str) -> Vec<f32> {
+        self.embed(text)
+    }
+
+    fn dimensions(&self) -> usize {
+        self.dimensions
+    }
+
+    fn provider_name(&self) -> &str {
+        "simple_tfidf"
+    }
+}
+
 fn simple_hash(s: &str) -> usize {
     let mut hash: usize = 5381;
     for b in s.bytes() {
@@ -161,7 +175,7 @@ pub struct HybridSearchEngine {
     _schema: Schema,
     id_field: Field,
     content_field: Field,
-    embedder: SimpleEmbedder,
+    embedder: Box<dyn crate::embeddings::Embedder>,
     // In-memory vector store (backed by SQLite for persistence)
     vectors: HashMap<String, Vec<f32>>,
 }
@@ -177,7 +191,19 @@ impl std::fmt::Debug for HybridSearchEngine {
 
 impl HybridSearchEngine {
     /// Create or open a hybrid search engine at the configured paths.
+    ///
+    /// Uses the built-in `SimpleEmbedder` (TF-IDF) with dimensions from config.
+    /// For pluggable embedders, use [`open_with_embedder`] instead.
     pub fn open(config: SearchConfig) -> Result<Self, SearchError> {
+        let embedder = Box::new(SimpleEmbedder::new(config.vector_dimensions));
+        Self::open_with_embedder(config, embedder)
+    }
+
+    /// Create or open a hybrid search engine with a custom embedder.
+    pub fn open_with_embedder(
+        config: SearchConfig,
+        embedder: Box<dyn crate::embeddings::Embedder>,
+    ) -> Result<Self, SearchError> {
         // Build schema
         let mut schema_builder = Schema::builder();
         let id_field = schema_builder.add_text_field("id", STRING | STORED);
@@ -202,8 +228,6 @@ impl HybridSearchEngine {
         let writer = index
             .writer(50_000_000) // 50MB heap
             .map_err(|e| SearchError::IndexError(format!("Failed to create writer: {}", e)))?;
-
-        let embedder = SimpleEmbedder::new(config.vector_dimensions);
 
         Ok(Self {
             config,

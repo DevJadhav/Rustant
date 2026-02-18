@@ -30,7 +30,7 @@ impl std::fmt::Display for Role {
     }
 }
 
-/// Content within a message — text, tool call, or tool result.
+/// Content within a message — text, tool call, tool result, or extended types.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Content {
@@ -50,6 +50,76 @@ pub enum Content {
     MultiPart {
         parts: Vec<Content>,
     },
+    /// Image content for vision/multimodal capabilities.
+    Image {
+        source: ImageSource,
+        media_type: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    /// Extended thinking / chain-of-thought reasoning from the model.
+    Thinking {
+        thinking: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        signature: Option<String>,
+    },
+    /// Citation referencing a source document, URL, or tool result.
+    Citation {
+        cited_text: String,
+        source: CitationSource,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        start_index: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        end_index: Option<usize>,
+    },
+    /// Code execution result (e.g., Gemini sandbox).
+    CodeExecution {
+        language: String,
+        code: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    /// Web search / grounding results.
+    SearchResult {
+        query: String,
+        results: Vec<GroundingResult>,
+    },
+}
+
+/// Source of an image in a message.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageSource {
+    Base64(String),
+    Url(String),
+    FilePath(String),
+}
+
+/// Source of a citation reference.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CitationSource {
+    Document {
+        title: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        page: Option<usize>,
+    },
+    Url {
+        url: String,
+    },
+    ToolResult {
+        call_id: String,
+    },
+}
+
+/// A single grounding/web search result.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GroundingResult {
+    pub title: String,
+    pub url: String,
+    pub snippet: String,
 }
 
 impl Content {
@@ -84,10 +154,35 @@ impl Content {
         }
     }
 
+    /// Create an image content from base64 data.
+    pub fn image_base64(data: impl Into<String>, media_type: impl Into<String>) -> Self {
+        Content::Image {
+            source: ImageSource::Base64(data.into()),
+            media_type: media_type.into(),
+            detail: None,
+        }
+    }
+
+    /// Create a thinking content block.
+    pub fn thinking(thinking: impl Into<String>, signature: Option<String>) -> Self {
+        Content::Thinking {
+            thinking: thinking.into(),
+            signature,
+        }
+    }
+
     /// Returns the text representation of this content.
     pub fn as_text(&self) -> Option<&str> {
         match self {
             Content::Text { text } => Some(text),
+            _ => None,
+        }
+    }
+
+    /// Returns the thinking text if this is a Thinking variant.
+    pub fn as_thinking(&self) -> Option<&str> {
+        match self {
+            Content::Thinking { thinking, .. } => Some(thinking),
             _ => None,
         }
     }
@@ -148,14 +243,7 @@ impl Message {
 
     /// Approximate character length of the message content.
     pub fn content_length(&self) -> usize {
-        match &self.content {
-            Content::Text { text } => text.len(),
-            Content::ToolCall {
-                name, arguments, ..
-            } => name.len() + arguments.to_string().len(),
-            Content::ToolResult { output, .. } => output.len(),
-            Content::MultiPart { parts } => parts.iter().map(content_char_len).sum(),
-        }
+        content_char_len(&self.content)
     }
 }
 
@@ -168,6 +256,26 @@ fn content_char_len(c: &Content) -> usize {
         } => name.len() + arguments.to_string().len(),
         Content::ToolResult { output, .. } => output.len(),
         Content::MultiPart { parts } => parts.iter().map(content_char_len).sum(),
+        Content::Image { media_type, .. } => media_type.len() + 100, // base64 data excluded from char count
+        Content::Thinking { thinking, .. } => thinking.len(),
+        Content::Citation { cited_text, .. } => cited_text.len(),
+        Content::CodeExecution {
+            code,
+            output,
+            error,
+            ..
+        } => {
+            code.len()
+                + output.as_deref().map_or(0, |s| s.len())
+                + error.as_deref().map_or(0, |s| s.len())
+        }
+        Content::SearchResult { query, results } => {
+            query.len()
+                + results
+                    .iter()
+                    .map(|r| r.title.len() + r.snippet.len())
+                    .sum::<usize>()
+        }
     }
 }
 
@@ -768,6 +876,12 @@ impl AgentState {
 pub struct TokenUsage {
     pub input_tokens: usize,
     pub output_tokens: usize,
+    /// Tokens read from provider cache (discounted pricing).
+    #[serde(default)]
+    pub cache_read_tokens: usize,
+    /// Tokens written to provider cache (creation cost).
+    #[serde(default)]
+    pub cache_creation_tokens: usize,
 }
 
 impl TokenUsage {
@@ -778,6 +892,18 @@ impl TokenUsage {
     pub fn accumulate(&mut self, other: &TokenUsage) {
         self.input_tokens += other.input_tokens;
         self.output_tokens += other.output_tokens;
+        self.cache_read_tokens += other.cache_read_tokens;
+        self.cache_creation_tokens += other.cache_creation_tokens;
+    }
+
+    /// Compute the cache hit rate as a fraction (0.0 to 1.0).
+    pub fn cache_hit_rate(&self) -> f64 {
+        let total_input = self.input_tokens + self.cache_read_tokens;
+        if total_input == 0 {
+            0.0
+        } else {
+            self.cache_read_tokens as f64 / total_input as f64
+        }
     }
 }
 
@@ -786,6 +912,9 @@ impl TokenUsage {
 pub struct CostEstimate {
     pub input_cost: f64,
     pub output_cost: f64,
+    /// Cost savings from cache hits (positive = money saved).
+    #[serde(default)]
+    pub cache_savings: f64,
 }
 
 impl CostEstimate {
@@ -793,9 +922,15 @@ impl CostEstimate {
         self.input_cost + self.output_cost
     }
 
+    /// Total cost that would have been incurred without caching.
+    pub fn total_without_cache(&self) -> f64 {
+        self.input_cost + self.output_cost + self.cache_savings
+    }
+
     pub fn accumulate(&mut self, other: &CostEstimate) {
         self.input_cost += other.input_cost;
         self.output_cost += other.output_cost;
+        self.cache_savings += other.cache_savings;
     }
 }
 
@@ -817,6 +952,21 @@ pub enum StreamEvent {
     ToolCallEnd {
         id: String,
     },
+    /// Incremental thinking text during extended thinking.
+    ThinkingDelta(String),
+    /// Thinking phase complete with full text and optional signature.
+    ThinkingComplete {
+        thinking: String,
+        signature: Option<String>,
+    },
+    /// An inline citation in the response stream.
+    CitationBlock(Content),
+    /// Code execution result from provider sandbox.
+    CodeExecutionResult {
+        code: String,
+        output: Option<String>,
+        error: Option<String>,
+    },
     Done {
         usage: TokenUsage,
     },
@@ -832,6 +982,51 @@ pub struct CompletionResponse {
     pub finish_reason: Option<String>,
 }
 
+/// Configuration for extended thinking / chain-of-thought mode.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ThinkingConfig {
+    pub enabled: bool,
+    /// Anthropic: max tokens for thinking budget.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget_tokens: Option<usize>,
+    /// Gemini: thinking level ("none", "low", "medium", "high").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level: Option<String>,
+}
+
+/// Desired response format for structured outputs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "format", rename_all = "snake_case")]
+pub enum ResponseFormat {
+    Text,
+    JsonObject,
+    JsonSchema {
+        name: String,
+        schema: serde_json::Value,
+        #[serde(default)]
+        strict: bool,
+    },
+}
+
+/// Tool selection strategy for the LLM.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolChoice {
+    #[default]
+    Auto,
+    Required,
+    None,
+    Specific(String),
+}
+
+/// Grounding tools available for the request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GroundingTool {
+    GoogleSearch,
+    UrlContext { urls: Vec<String> },
+}
+
 /// A request to the LLM for completion.
 #[derive(Debug, Clone)]
 pub struct CompletionRequest {
@@ -841,6 +1036,22 @@ pub struct CompletionRequest {
     pub max_tokens: Option<usize>,
     pub stop_sequences: Vec<String>,
     pub model: Option<String>,
+    /// Cache hints for providers that support prompt caching.
+    pub cache_hint: crate::cache::CacheHint,
+    /// Extended thinking configuration.
+    pub thinking: Option<ThinkingConfig>,
+    /// Desired response format (text, JSON, JSON schema).
+    pub response_format: Option<ResponseFormat>,
+    /// Tool selection strategy.
+    pub tool_choice: ToolChoice,
+    /// Seed for deterministic outputs (where supported).
+    pub seed: Option<u64>,
+    /// Enable citation generation (Anthropic).
+    pub enable_citations: bool,
+    /// Enable code execution sandbox (Gemini).
+    pub enable_code_execution: bool,
+    /// Grounding tools (Gemini Google Search, URL context).
+    pub grounding_tools: Vec<GroundingTool>,
 }
 
 impl Default for CompletionRequest {
@@ -852,6 +1063,14 @@ impl Default for CompletionRequest {
             max_tokens: None,
             stop_sequences: Vec::new(),
             model: None,
+            cache_hint: crate::cache::CacheHint::default(),
+            thinking: None,
+            response_format: None,
+            tool_choice: ToolChoice::Auto,
+            seed: None,
+            enable_citations: false,
+            enable_code_execution: false,
+            grounding_tools: Vec::new(),
         }
     }
 }
@@ -986,12 +1205,14 @@ mod tests {
         let mut usage = TokenUsage {
             input_tokens: 100,
             output_tokens: 50,
+            ..Default::default()
         };
         assert_eq!(usage.total(), 150);
 
         let other = TokenUsage {
             input_tokens: 200,
             output_tokens: 100,
+            ..Default::default()
         };
         usage.accumulate(&other);
         assert_eq!(usage.input_tokens, 300);
@@ -1004,12 +1225,14 @@ mod tests {
         let mut cost = CostEstimate {
             input_cost: 0.01,
             output_cost: 0.03,
+            ..Default::default()
         };
         assert!((cost.total() - 0.04).abs() < f64::EPSILON);
 
         let other = CostEstimate {
             input_cost: 0.02,
             output_cost: 0.06,
+            ..Default::default()
         };
         cost.accumulate(&other);
         assert!((cost.input_cost - 0.03).abs() < f64::EPSILON);
@@ -1067,5 +1290,389 @@ mod tests {
             AgentStatus::WaitingForClarification.to_string(),
             "waiting for clarification"
         );
+    }
+
+    #[test]
+    fn test_token_usage_cache_fields_default_zero() {
+        let json = r#"{"input_tokens":100,"output_tokens":50}"#;
+        let u: TokenUsage = serde_json::from_str(json).unwrap();
+        assert_eq!(u.cache_read_tokens, 0);
+        assert_eq!(u.cache_creation_tokens, 0);
+    }
+
+    #[test]
+    fn test_token_usage_accumulate_with_cache() {
+        let mut a = TokenUsage {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_read_tokens: 200,
+            cache_creation_tokens: 0,
+        };
+        let b = TokenUsage {
+            input_tokens: 50,
+            output_tokens: 25,
+            cache_read_tokens: 100,
+            cache_creation_tokens: 300,
+        };
+        a.accumulate(&b);
+        assert_eq!(a.input_tokens, 150);
+        assert_eq!(a.output_tokens, 75);
+        assert_eq!(a.cache_read_tokens, 300);
+        assert_eq!(a.cache_creation_tokens, 300);
+    }
+
+    #[test]
+    fn test_cache_hit_rate() {
+        let u = TokenUsage {
+            input_tokens: 200,
+            output_tokens: 100,
+            cache_read_tokens: 800,
+            cache_creation_tokens: 0,
+        };
+        assert!((u.cache_hit_rate() - 0.8).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_cache_hit_rate_zero_input() {
+        let u = TokenUsage::default();
+        assert_eq!(u.cache_hit_rate(), 0.0);
+    }
+
+    #[test]
+    fn test_cost_estimate_cache_savings() {
+        let c = CostEstimate {
+            input_cost: 0.01,
+            output_cost: 0.05,
+            cache_savings: 0.009,
+        };
+        assert!((c.total() - 0.06).abs() < 0.0001);
+        assert!((c.total_without_cache() - 0.069).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_cost_estimate_accumulate_with_savings() {
+        let mut a = CostEstimate {
+            input_cost: 0.01,
+            output_cost: 0.02,
+            cache_savings: 0.005,
+        };
+        let b = CostEstimate {
+            input_cost: 0.005,
+            output_cost: 0.01,
+            cache_savings: 0.003,
+        };
+        a.accumulate(&b);
+        assert!((a.cache_savings - 0.008).abs() < 0.0001);
+    }
+
+    // ---- Phase 1: Extended Content Types Tests ----
+
+    #[test]
+    fn test_content_image_serde_roundtrip() {
+        let img = Content::Image {
+            source: ImageSource::Base64("iVBORw0KGgo=".into()),
+            media_type: "image/png".into(),
+            detail: Some("high".into()),
+        };
+        let json = serde_json::to_string(&img).unwrap();
+        let deserialized: Content = serde_json::from_str(&json).unwrap();
+        match deserialized {
+            Content::Image {
+                source,
+                media_type,
+                detail,
+            } => {
+                assert!(matches!(source, ImageSource::Base64(d) if d == "iVBORw0KGgo="));
+                assert_eq!(media_type, "image/png");
+                assert_eq!(detail, Some("high".into()));
+            }
+            _ => panic!("Expected Image content"),
+        }
+    }
+
+    #[test]
+    fn test_content_thinking_serde_roundtrip() {
+        // With signature
+        let thinking = Content::Thinking {
+            thinking: "Let me reason about this...".into(),
+            signature: Some("sig_abc123".into()),
+        };
+        let json = serde_json::to_string(&thinking).unwrap();
+        let restored: Content = serde_json::from_str(&json).unwrap();
+        match restored {
+            Content::Thinking {
+                thinking: t,
+                signature: s,
+            } => {
+                assert_eq!(t, "Let me reason about this...");
+                assert_eq!(s, Some("sig_abc123".into()));
+            }
+            _ => panic!("Expected Thinking content"),
+        }
+
+        // Without signature
+        let thinking_no_sig = Content::Thinking {
+            thinking: "Reasoning".into(),
+            signature: None,
+        };
+        let json2 = serde_json::to_string(&thinking_no_sig).unwrap();
+        assert!(!json2.contains("signature"));
+        let restored2: Content = serde_json::from_str(&json2).unwrap();
+        assert!(matches!(
+            restored2,
+            Content::Thinking {
+                signature: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_content_citation_serde_roundtrip() {
+        // Document citation
+        let citation = Content::Citation {
+            cited_text: "The answer is 42.".into(),
+            source: CitationSource::Document {
+                title: "guide.md".into(),
+                page: Some(3),
+            },
+            start_index: Some(10),
+            end_index: Some(28),
+        };
+        let json = serde_json::to_string(&citation).unwrap();
+        let restored: Content = serde_json::from_str(&json).unwrap();
+        match restored {
+            Content::Citation {
+                cited_text, source, ..
+            } => {
+                assert_eq!(cited_text, "The answer is 42.");
+                assert!(
+                    matches!(source, CitationSource::Document { title, page } if title == "guide.md" && page == Some(3))
+                );
+            }
+            _ => panic!("Expected Citation content"),
+        }
+
+        // URL citation
+        let url_citation = Content::Citation {
+            cited_text: "Rust is fast.".into(),
+            source: CitationSource::Url {
+                url: "https://rust-lang.org".into(),
+            },
+            start_index: None,
+            end_index: None,
+        };
+        let json2 = serde_json::to_string(&url_citation).unwrap();
+        let restored2: Content = serde_json::from_str(&json2).unwrap();
+        assert!(matches!(
+            restored2,
+            Content::Citation {
+                source: CitationSource::Url { .. },
+                ..
+            }
+        ));
+
+        // ToolResult citation
+        let tool_citation = Content::Citation {
+            cited_text: "file contents".into(),
+            source: CitationSource::ToolResult {
+                call_id: "call_123".into(),
+            },
+            start_index: None,
+            end_index: None,
+        };
+        let json3 = serde_json::to_string(&tool_citation).unwrap();
+        let restored3: Content = serde_json::from_str(&json3).unwrap();
+        assert!(matches!(
+            restored3,
+            Content::Citation {
+                source: CitationSource::ToolResult { .. },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_content_code_execution_serde() {
+        let code_exec = Content::CodeExecution {
+            language: "python".into(),
+            code: "print(2 + 2)".into(),
+            output: Some("4".into()),
+            error: None,
+        };
+        let json = serde_json::to_string(&code_exec).unwrap();
+        let restored: Content = serde_json::from_str(&json).unwrap();
+        match restored {
+            Content::CodeExecution {
+                language,
+                code,
+                output,
+                error,
+            } => {
+                assert_eq!(language, "python");
+                assert_eq!(code, "print(2 + 2)");
+                assert_eq!(output, Some("4".into()));
+                assert!(error.is_none());
+            }
+            _ => panic!("Expected CodeExecution content"),
+        }
+    }
+
+    #[test]
+    fn test_content_search_result_serde() {
+        let search = Content::SearchResult {
+            query: "Rust async".into(),
+            results: vec![
+                GroundingResult {
+                    title: "Async Rust Book".into(),
+                    url: "https://rust-async.org".into(),
+                    snippet: "Learn async programming in Rust.".into(),
+                },
+                GroundingResult {
+                    title: "Tokio Tutorial".into(),
+                    url: "https://tokio.rs".into(),
+                    snippet: "Tokio is an async runtime for Rust.".into(),
+                },
+            ],
+        };
+        let json = serde_json::to_string(&search).unwrap();
+        let restored: Content = serde_json::from_str(&json).unwrap();
+        match restored {
+            Content::SearchResult { query, results } => {
+                assert_eq!(query, "Rust async");
+                assert_eq!(results.len(), 2);
+                assert_eq!(results[0].title, "Async Rust Book");
+            }
+            _ => panic!("Expected SearchResult content"),
+        }
+    }
+
+    #[test]
+    fn test_completion_request_backward_compat() {
+        // Old-style CompletionRequest without new fields should still work
+        let req = CompletionRequest::default();
+        assert!(req.thinking.is_none());
+        assert!(req.response_format.is_none());
+        assert!(matches!(req.tool_choice, ToolChoice::Auto));
+        assert!(req.seed.is_none());
+        assert!(!req.enable_citations);
+        assert!(!req.enable_code_execution);
+        assert!(req.grounding_tools.is_empty());
+    }
+
+    #[test]
+    fn test_tool_choice_default_is_auto() {
+        let tc = ToolChoice::default();
+        assert!(matches!(tc, ToolChoice::Auto));
+    }
+
+    #[test]
+    fn test_response_format_json_schema() {
+        let schema = ResponseFormat::JsonSchema {
+            name: "result".into(),
+            schema: serde_json::json!({"type": "object", "properties": {"answer": {"type": "string"}}}),
+            strict: true,
+        };
+        let json = serde_json::to_string(&schema).unwrap();
+        let restored: ResponseFormat = serde_json::from_str(&json).unwrap();
+        match restored {
+            ResponseFormat::JsonSchema { name, strict, .. } => {
+                assert_eq!(name, "result");
+                assert!(strict);
+            }
+            _ => panic!("Expected JsonSchema"),
+        }
+    }
+
+    #[test]
+    fn test_thinking_config_serde() {
+        let tc = ThinkingConfig {
+            enabled: true,
+            budget_tokens: Some(4096),
+            level: None,
+        };
+        let json = serde_json::to_string(&tc).unwrap();
+        let restored: ThinkingConfig = serde_json::from_str(&json).unwrap();
+        assert!(restored.enabled);
+        assert_eq!(restored.budget_tokens, Some(4096));
+        assert!(restored.level.is_none());
+
+        // Without budget
+        let tc2 = ThinkingConfig::default();
+        assert!(!tc2.enabled);
+        assert!(tc2.budget_tokens.is_none());
+    }
+
+    #[test]
+    fn test_stream_event_thinking_delta() {
+        let event = StreamEvent::ThinkingDelta("reasoning...".into());
+        assert!(matches!(event, StreamEvent::ThinkingDelta(ref s) if s == "reasoning..."));
+
+        let event2 = StreamEvent::ThinkingComplete {
+            thinking: "full reasoning".into(),
+            signature: Some("sig123".into()),
+        };
+        assert!(matches!(event2, StreamEvent::ThinkingComplete { .. }));
+    }
+
+    #[test]
+    fn test_content_image_constructors() {
+        let img = Content::image_base64("data123", "image/jpeg");
+        match img {
+            Content::Image {
+                source,
+                media_type,
+                detail,
+            } => {
+                assert!(matches!(source, ImageSource::Base64(d) if d == "data123"));
+                assert_eq!(media_type, "image/jpeg");
+                assert!(detail.is_none());
+            }
+            _ => panic!("Expected Image"),
+        }
+    }
+
+    #[test]
+    fn test_content_thinking_constructor() {
+        let t = Content::thinking("deep thoughts", Some("sig".into()));
+        assert_eq!(t.as_thinking(), Some("deep thoughts"));
+        assert_eq!(t.as_text(), None);
+    }
+
+    #[test]
+    fn test_content_char_len_extended_variants() {
+        let img = Content::Image {
+            source: ImageSource::Url("https://example.com/img.png".into()),
+            media_type: "image/png".into(),
+            detail: None,
+        };
+        assert!(content_char_len(&img) > 0);
+
+        let thinking = Content::Thinking {
+            thinking: "a".repeat(100),
+            signature: None,
+        };
+        assert_eq!(content_char_len(&thinking), 100);
+
+        let code = Content::CodeExecution {
+            language: "python".into(),
+            code: "x = 1".into(),
+            output: Some("1".into()),
+            error: None,
+        };
+        assert_eq!(content_char_len(&code), 5 + 1);
+    }
+
+    #[test]
+    fn test_grounding_tool_serde() {
+        let gt = GroundingTool::GoogleSearch;
+        let json = serde_json::to_string(&gt).unwrap();
+        assert!(json.contains("google_search"));
+
+        let gt2 = GroundingTool::UrlContext {
+            urls: vec!["https://example.com".into()],
+        };
+        let json2 = serde_json::to_string(&gt2).unwrap();
+        assert!(json2.contains("url_context"));
     }
 }

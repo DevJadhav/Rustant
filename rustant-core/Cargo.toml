@@ -74,6 +74,7 @@ chromiumoxide = { workspace = true, optional = true }
 default = []
 voice = ["dep:cpal", "dep:whisper-rs"]
 browser = ["dep:chromiumoxide"]
+semantic-search = []
 
 [dev-dependencies]
 tokio-test = "0.4"

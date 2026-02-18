@@ -50,6 +50,7 @@ impl ContextSummarizer {
             max_tokens: Some(500),
             stop_sequences: Vec::new(),
             model: None,
+            ..Default::default()
         };
 
         let response = self
@@ -117,6 +118,13 @@ fn build_summarization_prompt(messages: &[Message]) -> String {
                 })
                 .collect::<Vec<_>>()
                 .join(" "),
+            Content::Thinking { thinking, .. } => format!("[Thinking: {}]", thinking),
+            Content::Image { media_type, .. } => format!("[Image: {}]", media_type),
+            Content::Citation { cited_text, .. } => format!("[Citation: {}]", cited_text),
+            Content::CodeExecution { code, .. } => {
+                format!("[Code: {}]", &code[..code.len().min(100)])
+            }
+            Content::SearchResult { query, .. } => format!("[Search: {}]", query),
         };
         prompt.push_str(&format!("{}: {}\n", role, text));
     }
@@ -138,6 +146,22 @@ fn estimate_message_tokens(msg: &Message) -> usize {
                 _ => 0,
             })
             .sum(),
+        Content::Image { .. } => 300, // images are roughly 85 tokens
+        Content::Thinking { thinking, .. } => thinking.len(),
+        Content::Citation { cited_text, .. } => cited_text.len(),
+        Content::CodeExecution {
+            code,
+            output,
+            error,
+            ..
+        } => {
+            code.len()
+                + output.as_deref().map_or(0, |s| s.len())
+                + error.as_deref().map_or(0, |s| s.len())
+        }
+        Content::SearchResult { query, results } => {
+            query.len() + results.iter().map(|r| r.snippet.len()).sum::<usize>()
+        }
     };
     text_len / 4 + 4 // rough: 4 chars per token + overhead
 }

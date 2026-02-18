@@ -1168,12 +1168,8 @@ async fn handle_slack(action: SlackCommand) -> anyhow::Result<()> {
 }
 
 pub async fn handle_voice(action: VoiceAction) -> anyhow::Result<()> {
-    let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| {
-        anyhow::anyhow!(
-            "OPENAI_API_KEY environment variable not set.\n\
-             Set it with: export OPENAI_API_KEY=sk-..."
-        )
-    })?;
+    let api_key =
+        rustant_core::resolve_api_key_by_env("OPENAI_API_KEY").map_err(|e| anyhow::anyhow!(e))?;
 
     match action {
         VoiceAction::Speak { text, voice } => {
@@ -2079,12 +2075,8 @@ pub async fn run_voice_mode(
     use rustant_core::voice::{OpenAiSttProvider, OpenAiTtsProvider, SttWakeDetector};
     use std::sync::Arc;
 
-    let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| {
-        anyhow::anyhow!(
-            "OPENAI_API_KEY required for voice mode.\n\
-             Set it with: export OPENAI_API_KEY=sk-..."
-        )
-    })?;
+    let api_key =
+        rustant_core::resolve_api_key_by_env("OPENAI_API_KEY").map_err(|e| anyhow::anyhow!(e))?;
 
     println!("Voice mode active. Say \"hey rustant\" to give a command.");
     println!("Press Ctrl+C to exit.\n");

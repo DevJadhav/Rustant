@@ -41,6 +41,57 @@ pub trait LlmProvider: Send + Sync {
 
     /// Return the model name.
     fn model_name(&self) -> &str;
+
+    /// Whether this provider supports prompt caching.
+    fn supports_caching(&self) -> bool {
+        false
+    }
+
+    /// Cost per token for cache operations: (cache_read_per_token, cache_write_per_token).
+    /// Cache reads are discounted; cache writes may have a premium.
+    fn cache_cost_per_token(&self) -> (f64, f64) {
+        let (input, _) = self.cost_per_token();
+        // Default: cache reads at 10% of input cost, cache writes at 125% of input cost
+        (input * 0.1, input * 1.25)
+    }
+
+    // --- Capability discovery (default: all false) ---
+
+    /// Whether this provider supports vision/image inputs.
+    fn supports_vision(&self) -> bool {
+        false
+    }
+
+    /// Whether this provider supports extended thinking / chain-of-thought.
+    fn supports_thinking(&self) -> bool {
+        false
+    }
+
+    /// Whether this provider supports structured output (JSON schema).
+    fn supports_structured_output(&self) -> bool {
+        false
+    }
+
+    /// Whether this provider supports inline citations.
+    fn supports_citations(&self) -> bool {
+        false
+    }
+
+    /// Whether this provider supports code execution sandbox.
+    fn supports_code_execution(&self) -> bool {
+        false
+    }
+
+    /// Whether this provider supports web grounding / search.
+    fn supports_grounding(&self) -> bool {
+        false
+    }
+
+    /// Exact token count via provider API (e.g., Anthropic count_tokens endpoint).
+    /// Returns `None` if not supported.
+    async fn count_tokens_exact(&self, _request: &CompletionRequest) -> Option<usize> {
+        None
+    }
 }
 
 /// Token counter using tiktoken-rs for accurate BPE tokenization.
@@ -85,37 +136,41 @@ impl TokenCounter {
         for msg in messages {
             // Each message has overhead: role token + separators (~4 tokens)
             total += 4;
-            match &msg.content {
-                Content::Text { text } => total += self.count(text),
-                Content::ToolCall {
-                    name, arguments, ..
-                } => {
-                    total += self.count(name);
-                    total += self.count(&arguments.to_string());
-                }
-                Content::ToolResult { output, .. } => {
-                    total += self.count(output);
-                }
-                Content::MultiPart { parts } => {
-                    for part in parts {
-                        match part {
-                            Content::Text { text } => total += self.count(text),
-                            Content::ToolCall {
-                                name, arguments, ..
-                            } => {
-                                total += self.count(name);
-                                total += self.count(&arguments.to_string());
-                            }
-                            Content::ToolResult { output, .. } => {
-                                total += self.count(output);
-                            }
-                            _ => total += 10,
-                        }
-                    }
-                }
-            }
+            total += self.count_content(&msg.content);
         }
         total + 3 // reply priming overhead
+    }
+
+    /// Estimate the token count for a single Content value.
+    fn count_content(&self, content: &Content) -> usize {
+        match content {
+            Content::Text { text } => self.count(text),
+            Content::ToolCall {
+                name, arguments, ..
+            } => self.count(name) + self.count(&arguments.to_string()),
+            Content::ToolResult { output, .. } => self.count(output),
+            Content::MultiPart { parts } => parts.iter().map(|p| self.count_content(p)).sum(),
+            Content::Image { .. } => 85, // vision tokens approximation (low detail)
+            Content::Thinking { thinking, .. } => self.count(thinking),
+            Content::Citation { cited_text, .. } => self.count(cited_text),
+            Content::CodeExecution {
+                code,
+                output,
+                error,
+                ..
+            } => {
+                self.count(code)
+                    + output.as_deref().map_or(0, |s| self.count(s))
+                    + error.as_deref().map_or(0, |s| self.count(s))
+            }
+            Content::SearchResult { query, results } => {
+                self.count(query)
+                    + results
+                        .iter()
+                        .map(|r| self.count(&r.title) + self.count(&r.snippet))
+                        .sum::<usize>()
+            }
+        }
     }
 }
 
@@ -347,23 +402,22 @@ impl Brain {
             max_tokens: None,
             stop_sequences: Vec::new(),
             model: None,
+            cache_hint: crate::cache::CacheHint {
+                enable_prompt_cache: self.provider.supports_caching(),
+                cached_content_ref: None,
+            },
+            ..Default::default()
         };
 
         let response = self.provider.complete(request).await?;
 
-        // Track usage
-        self.total_usage.accumulate(&response.usage);
-        let (input_rate, output_rate) = self.provider.cost_per_token();
-        let cost = CostEstimate {
-            input_cost: response.usage.input_tokens as f64 * input_rate,
-            output_cost: response.usage.output_tokens as f64 * output_rate,
-        };
-        self.total_cost.accumulate(&cost);
+        // Track usage (cache-aware)
+        self.track_usage(&response.usage);
 
         info!(
             input_tokens = response.usage.input_tokens,
             output_tokens = response.usage.output_tokens,
-            cost = format!("${:.4}", cost.total()),
+            cost = format!("${:.4}", self.total_cost.total()),
             "Completion received"
         );
 
@@ -441,6 +495,11 @@ impl Brain {
             max_tokens: None,
             stop_sequences: Vec::new(),
             model: None,
+            cache_hint: crate::cache::CacheHint {
+                enable_prompt_cache: self.provider.supports_caching(),
+                cached_content_ref: None,
+            },
+            ..Default::default()
         };
 
         self.provider.complete_streaming(request, tx).await
@@ -485,9 +544,21 @@ impl Brain {
     pub fn track_usage(&mut self, usage: &TokenUsage) {
         self.total_usage.accumulate(usage);
         let (input_rate, output_rate) = self.provider.cost_per_token();
+        let (cache_read_rate, cache_write_rate) = self.provider.cache_cost_per_token();
+
+        // Cache read tokens are charged at the discounted rate instead of full input rate.
+        // Cache creation tokens are charged at the premium rate.
+        // Savings = (full_price - discounted_price) for cache read tokens.
+        let cache_read_cost = usage.cache_read_tokens as f64 * cache_read_rate;
+        let cache_creation_cost = usage.cache_creation_tokens as f64 * cache_write_rate;
+        let cache_savings = usage.cache_read_tokens as f64 * (input_rate - cache_read_rate);
+
         let cost = CostEstimate {
-            input_cost: usage.input_tokens as f64 * input_rate,
+            input_cost: usage.input_tokens as f64 * input_rate
+                + cache_read_cost
+                + cache_creation_cost,
             output_cost: usage.output_tokens as f64 * output_rate,
+            cache_savings,
         };
         self.total_cost.accumulate(&cost);
     }
@@ -539,6 +610,7 @@ impl MockLlmProvider {
             usage: TokenUsage {
                 input_tokens: 100,
                 output_tokens: 50,
+                ..Default::default()
             },
             model: "mock-model".to_string(),
             finish_reason: Some("stop".to_string()),
@@ -556,6 +628,7 @@ impl MockLlmProvider {
             usage: TokenUsage {
                 input_tokens: 100,
                 output_tokens: 30,
+                ..Default::default()
             },
             model: "mock-model".to_string(),
             finish_reason: Some("tool_calls".to_string()),
@@ -582,10 +655,29 @@ impl MockLlmProvider {
             usage: TokenUsage {
                 input_tokens: 100,
                 output_tokens: 50,
+                ..Default::default()
             },
             model: "mock-model".to_string(),
             finish_reason: Some("tool_calls".to_string()),
         }
+    }
+}
+
+/// Rough token estimate for mock provider (~4 chars per token).
+fn estimate_content_tokens_mock(content: &Content) -> usize {
+    match content {
+        Content::Text { text } => text.len() / 4,
+        Content::ToolCall { arguments, .. } => arguments.to_string().len() / 4,
+        Content::ToolResult { output, .. } => output.len() / 4,
+        Content::MultiPart { parts } => parts.iter().map(estimate_content_tokens_mock).sum(),
+        Content::Image { .. } => 85,
+        Content::Thinking { thinking, .. } => thinking.len() / 4,
+        Content::Citation { cited_text, .. } => cited_text.len() / 4,
+        Content::CodeExecution { code, .. } => code.len() / 4,
+        Content::SearchResult { results, .. } => results
+            .iter()
+            .map(|r| (r.snippet.len() + r.title.len()) / 4)
+            .sum(),
     }
 }
 
@@ -631,18 +723,7 @@ impl LlmProvider for MockLlmProvider {
         // Rough estimate: ~4 chars per token
         messages
             .iter()
-            .map(|m| match &m.content {
-                Content::Text { text } => text.len() / 4,
-                Content::ToolCall { arguments, .. } => arguments.to_string().len() / 4,
-                Content::ToolResult { output, .. } => output.len() / 4,
-                Content::MultiPart { parts } => parts
-                    .iter()
-                    .map(|p| match p {
-                        Content::Text { text } => text.len() / 4,
-                        _ => 50,
-                    })
-                    .sum(),
-            })
+            .map(|m| estimate_content_tokens_mock(&m.content))
             .sum::<usize>()
             + 100 // overhead for message structure
     }
@@ -1135,6 +1216,7 @@ mod tests {
         let usage = TokenUsage {
             input_tokens: 100,
             output_tokens: 50,
+            ..Default::default()
         };
         brain.track_usage(&usage);
 

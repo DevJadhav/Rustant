@@ -91,6 +91,24 @@ pub struct AgentConfig {
     /// Optional MCP safety policy configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp_safety: Option<McpSafetyConfig>,
+    /// Optional adaptive persona configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persona: Option<crate::personas::PersonaConfig>,
+    /// Optional prompt caching configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache: Option<crate::cache::CacheConfig>,
+    /// Optional embedding provider configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding: Option<crate::embeddings::EmbeddingConfig>,
+    /// Runtime feature flags for graceful degradation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub features: Option<FeatureFlags>,
+    /// Hooks system configuration.
+    #[serde(default)]
+    pub hooks: HooksConfig,
+    /// Configuration format version for migration support.
+    #[serde(default)]
+    pub config_version: u32,
 }
 
 /// Meeting recording and transcription configuration.
@@ -1063,8 +1081,6 @@ pub struct UiConfig {
     pub vim_mode: bool,
     /// Whether to show cost information in the UI.
     pub show_cost: bool,
-    /// Whether to use the TUI (false = simple REPL, default).
-    pub use_tui: bool,
     /// Whether verbose output is enabled (shows tool execution details).
     #[serde(default)]
     pub verbose: bool,
@@ -1076,7 +1092,6 @@ impl Default for UiConfig {
             theme: "dark".to_string(),
             vim_mode: false,
             show_cost: true,
-            use_tui: false,
             verbose: false,
         }
     }
@@ -1255,6 +1270,65 @@ impl Default for CouncilConfig {
             chairman_model: None,
             max_member_tokens: 2048,
             auto_detect: true,
+        }
+    }
+}
+
+/// Runtime feature flags for graceful degradation.
+///
+/// Controls which major subsystems are active. All flags default to sensible
+/// values and unknown flags are silently ignored (forward compatibility).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeatureFlags {
+    /// Enable provider-level prompt caching (Anthropic cache_control, Gemini CachedContent, etc.).
+    #[serde(default = "default_feature_true")]
+    pub prompt_caching: bool,
+    /// Enable semantic search (uses local TF-IDF if fastembed feature not compiled in).
+    #[serde(default = "default_feature_true")]
+    pub semantic_search: bool,
+    /// Enable dynamic persona evolution (disabled by default — experimental).
+    #[serde(default)]
+    pub dynamic_personas: bool,
+    /// Enable the evaluation framework for trace analysis.
+    #[serde(default = "default_feature_true")]
+    pub evaluation: bool,
+}
+
+fn default_feature_true() -> bool {
+    true
+}
+
+impl Default for FeatureFlags {
+    fn default() -> Self {
+        Self {
+            prompt_caching: true,
+            semantic_search: true,
+            dynamic_personas: false,
+            evaluation: true,
+        }
+    }
+}
+
+/// Configuration for the hooks system.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HooksConfig {
+    /// Whether the hooks system is enabled.
+    #[serde(default = "default_hooks_enabled")]
+    pub enabled: bool,
+    /// Registered hook definitions.
+    #[serde(default)]
+    pub hooks: Vec<crate::hooks::HookDefinition>,
+}
+
+fn default_hooks_enabled() -> bool {
+    true
+}
+
+impl Default for HooksConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            hooks: Vec::new(),
         }
     }
 }
@@ -1581,7 +1655,6 @@ enable_persistence = false
 theme = "dark"
 vim_mode = false
 show_cost = true
-use_tui = false
 
 [tools]
 enable_builtins = true
@@ -1942,7 +2015,6 @@ allowed_hosts = []
             theme = "dark"
             vim_mode = false
             show_cost = true
-            use_tui = false
 
             [tools]
             enable_builtins = true

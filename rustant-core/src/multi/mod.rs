@@ -8,12 +8,17 @@ pub mod messaging;
 pub mod orchestrator;
 pub mod routing;
 pub mod spawner;
+pub mod teams;
 
 pub use isolation::{AgentContext, AgentStatus, ResourceLimits};
 pub use messaging::{AgentEnvelope, AgentPayload, MessageBus, MessagePriority};
 pub use orchestrator::{AgentOrchestrator, TaskHandler};
 pub use routing::{AgentRoute, AgentRouter};
 pub use spawner::AgentSpawner;
+pub use teams::{
+    AgentTeam, CoordinationStrategy, SharedContext, TeamDecision, TeamMember, TeamRegistry,
+    TeamTask, TeamTaskStatus,
+};
 
 #[cfg(test)]
 mod tests {
