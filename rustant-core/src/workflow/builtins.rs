@@ -729,8 +729,8 @@ outputs:
 
 const ARXIV_RESEARCH_WORKFLOW: &str = r#"
 name: arxiv_research
-description: Search, analyze, and manage academic papers from arXiv
-version: "1.0"
+description: Search, analyze, summarize, and manage academic papers with multi-source enrichment
+version: "2.0"
 author: rustant
 inputs:
   - name: topic
@@ -752,6 +752,12 @@ steps:
       action: "search"
       query: "{{ inputs.topic }}"
       max_results: "{{ inputs.max_results }}"
+  - id: summarize_top
+    tool: arxiv_research
+    params:
+      action: "summarize"
+      arxiv_id: "{{ steps.search_papers.top_id }}"
+      level: "abstract"
   - id: analyze_top
     tool: arxiv_research
     params:
@@ -769,7 +775,7 @@ steps:
   - id: summary
     tool: echo
     params:
-      text: "ArXiv research complete. Papers searched, analyzed, and optionally saved."
+      text: "ArXiv research complete. Papers searched, summarized, analyzed, and optionally saved."
 outputs:
   - name: research_report
     value: "{{ steps.analyze_top.output }}"

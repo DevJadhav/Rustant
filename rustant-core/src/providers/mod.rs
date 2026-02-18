@@ -162,6 +162,31 @@ pub fn resolve_api_key_by_env(env_var: &str) -> Result<String, String> {
     })
 }
 
+/// Resolve API key from OS keychain ONLY. No env var fallback.
+///
+/// More secure: keys never leak to child processes, logs, or crash reports.
+/// Users store keys via `rustant auth login --service <name>`.
+///
+/// # Arguments
+/// * `account` - Keychain account name (e.g., "semantic_scholar_api_key")
+pub fn resolve_api_key_keychain(account: &str) -> Result<String, String> {
+    let keychain_key = format!("rustant_{}", account.to_lowercase());
+    match keyring::Entry::new("rustant", &keychain_key) {
+        Ok(entry) => match entry.get_password() {
+            Ok(key) if !key.is_empty() => Ok(key),
+            Ok(_) => Err(format!(
+                "API key '{}' is empty in keychain. Store it via: rustant auth login --service {}",
+                account, account
+            )),
+            Err(_) => Err(format!(
+                "API key '{}' not found in keychain. Store it via: rustant auth login --service {}",
+                account, account
+            )),
+        },
+        Err(e) => Err(format!("Keychain access failed for '{}': {}", account, e)),
+    }
+}
+
 /// Resolve authentication for a provider, supporting both API keys and OAuth tokens.
 ///
 /// If `config.auth_method` is `"oauth"`, loads and (if needed) refreshes the OAuth

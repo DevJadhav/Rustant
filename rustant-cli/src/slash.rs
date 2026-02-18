@@ -701,22 +701,27 @@ impl CommandRegistry {
             category: CommandCategory::Agent,
 
             detailed_help: Some(
-                "Search, fetch, and manage academic papers from arXiv.\n\n\
-                 Usage:\n  /arxiv search <query>       — Search for papers by topic\n  \
-                 /arxiv fetch <id>            — Get full paper details by ArXiv ID\n  \
-                 /arxiv analyze <id>          — Get structured analysis of a paper\n  \
-                 /arxiv trending [category]   — Show recent trending papers\n  \
-                 /arxiv library               — List saved papers\n  \
-                 /arxiv save <id>             — Save a paper to your library\n  \
-                 /arxiv bibtex                — Export library as BibTeX\n  \
-                 /arxiv paper_to_code <id>    — Generate code from paper\n  \
-                 /arxiv paper_to_notebook <id> — Generate Jupyter notebook\n\n\
+                "Search, fetch, and manage academic papers with multi-source enrichment.\n\n\
+                 Usage:\n  /arxiv search <query>         — Search papers by topic\n  \
+                 /arxiv fetch <id>              — Get full paper details\n  \
+                 /arxiv analyze <id>            — Structured analysis\n  \
+                 /arxiv trending [category]     — Recent trending papers\n  \
+                 /arxiv library                 — List saved papers\n  \
+                 /arxiv save <id>               — Save to library\n  \
+                 /arxiv bibtex                  — Export as BibTeX\n  \
+                 /arxiv paper_to_code <id>      — Generate code scaffold\n  \
+                 /arxiv paper_to_notebook <id>  — Generate Jupyter notebook\n  \
+                 /arxiv semantic_search <q>     — Keyword search over library\n  \
+                 /arxiv summarize <id>          — Multi-level summary\n  \
+                 /arxiv citation_graph <id>     — Citation network analysis\n  \
+                 /arxiv blueprint <id>          — Implementation blueprint\n  \
+                 /arxiv reindex                 — Rebuild search index\n\n\
                  Examples:\n  /arxiv search transformer fine-tuning\n  \
                  /arxiv fetch 1706.03762\n  \
-                 /arxiv trending cs.AI\n  \
-                 /arxiv analyze 2301.12345\n\n\
-                 Papers are stored locally in .rustant/arxiv/library.json.\n\
-                 Requires internet connection for search/fetch/trending.",
+                 /arxiv summarize 1706.03762\n  \
+                 /arxiv citation_graph 1706.03762\n\n\
+                 Papers stored in .rustant/arxiv/library.json.\n\
+                 Uses arXiv, Semantic Scholar, and OpenAlex APIs.",
             ),
         });
 

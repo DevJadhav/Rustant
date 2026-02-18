@@ -4,6 +4,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+use crate::paper_sources::{CitationGraphState, ExternalMetadata};
+
 /// A paper from the ArXiv API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArxivPaper {
@@ -23,6 +25,8 @@ pub struct ArxivPaper {
     pub comment: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub journal_ref: Option<String>,
+    #[serde(default)]
+    pub external: ExternalMetadata,
 }
 
 /// Search parameters for the ArXiv API.
@@ -137,6 +141,53 @@ pub struct ArxivLibraryState {
     pub digest_config: Option<DigestConfig>,
     #[serde(default)]
     pub implementations: Vec<ImplementationRecord>,
+    #[serde(default)]
+    pub summaries: Vec<CachedSummary>,
+    #[serde(default)]
+    pub citation_graph: Option<CitationGraphState>,
+    #[serde(default)]
+    pub blueprints: Vec<ImplementationBlueprint>,
+}
+
+/// A cached summary of a paper at a specific level and audience.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedSummary {
+    pub arxiv_id: String,
+    pub level: String,
+    pub audience: String,
+    pub summary: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// An implementation blueprint distilled from a paper.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImplementationBlueprint {
+    pub paper_id: String,
+    pub language: String,
+    pub overview: String,
+    pub components: Vec<BlueprintComponent>,
+    pub file_structure: Vec<BlueprintFile>,
+    pub dependencies: Vec<String>,
+    pub generation_order: Vec<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// A component in an implementation blueprint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlueprintComponent {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub paper_section: String,
+    pub depends_on: Vec<String>,
+}
+
+/// A file in an implementation blueprint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlueprintFile {
+    pub path: String,
+    pub purpose: String,
+    pub component_id: String,
 }
 
 /// Configuration for daily paper digest.
@@ -607,6 +658,7 @@ fn parse_entry(entry: &str) -> Option<ArxivPaper> {
         doi,
         comment,
         journal_ref,
+        external: ExternalMetadata::default(),
     })
 }
 
@@ -1036,6 +1088,7 @@ convolutional neural networks that include an encoder and a decoder.  </summary>
             doi: None,
             comment: None,
             journal_ref: None,
+            external: ExternalMetadata::default(),
         };
         let bib = generate_bibtex(&paper);
         assert!(bib.starts_with("@article{"));
@@ -1063,6 +1116,7 @@ convolutional neural networks that include an encoder and a decoder.  </summary>
             doi: None,
             comment: None,
             journal_ref: None,
+            external: ExternalMetadata::default(),
         };
         let bib = generate_bibtex(&paper);
         assert!(bib.contains("\\&"));
@@ -1089,6 +1143,7 @@ convolutional neural networks that include an encoder and a decoder.  </summary>
                     doi: None,
                     comment: None,
                     journal_ref: None,
+                    external: ExternalMetadata::default(),
                 },
                 tags: vec!["ml".to_string(), "test".to_string()],
                 collection: Some("Favorites".to_string()),
@@ -1102,6 +1157,9 @@ convolutional neural networks that include an encoder and a decoder.  </summary>
                 enabled: true,
             }),
             implementations: Vec::new(),
+            summaries: Vec::new(),
+            citation_graph: None,
+            blueprints: Vec::new(),
         };
 
         let json = serde_json::to_string_pretty(&state).unwrap();

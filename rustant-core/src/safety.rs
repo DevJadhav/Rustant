@@ -1190,6 +1190,8 @@ impl SafetyGuardian {
             "duckduckgo.com",
             "export.arxiv.org",
             "arxiv.org",
+            "api.semanticscholar.org",
+            "api.openalex.org",
         ];
         if BUILTIN_HOSTS.contains(&host) {
             return None;

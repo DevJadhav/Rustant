@@ -1823,10 +1823,16 @@ impl Agent {
                     .and_then(|v| v.as_str())
                     .unwrap_or("search");
                 match action {
-                    "save" | "remove" | "collections" | "digest_config" => {
+                    "save" | "remove" | "collections" | "digest_config" | "reindex" => {
                         ActionDetails::FileWrite {
                             path: ".rustant/arxiv/library.json".into(),
                             size_bytes: 0,
+                        }
+                    }
+                    "semantic_search" | "summarize" | "citation_graph" | "blueprint" => {
+                        ActionDetails::NetworkRequest {
+                            host: "api.semanticscholar.org".to_string(),
+                            method: "GET".to_string(),
                         }
                     }
                     _ => ActionDetails::NetworkRequest {
@@ -2111,7 +2117,7 @@ impl Agent {
                 "For this task, call the appropriate iMessage tool: 'imessage_read', 'imessage_send', or 'imessage_contacts'."
             }
             TaskClassification::ArxivResearch => {
-                "For this task, call the 'arxiv_research' tool with {\"action\": \"search\", \"query\": \"your search terms\", \"max_results\": 10}. This tool uses the arXiv API directly — do NOT use macos_safari, shell_exec, or curl. Other actions: fetch (get by ID), analyze (LLM summary), trending (recent papers), paper_to_code, paper_to_notebook, save/library/remove, export_bibtex."
+                "For this task, call the 'arxiv_research' tool. Actions: search, fetch, analyze, compare, trending, save/library/remove, export_bibtex, collections, digest_config, paper_to_code, paper_to_notebook, implement, setup_env, verify, implementation_status, semantic_search, summarize, citation_graph, blueprint, reindex. Do NOT use macos_safari, shell_exec, or curl."
             }
             TaskClassification::KnowledgeGraph => {
                 "For this task, call the 'knowledge_graph' tool. Actions: add_node, get_node, update_node, remove_node, add_edge, remove_edge, neighbors, search, list, path, stats, import_arxiv, export_dot."
@@ -2170,7 +2176,7 @@ impl Agent {
                 "For this task, call the 'slack' tool with the appropriate action (send_message, read_messages, list_channels, reply_thread, list_users, add_reaction). Do NOT use shell_exec to interact with Slack."
             }
             TaskClassification::ArxivResearch => {
-                "For this task, call the 'arxiv_research' tool with {\"action\": \"search\", \"query\": \"your search terms\", \"max_results\": 10}. This tool uses the arXiv API directly — do NOT use shell_exec, or curl. Other actions: fetch (get by ID), analyze (LLM summary), trending (recent papers), paper_to_code, paper_to_notebook, save/library/remove, export_bibtex."
+                "For this task, call the 'arxiv_research' tool. Actions: search, fetch, analyze, compare, trending, save/library/remove, export_bibtex, collections, digest_config, paper_to_code, paper_to_notebook, implement, setup_env, verify, implementation_status, semantic_search, summarize, citation_graph, blueprint, reindex. Do NOT use shell_exec or curl."
             }
             TaskClassification::KnowledgeGraph => {
                 "For this task, call the 'knowledge_graph' tool. Actions: add_node, get_node, update_node, remove_node, add_edge, remove_edge, neighbors, search, list, path, stats, import_arxiv, export_dot."

@@ -109,6 +109,44 @@ pub struct AgentConfig {
     /// Configuration format version for migration support.
     #[serde(default)]
     pub config_version: u32,
+    /// Optional ArXiv research tool configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arxiv: Option<ArxivConfig>,
+}
+
+/// ArXiv research tool configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArxivConfig {
+    /// Whether semantic search over the library is enabled.
+    #[serde(default = "default_true")]
+    pub semantic_search_enabled: bool,
+    /// Email for OpenAlex polite pool (faster rate limits, not a secret).
+    #[serde(default)]
+    pub openalex_email: Option<String>,
+    /// Cache TTL in seconds (default: 3600).
+    #[serde(default = "default_cache_ttl")]
+    pub cache_ttl_secs: u64,
+    /// Maximum cache entries (default: 1000).
+    #[serde(default = "default_cache_max")]
+    pub cache_max_entries: usize,
+}
+
+impl Default for ArxivConfig {
+    fn default() -> Self {
+        Self {
+            semantic_search_enabled: true,
+            openalex_email: None,
+            cache_ttl_secs: 3600,
+            cache_max_entries: 1000,
+        }
+    }
+}
+
+fn default_cache_ttl() -> u64 {
+    3600
+}
+fn default_cache_max() -> usize {
+    1000
 }
 
 /// Meeting recording and transcription configuration.

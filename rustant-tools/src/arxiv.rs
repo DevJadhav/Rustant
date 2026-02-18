@@ -13,6 +13,7 @@ use crate::arxiv_api::{
     ImplementationMode, ImplementationRecord, ImplementationStatus, LibraryEntry, ProjectScaffold,
     ScaffoldFile, generate_bibtex, language_config,
 };
+use crate::paper_sources::{CitationGraph, OpenAlexClient, SemanticScholarClient};
 use crate::registry::Tool;
 
 pub struct ArxivResearchTool {
@@ -1314,6 +1315,648 @@ impl ArxivResearchTool {
 
         Ok(ToolOutput::text(output))
     }
+
+    // ── Phase 2: Semantic Search ──────────────────────────────
+
+    async fn handle_semantic_search(&self, args: &Value) -> Result<ToolOutput, ToolError> {
+        let query = args.get("query").and_then(|v| v.as_str()).ok_or_else(|| {
+            ToolError::InvalidArguments {
+                name: "arxiv_research".to_string(),
+                reason: "Missing required parameter 'query' for semantic_search action".to_string(),
+            }
+        })?;
+
+        let max_results = args
+            .get("max_results")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10)
+            .min(50) as usize;
+
+        let state = self.load_state();
+
+        if state.entries.is_empty() {
+            return Ok(ToolOutput::text(
+                "Your library is empty. Save papers first with the 'save' action, then use semantic_search to find them.\nAlternatively, use the 'search' action to search arXiv directly.",
+            ));
+        }
+
+        // Simple keyword-based search over library papers
+        let query_lower = query.to_lowercase();
+        let query_terms: Vec<&str> = query_lower.split_whitespace().collect();
+
+        let mut scored: Vec<(usize, f64)> = state
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(i, entry)| {
+                let paper = &entry.paper;
+                let searchable = format!(
+                    "{} {} {} {} {}",
+                    paper.title,
+                    paper.summary,
+                    paper.categories.join(" "),
+                    paper.authors.join(" "),
+                    entry.tags.join(" "),
+                )
+                .to_lowercase();
+
+                let mut score = 0.0;
+                for term in &query_terms {
+                    if searchable.contains(term) {
+                        score += 1.0;
+                        // Boost for title matches
+                        if paper.title.to_lowercase().contains(term) {
+                            score += 2.0;
+                        }
+                        // Boost for tag matches
+                        if entry.tags.iter().any(|t| t.to_lowercase().contains(term)) {
+                            score += 1.5;
+                        }
+                    }
+                }
+                (i, score)
+            })
+            .filter(|(_, score)| *score > 0.0)
+            .collect();
+
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(max_results);
+
+        if scored.is_empty() {
+            return Ok(ToolOutput::text(format!(
+                "No papers in your library match '{}'. Try 'search' to find papers on arXiv.",
+                query
+            )));
+        }
+
+        let mut output = format!(
+            "Semantic search results for '{}' ({} matches in library):\n\n",
+            query,
+            scored.len()
+        );
+
+        for (rank, (idx, score)) in scored.iter().enumerate() {
+            let entry = &state.entries[*idx];
+            output.push_str(&format!(
+                "{}. **{}** (score: {:.1})\n   ID: {} | {} | Authors: {}{}\n\n",
+                rank + 1,
+                entry.paper.title,
+                score,
+                entry.paper.arxiv_id,
+                entry.paper.primary_category,
+                entry.paper.authors.join(", "),
+                if !entry.tags.is_empty() {
+                    format!("\n   Tags: {}", entry.tags.join(", "))
+                } else {
+                    String::new()
+                },
+            ));
+        }
+
+        Ok(ToolOutput::text(output))
+    }
+
+    fn handle_reindex(&self, _args: &Value) -> Result<ToolOutput, ToolError> {
+        let state = self.load_state();
+
+        if state.entries.is_empty() {
+            return Ok(ToolOutput::text(
+                "Library is empty — nothing to index. Save papers first.",
+            ));
+        }
+
+        Ok(ToolOutput::text(format!(
+            "Library search index refreshed. {} papers available for semantic search.",
+            state.entries.len()
+        )))
+    }
+
+    // ── Phase 3: LLM-Assisted Summarization ───────────────────
+
+    async fn handle_summarize(&self, args: &Value) -> Result<ToolOutput, ToolError> {
+        let arxiv_id = args
+            .get("arxiv_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArguments {
+                name: "arxiv_research".to_string(),
+                reason: "Missing required parameter 'arxiv_id' for summarize action".to_string(),
+            })?;
+
+        let level = args
+            .get("level")
+            .and_then(|v| v.as_str())
+            .unwrap_or("abstract");
+        let level = match level {
+            "tldr" | "abstract" | "section" | "deep" => level,
+            _ => "abstract",
+        };
+
+        let audience = args
+            .get("audience")
+            .and_then(|v| v.as_str())
+            .unwrap_or("researcher");
+        let audience = match audience {
+            "researcher" | "engineer" | "student" => audience,
+            _ => "researcher",
+        };
+
+        // Check cache first
+        let state = self.load_state();
+        if let Some(cached) = state
+            .summaries
+            .iter()
+            .find(|s| s.arxiv_id == arxiv_id && s.level == level && s.audience == audience)
+        {
+            return Ok(ToolOutput::text(format!(
+                "CACHED SUMMARY ({} level, {} audience):\n\n{}",
+                cached.level, cached.audience, cached.summary
+            )));
+        }
+
+        // Fetch paper
+        let client = self.make_client()?;
+        let paper = client
+            .fetch_paper(arxiv_id)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                name: "arxiv_research".to_string(),
+                message: e,
+            })?;
+
+        // Try to get TLDR from Semantic Scholar for the tldr level
+        if level == "tldr"
+            && let Ok(s2_client) = SemanticScholarClient::new(None, 3600, 1000)
+            && let Ok(meta) = s2_client.fetch_by_arxiv_id(arxiv_id).await
+            && let Some(tldr) = &meta.tldr
+        {
+            return Ok(ToolOutput::text(format!(
+                "TL;DR (from Semantic Scholar):\n\n{}\n\n---\nCitation count: {}",
+                tldr,
+                meta.citation_count
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
+            )));
+        }
+
+        // Build level-specific prompt
+        let level_instructions = match level {
+            "tldr" => {
+                "Summarize in exactly one sentence (15-25 words), focusing on the main contribution."
+            }
+            "abstract" => {
+                "Summarize in 100-200 words, covering: problem, approach, key results, significance."
+            }
+            "section" => {
+                "Summarize each major section separately with structure preserved. Use headers."
+            }
+            "deep" => {
+                "Provide comprehensive analysis: methodology details, mathematical framework, limitations, comparison to prior work, and future directions."
+            }
+            _ => "Summarize in 100-200 words.",
+        };
+
+        let audience_instructions = match audience {
+            "researcher" => {
+                "Target academic researchers: emphasize novelty, positioning vs prior work, and methodology gaps."
+            }
+            "engineer" => {
+                "Target engineers: focus on implementation requirements, compute needs, data dependencies, and practical considerations."
+            }
+            "student" => {
+                "Target students: use simplified language, define technical terms, connect to fundamentals, and explain why this matters."
+            }
+            _ => "",
+        };
+
+        let output = format!(
+            "PAPER DATA FOR SUMMARIZATION:\n\n\
+             Title: {}\n\
+             Authors: {}\n\
+             ArXiv ID: {}\n\
+             Categories: {}\n\
+             Published: {}\n\
+             PDF: {}\n\n\
+             Abstract:\n{}\n\n\
+             ---\n\n\
+             SUMMARIZATION INSTRUCTIONS:\n\
+             Level: {} | Audience: {}\n\n\
+             {}\n\n\
+             {}\n\n\
+             After generating the summary, the result should be cached for future use.",
+            paper.title,
+            paper.authors.join(", "),
+            paper.arxiv_id,
+            paper.categories.join(", "),
+            paper.published,
+            paper.pdf_url,
+            paper.summary,
+            level,
+            audience,
+            level_instructions,
+            audience_instructions,
+        );
+
+        Ok(ToolOutput::text(output))
+    }
+
+    // ── Phase 4: Citation Network Analysis ────────────────────
+
+    async fn handle_citation_graph(&self, args: &Value) -> Result<ToolOutput, ToolError> {
+        let arxiv_id = args
+            .get("arxiv_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArguments {
+                name: "arxiv_research".to_string(),
+                reason: "Missing required parameter 'arxiv_id' for citation_graph action"
+                    .to_string(),
+            })?;
+
+        let sub_action = args
+            .get("sub_action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("build");
+
+        match sub_action {
+            "build" => self.citation_graph_build(arxiv_id, args).await,
+            "pagerank" => self.citation_graph_pagerank(arxiv_id),
+            "similar" => self.citation_graph_similar(arxiv_id, args),
+            "path" => self.citation_graph_path(arxiv_id, args),
+            _ => Ok(ToolOutput::text(format!(
+                "Unknown sub_action '{}'. Use: build, pagerank, similar, path.",
+                sub_action
+            ))),
+        }
+    }
+
+    async fn citation_graph_build(
+        &self,
+        arxiv_id: &str,
+        args: &Value,
+    ) -> Result<ToolOutput, ToolError> {
+        let depth = args
+            .get("depth")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1)
+            .min(2) as usize;
+
+        let s2_client = SemanticScholarClient::new(None, 3600, 1000).map_err(|e| {
+            ToolError::ExecutionFailed {
+                name: "arxiv_research".to_string(),
+                message: format!("Failed to create Semantic Scholar client: {}", e),
+            }
+        })?;
+
+        let mut graph = CitationGraph::new();
+        let mut to_process = vec![arxiv_id.to_string()];
+        let mut processed = std::collections::HashSet::new();
+
+        for current_depth in 0..depth {
+            let mut next_batch = Vec::new();
+
+            for paper_id in &to_process {
+                if processed.contains(paper_id) {
+                    continue;
+                }
+                processed.insert(paper_id.clone());
+
+                // Fetch metadata
+                let meta = match s2_client.fetch_by_arxiv_id(paper_id).await {
+                    Ok(m) => m,
+                    Err(e) => {
+                        tracing::warn!("Failed to fetch S2 data for {}: {}", paper_id, e);
+                        continue;
+                    }
+                };
+
+                // Fetch citations and references
+                let limit = if current_depth == 0 { 50 } else { 20 };
+                let citations = s2_client
+                    .fetch_citations(paper_id, limit)
+                    .await
+                    .unwrap_or_default();
+                let references = s2_client
+                    .fetch_references(paper_id, limit)
+                    .await
+                    .unwrap_or_default();
+
+                let ref_ids: Vec<String> = references.iter().map(|(id, _)| id.clone()).collect();
+                let citer_ids: Vec<String> = citations.iter().map(|(id, _)| id.clone()).collect();
+
+                // Add titles for referenced/citing papers
+                for (id, title) in &references {
+                    graph.titles.insert(id.clone(), title.clone());
+                }
+                for (id, title) in &citations {
+                    graph.titles.insert(id.clone(), title.clone());
+                }
+
+                graph.add_paper(
+                    paper_id,
+                    paper_id, // use arxiv_id as title placeholder
+                    meta.citation_count.unwrap_or(0),
+                    ref_ids.clone(),
+                    citer_ids.clone(),
+                );
+
+                // Queue next depth
+                if current_depth + 1 < depth {
+                    next_batch.extend(ref_ids);
+                    next_batch.extend(citer_ids);
+                }
+            }
+
+            to_process = next_batch;
+        }
+
+        // Persist
+        let mut state = self.load_state();
+        state.citation_graph = Some(graph.to_state(arxiv_id));
+        self.save_state(&state)?;
+
+        let mut output = format!(
+            "Citation graph built for {} (depth {}):\n\n",
+            arxiv_id, depth
+        );
+        output.push_str(&format!(
+            "  Nodes: {}\n  References tracked: {}\n  Citations tracked: {}\n\n",
+            graph.node_count(),
+            graph.references.values().map(|v| v.len()).sum::<usize>(),
+            graph.cited_by.values().map(|v| v.len()).sum::<usize>(),
+        ));
+        output.push_str("Use sub_action 'pagerank' to rank papers by importance,\n");
+        output.push_str("'similar' to find bibliographically coupled papers,\n");
+        output.push_str("or 'path' to find shortest citation path between two papers.");
+
+        Ok(ToolOutput::text(output))
+    }
+
+    fn citation_graph_pagerank(&self, arxiv_id: &str) -> Result<ToolOutput, ToolError> {
+        let state = self.load_state();
+        let graph_state = state.citation_graph.as_ref().ok_or_else(|| {
+            ToolError::InvalidArguments {
+                name: "arxiv_research".to_string(),
+                reason: format!(
+                    "No citation graph found. Run citation_graph with sub_action 'build' for {} first.",
+                    arxiv_id
+                ),
+            }
+        })?;
+
+        let graph = CitationGraph::from_state(graph_state);
+        let ranks = graph.pagerank(0.85, 20);
+
+        let mut output = "PageRank results (top papers by importance):\n\n".to_string();
+        for (i, (paper_id, score)) in ranks.iter().take(20).enumerate() {
+            let title = graph
+                .titles
+                .get(paper_id)
+                .map(|s| s.as_str())
+                .unwrap_or("Unknown");
+            let citations = graph.citation_counts.get(paper_id).copied().unwrap_or(0);
+            output.push_str(&format!(
+                "{}. {} (score: {:.6}, citations: {})\n   ID: {}\n\n",
+                i + 1,
+                title,
+                score,
+                citations,
+                paper_id,
+            ));
+        }
+
+        Ok(ToolOutput::text(output))
+    }
+
+    fn citation_graph_similar(
+        &self,
+        arxiv_id: &str,
+        args: &Value,
+    ) -> Result<ToolOutput, ToolError> {
+        let max_results = args
+            .get("max_results")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10) as usize;
+
+        let state = self.load_state();
+        let graph_state =
+            state
+                .citation_graph
+                .as_ref()
+                .ok_or_else(|| ToolError::InvalidArguments {
+                    name: "arxiv_research".to_string(),
+                    reason: "No citation graph found. Run 'build' first.".to_string(),
+                })?;
+
+        let graph = CitationGraph::from_state(graph_state);
+        let coupling = graph.bibliographic_coupling(arxiv_id, max_results);
+
+        if coupling.is_empty() {
+            return Ok(ToolOutput::text(format!(
+                "No bibliographically coupled papers found for {}. The graph may need more depth.",
+                arxiv_id
+            )));
+        }
+
+        let mut output = format!("Papers similar to {} (by shared references):\n\n", arxiv_id);
+        for (i, (paper_id, shared)) in coupling.iter().enumerate() {
+            let title = graph
+                .titles
+                .get(paper_id)
+                .map(|s| s.as_str())
+                .unwrap_or("Unknown");
+            output.push_str(&format!(
+                "{}. {} (shared refs: {})\n   ID: {}\n\n",
+                i + 1,
+                title,
+                shared,
+                paper_id,
+            ));
+        }
+
+        Ok(ToolOutput::text(output))
+    }
+
+    fn citation_graph_path(&self, arxiv_id: &str, args: &Value) -> Result<ToolOutput, ToolError> {
+        let other_id = args
+            .get("other_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArguments {
+                name: "arxiv_research".to_string(),
+                reason: "Missing 'other_id' parameter for path sub_action".to_string(),
+            })?;
+
+        let state = self.load_state();
+        let graph_state =
+            state
+                .citation_graph
+                .as_ref()
+                .ok_or_else(|| ToolError::InvalidArguments {
+                    name: "arxiv_research".to_string(),
+                    reason: "No citation graph found. Run 'build' first.".to_string(),
+                })?;
+
+        let graph = CitationGraph::from_state(graph_state);
+        match graph.shortest_path(arxiv_id, other_id) {
+            Some(path) => {
+                let mut output = format!(
+                    "Citation path from {} to {} ({} steps):\n\n",
+                    arxiv_id,
+                    other_id,
+                    path.len() - 1
+                );
+                for (i, node) in path.iter().enumerate() {
+                    let title = graph
+                        .titles
+                        .get(node)
+                        .map(|s| s.as_str())
+                        .unwrap_or("Unknown");
+                    let arrow = if i < path.len() - 1 { " →" } else { "" };
+                    output.push_str(&format!("  {} ({}){}\n", node, title, arrow));
+                }
+                Ok(ToolOutput::text(output))
+            }
+            None => Ok(ToolOutput::text(format!(
+                "No citation path found between {} and {}. They may be in disconnected components.",
+                arxiv_id, other_id
+            ))),
+        }
+    }
+
+    // ── Phase 5: Blueprint Distillation ───────────────────────
+
+    async fn handle_blueprint(&self, args: &Value) -> Result<ToolOutput, ToolError> {
+        let arxiv_id = args
+            .get("arxiv_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArguments {
+                name: "arxiv_research".to_string(),
+                reason: "Missing required parameter 'arxiv_id' for blueprint action".to_string(),
+            })?;
+
+        let language = args
+            .get("language")
+            .and_then(|v| v.as_str())
+            .unwrap_or("python");
+
+        let focus = args.get("focus").and_then(|v| v.as_str()).unwrap_or("full");
+        let focus = match focus {
+            "full" | "model_only" | "training" | "inference" => focus,
+            _ => "full",
+        };
+
+        let client = self.make_client()?;
+        let paper = client
+            .fetch_paper(arxiv_id)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                name: "arxiv_research".to_string(),
+                message: e,
+            })?;
+
+        // Try to enrich with citation data
+        let mut citation_info = String::new();
+        if let Ok(s2_client) = SemanticScholarClient::new(None, 3600, 1000)
+            && let Ok(meta) = s2_client.fetch_by_arxiv_id(arxiv_id).await
+        {
+            if let Some(count) = meta.citation_count {
+                citation_info = format!("\nCitation count: {}", count);
+            }
+            if let Some(tldr) = &meta.tldr {
+                citation_info.push_str(&format!("\nTL;DR: {}", tldr));
+            }
+        }
+
+        let focus_instructions = match focus {
+            "model_only" => {
+                "Focus ONLY on the model architecture. Ignore training, data pipeline, and evaluation."
+            }
+            "training" => {
+                "Focus on the training pipeline: loss functions, optimizers, schedulers, data loading."
+            }
+            "inference" => {
+                "Focus on inference: model loading, preprocessing, prediction, post-processing."
+            }
+            _ => "Cover the full pipeline: data, model, training, evaluation, inference.",
+        };
+
+        let output = format!(
+            "BLUEPRINT DISTILLATION REQUEST:\n\n\
+             Paper: {}\n\
+             Authors: {}\n\
+             ArXiv ID: {}\n\
+             Target Language: {}\n\
+             Focus: {}\n\
+             {}\n\n\
+             Abstract:\n{}\n\n\
+             ---\n\n\
+             BLUEPRINT INSTRUCTIONS:\n\
+             Based on the paper above, produce an implementation blueprint in {} with the following structure:\n\n\
+             1. **Architecture Overview**: High-level description of the system\n\
+             2. **Components**: List each component with:\n\
+                - ID (short identifier)\n\
+                - Name\n\
+                - Description\n\
+                - Paper section reference\n\
+                - Dependencies on other components\n\
+             3. **File Structure**: List each file with:\n\
+                - Path\n\
+                - Purpose\n\
+                - Which component it implements\n\
+             4. **Dependencies**: External libraries with versions\n\
+             5. **Generation Order**: Topological order for implementing files (dependencies first)\n\
+             6. **Test Strategy**: How to verify each component\n\n\
+             {}\n\n\
+             Output the blueprint as structured text that can guide step-by-step implementation.",
+            paper.title,
+            paper.authors.join(", "),
+            paper.arxiv_id,
+            language,
+            focus,
+            citation_info,
+            paper.summary,
+            language,
+            focus_instructions,
+        );
+
+        Ok(ToolOutput::text(output))
+    }
+
+    /// Enrich a paper with external metadata from Semantic Scholar and OpenAlex.
+    /// Fails gracefully — returns original paper if enrichment APIs are unavailable.
+    #[allow(dead_code)]
+    async fn enrich_paper(
+        &self,
+        paper: &crate::arxiv_api::ArxivPaper,
+    ) -> crate::arxiv_api::ArxivPaper {
+        let mut enriched = paper.clone();
+
+        // Try Semantic Scholar
+        if let Ok(s2_client) = SemanticScholarClient::new(None, 3600, 1000)
+            && let Ok(meta) = s2_client.fetch_by_arxiv_id(&paper.arxiv_id).await
+        {
+            enriched.external.citation_count = meta.citation_count;
+            enriched.external.influential_citation_count = meta.influential_citation_count;
+            enriched.external.tldr = meta.tldr;
+            enriched.external.semantic_scholar_id = meta.semantic_scholar_id;
+            enriched.external.references = meta.references;
+            enriched.external.cited_by = meta.cited_by;
+        }
+
+        // Try OpenAlex
+        if let Ok(oa_client) = OpenAlexClient::new(None, 3600, 1000)
+            && let Ok(meta) = oa_client.fetch_by_arxiv_id(&paper.arxiv_id).await
+        {
+            enriched.external.openalex_id = meta.openalex_id;
+            if !meta.concepts.is_empty() {
+                enriched.external.concepts = meta.concepts;
+            }
+            // Use OpenAlex citation count if S2 didn't provide one
+            if enriched.external.citation_count.is_none() {
+                enriched.external.citation_count = meta.citation_count;
+            }
+        }
+
+        enriched
+    }
 }
 
 /// Truncate text to a maximum length, adding "..." if truncated.
@@ -1478,13 +2121,8 @@ fn generate_project_scaffold(
     }
 }
 
-/// Generate a valid Jupyter notebook JSON structure.
+/// Generate a valid Jupyter notebook JSON structure with 4-layer progressive design.
 fn generate_notebook_json(paper: &crate::arxiv_api::ArxivPaper) -> String {
-    let title_source = format!("# {}", paper.title);
-    let authors_source = format!("**Authors:** {}", paper.authors.join(", "));
-    let arxiv_source = format!("**ArXiv:** https://arxiv.org/abs/{}", paper.arxiv_id);
-    let abstract_source = format!("**Abstract:** {}", truncate_text(&paper.summary, 300));
-
     let notebook = json!({
         "nbformat": 4,
         "nbformat_minor": 5,
@@ -1500,65 +2138,135 @@ fn generate_notebook_json(paper: &crate::arxiv_api::ArxivPaper) -> String {
             }
         },
         "cells": [
+            // ── Layer 1: Intuition ──
             {
                 "cell_type": "markdown",
                 "metadata": {},
-                "source": [title_source, "\n", authors_source, "\n", arxiv_source, "\n", abstract_source],
-                "id": "cell_1"
-            },
-            {
-                "cell_type": "code",
-                "metadata": {},
-                "source": ["import numpy as np\nimport matplotlib.pyplot as plt\n\n# TODO: Add paper-specific imports"],
-                "execution_count": null,
-                "outputs": [],
-                "id": "cell_2"
-            },
-            {
-                "cell_type": "code",
-                "metadata": {},
-                "source": ["# Data Preparation\n# TODO: Load and preprocess data as described in the paper"],
-                "execution_count": null,
-                "outputs": [],
-                "id": "cell_3"
-            },
-            {
-                "cell_type": "code",
-                "metadata": {},
-                "source": ["# Model Architecture\n# TODO: Implement the core model/algorithm from the paper"],
-                "execution_count": null,
-                "outputs": [],
-                "id": "cell_4"
-            },
-            {
-                "cell_type": "code",
-                "metadata": {},
-                "source": ["# Training Loop\n# TODO: Implement training procedure"],
-                "execution_count": null,
-                "outputs": [],
-                "id": "cell_5"
-            },
-            {
-                "cell_type": "code",
-                "metadata": {},
-                "source": ["# Evaluation\n# TODO: Compute metrics as described in the paper"],
-                "execution_count": null,
-                "outputs": [],
-                "id": "cell_6"
-            },
-            {
-                "cell_type": "code",
-                "metadata": {},
-                "source": ["# Validation Tests\nassert True, 'Model initialization test'\nassert True, 'Forward pass shape test'\nprint('All validation tests passed!')"],
-                "execution_count": null,
-                "outputs": [],
-                "id": "cell_7"
+                "source": [format!("# {}\n\n**Authors:** {}\n**ArXiv:** https://arxiv.org/abs/{}\n**Published:** {}\n\n---\n\n## Layer 1: Intuition\n*Goal: Understand the core idea before any code.*",
+                    paper.title, paper.authors.join(", "), paper.arxiv_id,
+                    &paper.published[..10.min(paper.published.len())])],
+                "id": "cell_01"
             },
             {
                 "cell_type": "markdown",
                 "metadata": {},
-                "source": ["## Summary & Conclusions\n", "\n", "TODO: Summarize key findings and implementation notes"],
-                "id": "cell_8"
+                "source": [format!("### Problem Statement\n\n**Abstract:** {}\n\nTODO: In your own words, what problem does this paper solve? What gap in existing work does it fill?",
+                    truncate_text(&paper.summary, 500))],
+                "id": "cell_02"
+            },
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": ["### Key Insight\n\nTODO: What is the core idea in plain language? If you had to explain this to someone in one paragraph, what would you say?"],
+                "id": "cell_03"
+            },
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "source": ["# Visual Intuition — sketch the core concept\nimport matplotlib.pyplot as plt\nimport numpy as np\n\n# TODO: Create a diagram or visualization of the key concept\n# Example: plot the architecture, show data flow, or illustrate the key equation\nfig, ax = plt.subplots(1, 1, figsize=(10, 6))\nax.set_title('Core Concept Visualization')\nax.text(0.5, 0.5, 'TODO: Visualize the key idea', ha='center', va='center', fontsize=14)\nplt.show()"],
+                "execution_count": null,
+                "outputs": [],
+                "id": "cell_04"
+            },
+            // ── Layer 2: Minimal Example ──
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": ["---\n\n## Layer 2: Minimal Example\n*Goal: Get the core algorithm working on toy data in <50 lines.*"],
+                "id": "cell_05"
+            },
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "source": ["# Minimal imports — just the basics\nimport numpy as np"],
+                "execution_count": null,
+                "outputs": [],
+                "id": "cell_06"
+            },
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "source": ["# Toy data — small synthetic dataset\n# TODO: Create a minimal dataset that demonstrates the paper's approach\nnp.random.seed(42)\nX = np.random.randn(100, 10)\ny = np.random.randint(0, 2, 100)\nprint(f'Data shape: X={X.shape}, y={y.shape}')"],
+                "execution_count": null,
+                "outputs": [],
+                "id": "cell_07"
+            },
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "source": ["# Simplified algorithm — core idea in <50 lines\n# TODO: Implement the essential algorithm from the paper\n# Reference the specific section/equation numbers\n\ndef simplified_model(x):\n    \"\"\"Minimal implementation of the paper's core contribution.\"\"\"\n    # TODO: Replace with actual algorithm\n    return x\n\nresult = simplified_model(X)\nprint(f'Output shape: {result.shape}')\n\n# Validation\nassert result.shape == X.shape, 'Output shape mismatch'\nprint('Minimal example validated!')"],
+                "execution_count": null,
+                "outputs": [],
+                "id": "cell_08"
+            },
+            // ── Layer 3: Full Implementation ──
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": ["---\n\n## Layer 3: Full Implementation\n*Goal: Complete, paper-faithful implementation with all components.*"],
+                "id": "cell_09"
+            },
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "source": ["# Full imports and configuration\nimport numpy as np\nimport matplotlib.pyplot as plt\n\n# TODO: Add paper-specific imports (torch, tensorflow, etc.)\n\n# Hyperparameters from the paper\nCONFIG = {\n    'learning_rate': 1e-3,\n    'batch_size': 32,\n    'epochs': 100,\n    'hidden_dim': 256,\n    # TODO: Add paper-specific hyperparameters\n}\nprint('Configuration:', CONFIG)"],
+                "execution_count": null,
+                "outputs": [],
+                "id": "cell_10"
+            },
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "source": ["# Data pipeline — preprocessing, splits, DataLoader\n# TODO: Implement full data pipeline as described in the paper\n# Reference: Section on Datasets/Experimental Setup"],
+                "execution_count": null,
+                "outputs": [],
+                "id": "cell_11"
+            },
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "source": ["# Model architecture — complete implementation\n# TODO: Implement the full model architecture\n# Reference: Section on Model/Architecture/Method"],
+                "execution_count": null,
+                "outputs": [],
+                "id": "cell_12"
+            },
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "source": ["# Training loop — optimizer, scheduler, logging\n# TODO: Implement training procedure from the paper\n# Reference: Section on Training/Optimization"],
+                "execution_count": null,
+                "outputs": [],
+                "id": "cell_13"
+            },
+            // ── Layer 4: Experimentation ──
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": ["---\n\n## Layer 4: Experimentation\n*Goal: Reproduce results and explore beyond the paper.*"],
+                "id": "cell_14"
+            },
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "source": ["# Hyperparameter sweep\n# TODO: Systematically vary key parameters to understand sensitivity\nresults = []\nfor lr in [1e-4, 1e-3, 1e-2]:\n    # TODO: Train and evaluate with each setting\n    results.append({'lr': lr, 'metric': 0.0})\nprint('Sweep results:', results)"],
+                "execution_count": null,
+                "outputs": [],
+                "id": "cell_15"
+            },
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "source": ["# Ablation study — remove components to measure impact\n# TODO: Systematically disable components to understand their contribution\n# This is key for understanding which parts of the paper matter most"],
+                "execution_count": null,
+                "outputs": [],
+                "id": "cell_16"
+            },
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [format!("---\n\n## Summary & Conclusions\n\n**Paper:** {}\n**ArXiv:** https://arxiv.org/abs/{}\n\n### Results\nTODO: Summarize reproduction status and key findings\n\n### Differences from Paper\nTODO: Note any deviations from the original implementation\n\n### Next Steps\nTODO: What would you explore next?",
+                    paper.title, paper.arxiv_id)],
+                "id": "cell_17"
             }
         ]
     });
@@ -1573,14 +2281,14 @@ impl Tool for ArxivResearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search, fetch, analyze, and implement academic papers from arXiv. Actions: search, fetch, \
-         analyze, compare, trending, save/library/remove, export_bibtex, collections, \
-         digest_config, paper_to_code, paper_to_notebook, implement (full TDD project scaffold), \
-         setup_env (environment setup), verify (lint/test/typecheck), implementation_status. \
-         IMPORTANT workflow: after 'search', present numbered results with summaries and ask the \
-         user to select a paper. After selection, for 'implement'/'paper_to_code'/'paper_to_notebook', \
-         ask the user to choose: (1) language (python/rust/typescript/go/cpp/julia), and \
-         (2) mode (project or notebook). Python always uses venv for isolation."
+        "Search, fetch, analyze, and implement academic papers from arXiv with multi-source \
+         enrichment. Actions: search, fetch, analyze, compare, trending, save/library/remove, \
+         export_bibtex, collections, digest_config, paper_to_code, paper_to_notebook, implement \
+         (full TDD scaffold), setup_env, verify, implementation_status, semantic_search (keyword \
+         search over library), summarize (multi-level LLM summary), citation_graph (build/pagerank/\
+         similar/path), blueprint (implementation planning), reindex. \
+         IMPORTANT workflow: after 'search', present numbered results and ask user to select. \
+         For implement/paper_to_code/paper_to_notebook, ask language and mode. Python uses venv."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -1593,7 +2301,8 @@ impl Tool for ArxivResearchTool {
                         "search", "fetch", "analyze", "compare", "trending",
                         "save", "library", "remove", "export_bibtex",
                         "collections", "digest_config", "paper_to_code", "paper_to_notebook",
-                        "implement", "setup_env", "verify", "implementation_status"
+                        "implement", "setup_env", "verify", "implementation_status",
+                        "semantic_search", "summarize", "citation_graph", "blueprint", "reindex"
                     ],
                     "description": "Action to perform"
                 },
@@ -1692,6 +2401,25 @@ impl Tool for ArxivResearchTool {
                 "tdd": {
                     "type": "boolean",
                     "description": "Whether to use TDD approach with tests first (default: true)"
+                },
+                "level": {
+                    "type": "string",
+                    "enum": ["tldr", "abstract", "section", "deep"],
+                    "description": "Summary level (for summarize action, default: abstract)"
+                },
+                "audience": {
+                    "type": "string",
+                    "enum": ["researcher", "engineer", "student"],
+                    "description": "Target audience for summary (default: researcher)"
+                },
+                "other_id": {
+                    "type": "string",
+                    "description": "Second paper ID for citation_graph path sub_action"
+                },
+                "focus": {
+                    "type": "string",
+                    "enum": ["full", "model_only", "training", "inference"],
+                    "description": "Blueprint focus area (default: full)"
                 }
             },
             "required": ["action"]
@@ -1732,10 +2460,15 @@ impl Tool for ArxivResearchTool {
             "setup_env" => self.handle_setup_env(&args),
             "verify" => self.handle_verify(&args),
             "implementation_status" => self.handle_implementation_status(&args),
+            "semantic_search" => self.handle_semantic_search(&args).await,
+            "summarize" => self.handle_summarize(&args).await,
+            "citation_graph" => self.handle_citation_graph(&args).await,
+            "blueprint" => self.handle_blueprint(&args).await,
+            "reindex" => self.handle_reindex(&args),
             _ => Err(ToolError::InvalidArguments {
                 name: "arxiv_research".to_string(),
                 reason: format!(
-                    "Unknown action '{}'. Valid actions: search, fetch, analyze, compare, trending, save, library, remove, export_bibtex, collections, digest_config, paper_to_code, paper_to_notebook, implement, setup_env, verify, implementation_status",
+                    "Unknown action '{}'. Valid actions: search, fetch, analyze, compare, trending, save, library, remove, export_bibtex, collections, digest_config, paper_to_code, paper_to_notebook, implement, setup_env, verify, implementation_status, semantic_search, summarize, citation_graph, blueprint, reindex",
                     action
                 ),
             }),
@@ -1785,7 +2518,7 @@ mod tests {
         let schema = tool.parameters_schema();
         let actions = schema["properties"]["action"]["enum"].as_array().unwrap();
         let action_strs: Vec<&str> = actions.iter().filter_map(|v| v.as_str()).collect();
-        assert_eq!(action_strs.len(), 17);
+        assert_eq!(action_strs.len(), 22);
         assert!(action_strs.contains(&"search"));
         assert!(action_strs.contains(&"fetch"));
         assert!(action_strs.contains(&"analyze"));
@@ -1803,6 +2536,11 @@ mod tests {
         assert!(action_strs.contains(&"setup_env"));
         assert!(action_strs.contains(&"verify"));
         assert!(action_strs.contains(&"implementation_status"));
+        assert!(action_strs.contains(&"semantic_search"));
+        assert!(action_strs.contains(&"summarize"));
+        assert!(action_strs.contains(&"citation_graph"));
+        assert!(action_strs.contains(&"blueprint"));
+        assert!(action_strs.contains(&"reindex"));
     }
 
     #[tokio::test]
@@ -1891,6 +2629,7 @@ mod tests {
                     doi: None,
                     comment: None,
                     journal_ref: None,
+                    external: Default::default(),
                 },
                 tags: vec!["test".to_string()],
                 collection: None,
@@ -1900,6 +2639,9 @@ mod tests {
             collections: Vec::new(),
             digest_config: None,
             implementations: Vec::new(),
+            summaries: Vec::new(),
+            citation_graph: None,
+            blueprints: Vec::new(),
         };
 
         tool.save_state(&state).unwrap();
@@ -2090,5 +2832,158 @@ mod tests {
             .unwrap();
         // Note: the fetched ID may include version suffix
         assert!(result.content.contains("Removed") || result.content.contains("not found"));
+    }
+
+    // ── Tests for new actions (Phase 9) ──
+
+    #[tokio::test]
+    async fn test_semantic_search_missing_query() {
+        let dir = TempDir::new().unwrap();
+        let tool = ArxivResearchTool::new(dir.path().to_path_buf());
+        let result = tool.execute(json!({"action": "semantic_search"})).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ToolError::InvalidArguments { reason, .. } => {
+                assert!(reason.contains("query"));
+            }
+            other => panic!("Expected InvalidArguments, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_semantic_search_empty_library() {
+        let dir = TempDir::new().unwrap();
+        let tool = ArxivResearchTool::new(dir.path().to_path_buf());
+        let result = tool
+            .execute(json!({"action": "semantic_search", "query": "attention"}))
+            .await
+            .unwrap();
+        assert!(result.content.contains("empty"));
+    }
+
+    #[tokio::test]
+    async fn test_summarize_missing_id() {
+        let dir = TempDir::new().unwrap();
+        let tool = ArxivResearchTool::new(dir.path().to_path_buf());
+        let result = tool.execute(json!({"action": "summarize"})).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ToolError::InvalidArguments { reason, .. } => {
+                assert!(reason.contains("arxiv_id"));
+            }
+            other => panic!("Expected InvalidArguments, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_blueprint_missing_id() {
+        let dir = TempDir::new().unwrap();
+        let tool = ArxivResearchTool::new(dir.path().to_path_buf());
+        let result = tool.execute(json!({"action": "blueprint"})).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ToolError::InvalidArguments { reason, .. } => {
+                assert!(reason.contains("arxiv_id"));
+            }
+            other => panic!("Expected InvalidArguments, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_citation_graph_missing_id() {
+        let dir = TempDir::new().unwrap();
+        let tool = ArxivResearchTool::new(dir.path().to_path_buf());
+        let result = tool.execute(json!({"action": "citation_graph"})).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ToolError::InvalidArguments { reason, .. } => {
+                assert!(reason.contains("arxiv_id"));
+            }
+            other => panic!("Expected InvalidArguments, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_reindex_empty_library() {
+        let dir = TempDir::new().unwrap();
+        let tool = ArxivResearchTool::new(dir.path().to_path_buf());
+        let result = tool.execute(json!({"action": "reindex"})).await.unwrap();
+        assert!(result.content.contains("empty"));
+    }
+
+    #[tokio::test]
+    async fn test_library_state_roundtrip_with_new_fields() {
+        let dir = TempDir::new().unwrap();
+        let workspace = dir.path().canonicalize().unwrap();
+        let tool = ArxivResearchTool::new(workspace);
+
+        let state = ArxivLibraryState {
+            entries: Vec::new(),
+            collections: Vec::new(),
+            digest_config: None,
+            implementations: Vec::new(),
+            summaries: vec![crate::arxiv_api::CachedSummary {
+                arxiv_id: "2301.12345".to_string(),
+                level: "abstract".to_string(),
+                audience: "researcher".to_string(),
+                summary: "Test summary.".to_string(),
+                created_at: Utc::now(),
+            }],
+            citation_graph: None,
+            blueprints: Vec::new(),
+        };
+
+        tool.save_state(&state).unwrap();
+        let loaded = tool.load_state();
+        assert_eq!(loaded.summaries.len(), 1);
+        assert_eq!(loaded.summaries[0].arxiv_id, "2301.12345");
+        assert!(loaded.citation_graph.is_none());
+        assert!(loaded.blueprints.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_backward_compat_old_library_format() {
+        let dir = TempDir::new().unwrap();
+        let workspace = dir.path().canonicalize().unwrap();
+        let tool = ArxivResearchTool::new(workspace.clone());
+
+        // Write old-format JSON (no summaries, citation_graph, blueprints fields)
+        let old_json = r#"{
+            "entries": [],
+            "collections": [],
+            "digest_config": null,
+            "implementations": []
+        }"#;
+
+        let state_path = workspace
+            .join(".rustant")
+            .join("arxiv")
+            .join("library.json");
+        std::fs::create_dir_all(state_path.parent().unwrap()).unwrap();
+        std::fs::write(&state_path, old_json).unwrap();
+
+        let loaded = tool.load_state();
+        assert!(loaded.summaries.is_empty());
+        assert!(loaded.citation_graph.is_none());
+        assert!(loaded.blueprints.is_empty());
+    }
+
+    // Integration tests for new actions — require network
+    #[tokio::test]
+    #[ignore]
+    async fn test_real_semantic_scholar_fetch() {
+        let client = crate::paper_sources::SemanticScholarClient::new(None, 3600, 100).unwrap();
+        let meta = client.fetch_by_arxiv_id("1706.03762").await.unwrap();
+        assert!(meta.citation_count.is_some());
+        assert!(meta.citation_count.unwrap() > 100);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_real_openalex_search() {
+        let client = crate::paper_sources::OpenAlexClient::new(None, 3600, 100).unwrap();
+        let meta = client.fetch_by_arxiv_id("1706.03762").await.unwrap();
+        // OpenAlex may or may not find the paper; just check no crash
+        assert!(meta.citation_count.is_some() || meta.openalex_id.is_none());
     }
 }

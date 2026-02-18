@@ -16,6 +16,7 @@ pub mod codebase_search;
 pub mod compress;
 pub mod content_engine;
 pub mod experiment_tracker;
+pub mod paper_sources;
 
 #[cfg(target_os = "macos")]
 pub mod contacts;
