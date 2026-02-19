@@ -1,84 +1,111 @@
-# Workflows
+# Workflows & Cron
 
-Workflows are declarative multi-step task definitions that chain tool executions together with input/output flow, conditional gates, and error handling.
+Workflows are declarative multi-step task definitions that chain tool executions with input/output flow, conditional gates, and error handling.
 
-## Built-in Workflows
+## Built-in Workflows (39+)
 
-```bash
-rustant workflow list               # List all available workflows
-rustant workflow show code-review   # Show workflow details
-rustant workflow run code-review --input path=src/main.rs
-```
+Rustant includes 39+ built-in workflow templates across categories:
 
-## Workflow Structure
+### Core Development
+| Template | Description |
+|----------|-------------|
+| `code_review` | Automated code review with quality analysis |
+| `refactor` | Guided refactoring with safety checks |
+| `test_generation` | Generate tests for existing code |
+| `documentation` | Auto-generate documentation |
+| `dependency_update` | Update and verify dependencies |
+| `pr_review` | Pull request review workflow |
+| `changelog` | Generate changelog entries |
+| `fullstack_verify` | Automated test/lint/build verification |
 
-A workflow consists of:
+### Security & Compliance
+| Template | Description |
+|----------|-------------|
+| `security_scan` | Full security scan (SAST, SCA, secrets) |
+| `compliance_audit` | Compliance framework evaluation |
+| `code_review_ai` | AI-assisted code review with security focus |
 
-- **Inputs** — Named parameters with types and optional/required flags
-- **Steps** — Ordered tool invocations with argument templates
-- **Gates** — Conditional checks between steps (approval required, condition expressions)
-- **Outputs** — Named results extracted from step outputs
+### SRE & Operations
+| Template | Description |
+|----------|-------------|
+| `incident_response` | SRE incident response steps |
+| `sre_deployment` | Deployment with risk assessment |
+| `alert_triage` | Alert investigation and triage |
+| `sre_health_review` | Infrastructure health review |
+| `deployment` | Standard deployment workflow |
+
+### Daily Productivity
+| Template | Description |
+|----------|-------------|
+| `morning_briefing` | Morning summary and planning |
+| `daily_briefing_full` | Comprehensive daily briefing |
+| `end_of_day_summary` | End of day review |
+| `email_triage` | Email classification and response |
+| `meeting_recorder` | Meeting recording and transcription |
+
+### Cognitive Extension
+| Template | Description |
+|----------|-------------|
+| `knowledge_graph` | Build concept maps |
+| `experiment_tracking` | Track hypotheses and experiments |
+| `code_analysis` | Architecture and pattern analysis |
+| `content_pipeline` | Content strategy and drafting |
+| `skill_development` | Skill assessment and learning plans |
+| `career_planning` | Career strategy and portfolio |
+| `system_monitoring` | Service health monitoring |
+| `life_planning` | Energy-aware scheduling |
+| `privacy_audit` | Data boundary management |
+| `self_improvement_loop` | Performance analysis and feedback |
+
+### macOS Automation
+| Template | Description |
+|----------|-------------|
+| `app_automation` | macOS app interaction workflows |
+| `dependency_audit` | Dependency security audit |
+| `arxiv_research` | Academic paper research pipeline |
+
+### ML/AI Engineering
+| Template | Description |
+|----------|-------------|
+| `ml_training` | End-to-end model training |
+| `rag_pipeline` | RAG pipeline setup and evaluation |
+| `model_evaluation` | Model benchmarking and comparison |
+| `data_pipeline` | Data processing workflow |
+| `llm_finetune` | LLM fine-tuning pipeline |
+| `research_paper` | Research methodology and analysis |
+| `model_deployment` | Model serving and monitoring |
+| `safety_audit` | AI safety evaluation |
 
 ## Running Workflows
 
-From the CLI:
 ```bash
-rustant workflow run <name> --input key1=value1 --input key2=value2
-```
+# CLI
+rustant workflow list
+rustant workflow show code-review
+rustant workflow run code-review --input path=src/main.rs
 
-From the REPL (inside an interactive session):
-```
-/workflow run <name> key1=value1 key2=value2
-```
-
-All workflow CLI subcommands are also available as REPL slash commands:
-```
-/workflow list                       # List available workflows
-/workflow show <name>                # Show workflow details
-/workflow run <name> [key=val ...]   # Run a workflow
-/workflow runs                       # List active runs
-/workflow status <run_id>            # Check run status
-/workflow cancel <run_id>            # Cancel a running workflow
+# REPL
+/workflow list
+/workflow show <name>
+/workflow run <name> key=value
+/workflow runs
+/workflow status <run_id>
+/workflow cancel <run_id>
 ```
 
 ## Automatic Workflow Routing
 
-The agent can automatically detect when your task matches a built-in workflow. For example, saying "do a security scan of this repo" will trigger the agent to suggest running the `security_scan` workflow.
-
-Supported pattern matches include:
-- "security scan" / "security audit" / "vulnerability" → `security_scan`
+The agent automatically detects when tasks match built-in workflows:
+- "security scan" → `security_scan`
 - "code review" → `code_review`
-- "refactor" → `refactor`
-- "generate tests" / "write tests" → `test_generation`
-- "generate docs" / "write docs" → `documentation`
-- "update dependencies" → `dependency_update`
+- "generate tests" → `test_generation`
 - "deploy" → `deployment`
-- "pr review" / "pull request review" → `pr_review`
-- "changelog" / "release notes" → `changelog`
+- "update dependencies" → `dependency_update`
+- "knowledge graph" → `knowledge_graph`
 - "email triage" → `email_triage`
-- "knowledge graph" / "concept mapping" → `knowledge_graph`
-- "experiment" / "hypothesis" → `experiment_tracking`
-- "code analysis" / "architecture review" → `code_analysis`
-- "content strategy" / "blog pipeline" → `content_pipeline`
-- "skill assessment" / "learning plan" → `skill_development`
-- "career planning" / "portfolio" → `career_planning`
-- "service monitoring" / "health check" → `system_monitoring`
-- "daily planning" / "productivity" → `life_planning`
-- "privacy audit" / "data management" → `privacy_audit`
-- "self improvement" / "performance analysis" → `self_improvement_loop`
-
-## Managing Runs
-
-```bash
-rustant workflow runs                # List active runs
-rustant workflow status <run_id>     # Check run status
-rustant workflow resume <run_id>     # Resume a paused run
-rustant workflow cancel <run_id>     # Cancel a running workflow
-```
+- And many more pattern matches...
 
 ## Cron Scheduling
-
-Schedule workflows or tasks to run on a cron schedule:
 
 ```bash
 rustant cron list                                          # List cron jobs
@@ -87,14 +114,12 @@ rustant cron run daily-report                              # Manual trigger
 rustant cron disable daily-report
 rustant cron enable daily-report
 rustant cron remove daily-report
+rustant cron jobs                                          # List background jobs
 ```
 
-## Background Jobs
+Cron state persists to `.rustant/cron/state.json` with atomic write pattern.
 
-```bash
-rustant cron jobs                    # List background jobs
-rustant cron cancel-job <job_id>     # Cancel a job
-```
+Cron expressions use 7-field format: `second minute hour day-of-month month day-of-week year`.
 
 ## Configuration
 
@@ -109,5 +134,3 @@ schedule = "0 0 9 * * * *"
 task = "Summarize yesterday's git commits"
 enabled = true
 ```
-
-Cron expressions follow the 7-field format: `second minute hour day-of-month month day-of-week year`.

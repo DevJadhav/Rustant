@@ -1,6 +1,6 @@
-# Channels
+# Channels & Messaging
 
-Rustant supports 12 messaging channels for receiving and responding to messages. Each channel implements the unified `Channel` trait.
+Rustant supports 13 messaging channels for receiving and responding to messages. Each channel implements the unified `Channel` trait.
 
 ## Supported Channels
 
@@ -18,6 +18,7 @@ Rustant supports 12 messaging channels for receiving and responding to messages.
 | Teams | OAuth | `[channels.teams]` |
 | iMessage | AppleScript (macOS) | `[channels.imessage]` |
 | WebChat | Gateway WebSocket | `[channels.webchat]` |
+| Webhook | HTTP endpoint | `[channels.webhook]` |
 
 ## Channel Management
 
@@ -46,59 +47,63 @@ rustant channel slack send general "Hello from Rustant!"
 rustant channel slack history general -n 20
 rustant channel slack channels
 rustant channel slack users
-rustant channel slack info C04M40V9B61
-rustant channel slack react C04M40V9B61 1770007692.977549 thumbsup
 rustant channel slack dm U0AC521V7UK "Direct message"
 rustant channel slack thread C04M40V9B61 1770007692.977549 "Thread reply"
-rustant channel slack join C04M40V9B61
+rustant channel slack react C04M40V9B61 1770007692.977549 thumbsup
 rustant channel slack files
 rustant channel slack team
 rustant channel slack groups
 ```
 
-## Configuration Example
+## Channel Intelligence
+
+Rustant automatically processes incoming messages with an intelligent classification and response pipeline:
+
+- **Two-Tier Classification** — Fast heuristic pattern matching (<1ms) + LLM-based semantic classification for ambiguous messages, with caching
+- **Auto-Reply** — Modes: `full_auto`, `auto_with_approval`, `draft_only`, `disabled`. Safety-gated through SafetyGuardian
+- **Channel Digests** — Periodic summaries (hourly/daily/weekly) with highlights and action items
+- **Smart Scheduling** — Automatic follow-up reminders with ICS calendar export
+- **Email Intelligence** — Auto-categorization (NeedsReply, ActionRequired, FYI, Newsletter, Automated), sender profile tracking
+- **Quiet Hours** — Suppress all auto-actions during configured time windows
 
 ```toml
-[channels.slack]
+[intelligence]
 enabled = true
-auth_method = "oauth"
 
-[channels.telegram]
-enabled = true
-bot_token = "your-bot-token"
-allowed_chat_ids = [123456789]
+[intelligence.defaults]
+auto_reply = "full_auto"
+digest = "daily"
+smart_scheduling = true
 
-[channels.email]
-enabled = true
-auth_method = "oauth"
-poll_interval_secs = 60
+[intelligence.channels.email]
+auto_reply = "draft_only"
+digest = "daily"
+
+[intelligence.channels.slack]
+auto_reply = "full_auto"
+digest = "hourly"
 ```
 
-## Channel Agent Bridge
-
-When channels are enabled, incoming messages are routed to the agent via the `ChannelAgentBridge`. The bridge normalizes messages from all platforms into a unified format, routes them to the agent, and sends responses back through the originating channel.
+REPL commands: `/digest`, `/digest history`, `/replies`, `/replies approve <id>`, `/reminders`, `/intelligence on/off`.
 
 ## Change Data Capture (CDC)
 
-CDC provides stateful, cursor-based polling for all channels with automatic reply-chain detection and communication style learning.
+CDC provides stateful, cursor-based polling with automatic reply-chain detection and communication style learning.
 
-### How It Works
-
-1. **Cursor Tracking** — Each channel maintains a cursor (e.g., Slack timestamp, IMAP UID) to track which messages have been processed. No duplicate processing.
-2. **Reply-Chain Detection** — The agent tracks message IDs it has sent. Incoming replies to these messages receive priority boost.
-3. **Style Learning** — Per-sender communication profiles (formality, emoji usage, greeting patterns, topics) are built over time and fed into long-term memory for adaptive responses.
+1. **Cursor Tracking** — Per-channel cursors (Slack timestamp, IMAP UID, etc.) persisted to `.rustant/cdc/state.json`
+2. **Reply-Chain Detection** — Agent tracks sent message IDs; replies receive priority boost
+3. **Style Learning** — Per-sender profiles (formality, emoji, greetings, topics) fed into long-term memory
 
 ### CDC Commands
 
 ```
-/cdc status              # Show polling state and per-channel intervals
-/cdc on                  # Enable CDC globally
-/cdc off                 # Disable CDC globally
-/cdc interval slack 30   # Set Slack polling to 30 seconds
-/cdc enable email        # Enable CDC for email
-/cdc disable imessage    # Disable CDC for iMessage
-/cdc cursors             # Show current cursor positions
-/cdc style               # Show learned communication style profiles
+/cdc status              # Show polling state
+/cdc on / off            # Enable/disable globally
+/cdc interval slack 30   # Set per-channel interval
+/cdc enable email        # Enable CDC for channel
+/cdc disable imessage    # Disable CDC for channel
+/cdc cursors             # Show cursor positions
+/cdc style               # Show learned styles
 ```
 
 ### CDC Configuration
@@ -117,14 +122,33 @@ email = 300
 
 ## Credential Security
 
-Channel tokens support the `SecretRef` format for secure storage:
+Channel tokens support `SecretRef` format:
 
-- **Keychain**: `bot_token_ref = "keychain:channel:slack:bot_token"` — stored in OS keychain
-- **Environment**: `bot_token_ref = "env:SLACK_BOT_TOKEN"` — resolved from environment variable
+- **Keychain**: `bot_token_ref = "keychain:channel:slack:bot_token"`
+- **Environment**: `bot_token_ref = "env:SLACK_BOT_TOKEN"`
 - **Inline** (deprecated): plain string values still work but emit warnings
 
-Migrate existing plaintext tokens to keychain:
+Migrate plaintext tokens: `rustant setup migrate-secrets`
 
-```bash
-rustant setup migrate-secrets
+## Configuration Example
+
+```toml
+[channels.slack]
+enabled = true
+auth_method = "oauth"
+
+[channels.telegram]
+enabled = true
+bot_token = "env:TELEGRAM_BOT_TOKEN"
+allowed_chat_ids = [123456789]
+
+[channels.email]
+enabled = true
+auth_method = "oauth"
+poll_interval_secs = 60
+
+[channels.webhook]
+enabled = true
+port = 8080
+secret = "keychain:channel:webhook:secret"
 ```

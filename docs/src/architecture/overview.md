@@ -4,46 +4,51 @@
 
 ```
 rustant/
-  rustant-core/    — Core library (agent, brain, memory, safety, channels, gateway)
-  rustant-tools/   — Built-in tool implementations
-  rustant-cli/     — Binary entry point (CLI, REPL, TUI)
-  rustant-mcp/     — Model Context Protocol server and client
-  rustant-plugins/ — Plugin loading and hook system
-  rustant-ui/      — Tauri dashboard UI
+  rustant-core/      — Agent orchestrator, brain, memory, safety, channels, gateway, personas, policy
+  rustant-tools/     — 72 built-in tools (45 base + 3 iMessage + 24 macOS native)
+  rustant-cli/       — Binary entry point (CLI, REPL, 110+ slash commands)
+  rustant-mcp/       — Model Context Protocol server and client
+  rustant-plugins/   — Plugin loading and hook system
+  rustant-security/  — Security scanning, code review, compliance, incident response (33 tools)
+  rustant-ml/        — ML/AI engineering (54 tools)
+  rustant-ui/        — Tauri dashboard UI
 ```
 
-Dependency flow: `rustant-cli` depends on all other crates. `rustant-mcp` depends on `rustant-tools`. `rustant-plugins` depends on `rustant-core`.
+Dependency flow:
+
+```
+rustant-cli → rustant-core + rustant-tools + rustant-mcp + rustant-security + rustant-ml
+rustant-mcp → rustant-core + rustant-tools + rustant-security
+rustant-security → rustant-core + rustant-tools
+rustant-ml → rustant-core + rustant-tools
+rustant-plugins → rustant-core
+```
 
 ## Agent Loop
 
 The core of Rustant is the Think-Act-Observe (ReAct) loop in `Agent`:
 
-1. **Think** — Send conversation context to the LLM via `Brain`, receive tool calls or text response. A `DecisionExplanation` is built for each tool call decision, capturing reasoning and confidence.
-2. **Act** — Execute tool calls through `ToolRegistry`, gated by `SafetyGuardian` approval. Tool arguments are parsed into typed `ActionDetails` (FileRead, FileWrite, ShellCommand, GitOperation) to produce rich `ApprovalContext` with reasoning, alternatives, consequences, and reversibility info. Budget checks emit user-facing warnings via `BudgetSeverity::Warning`/`Exceeded`. Safety denials and contract violations also produce `DecisionExplanation` entries.
-3. **Observe** — Feed tool results back into memory. Successful tool results (10-5000 chars) are recorded as `Fact` entries in long-term memory for cross-session learning. User denials are recorded as `Correction` entries. Repeat until task complete or max iterations.
+1. **Think** — Send conversation context to the LLM via `Brain`, receive tool calls or text response. A `DecisionExplanation` is built for each tool call decision, capturing reasoning and confidence. Context health is checked (Warning at 70%, Critical at 90%).
+2. **Act** — Execute tool calls through `ToolRegistry`, gated by `SafetyGuardian` approval. Tool arguments are parsed into typed `ActionDetails` to produce rich `ApprovalContext` with reasoning, alternatives, consequences, and reversibility info. Budget warnings with per-tool breakdown.
+3. **Observe** — Feed tool results back into memory. Successful results (10-5000 chars) are recorded as `Fact` entries in long-term memory for cross-session learning. User denials are recorded as `Correction` entries. Auto-compression checked after each observation.
 
-## Decision Transparency
+### Auto-Routing
 
-Every significant action point in the agent loop emits a `DecisionExplanation` via the `AgentCallback` interface:
-
-- **Tool calls** (single and multipart) — reasoning about which tool to use and why
-- **Safety denials** — explanation of why a tool was blocked by the safety guardian
-- **User denials** — records the user's decision to deny a proposed action
-- **Contract violations** — explanation when a safety contract invariant is violated
-
-Budget tracking surfaces real-time cost information to users through `BudgetSeverity` events (Warning and Exceeded), displayed in both CLI (colored terminal output) and TUI interfaces.
+`auto_correct_tool_call()` reroutes wrong tools based on task context (e.g., `document_read` → `macos_clipboard`). `tool_routing_hint()` and `workflow_routing_hint()` inject system messages guiding the LLM to correct tools and workflows.
 
 ## Brain / LLM Providers
 
-`Brain` abstracts LLM interaction behind the `LlmProvider` trait. Implementations:
+`Brain` abstracts LLM interaction behind the `LlmProvider` trait:
 
 - **OpenAI-compatible** — Also covers Azure OpenAI, Ollama, vLLM
-- **Anthropic** — Claude models
-- **Gemini** — Google's Gemini models (includes `fix_gemini_turns()` post-processing for API sequencing: merges consecutive same-role turns, fixes functionResponse names, filters empty parts, ensures user-first ordering). Uses 120s request timeout, 10s connect timeout, and true incremental SSE streaming.
+- **Anthropic** — Claude models with prompt caching (90% read discount)
+- **Gemini** — Google's models with `fix_gemini_turns()` post-processing, 120s timeout, incremental SSE streaming
 - **FailoverProvider** — Circuit-breaker failover across multiple providers
-- **PlanningCouncil** — Multi-model deliberation (inspired by [karpathy/llm-council](https://github.com/karpathy/llm-council)): three-stage protocol with parallel query, anonymous peer review, and chairman synthesis. Supports 2+ providers (cloud or Ollama).
+- **PlanningCouncil** — Multi-model deliberation: parallel query, anonymous peer review, chairman synthesis
 
-Token counting uses tiktoken-rs for accurate context window management. Centralized model pricing in `models.rs` covers OpenAI, Anthropic, Gemini, and Ollama models.
+Token counting uses tiktoken-rs. Centralized model pricing in `models.rs`. Prompt caching support for Anthropic, OpenAI, and Gemini with provider-specific discount rates.
+
+Retry: `RetryConfig` with exponential backoff + jitter. 3 retries, 1s initial, 2x multiplier, 60s max.
 
 ## Tool System
 
@@ -60,26 +65,46 @@ trait Tool: Send + Sync {
 }
 ```
 
-39 built-in tools across 6 categories: core (file_read, file_list, file_search, file_write, file_patch, git_status, git_diff, git_commit, shell_exec, echo, datetime, calculator, web_search, web_fetch, document_read, smart_edit, codebase_search), productivity (organizer, compress, http_api, template, pdf, pomodoro, inbox, relationships, finance, flashcards, travel), research (arxiv_research), and cognitive extension (knowledge_graph, experiment_tracker, code_intelligence, content_engine, skill_tracker, career_intel, system_monitor, life_planner, privacy_manager, self_improvement).
+**159+ tools** across categories: core (17), productivity (11), research (1 with 22 actions), cognitive extension (10), macOS native (24), iMessage (3), SRE/DevOps (5), fullstack (5), security (33), ML (54).
 
-The `ToolRegistry` handles registration, lookup, and invocation with configurable timeouts.
+**Dual registration**: `ToolRegistry` (rustant-tools) holds all tools; `Agent` (rustant-core) has its own `HashMap<String, RegisteredTool>`. Bridged via `register_agent_tools_from_registry()` using `Arc<ToolRegistry>` as fallback.
 
-## Gateway
+## Safety & Trust
 
-The WebSocket gateway (built on axum) enables remote access:
+Five-layer defense: input validation, authorization, sandboxing, output validation, audit trail.
 
-- Task submission and status tracking
-- Real-time event streaming
-- Channel message bridging
-- Node coordination for multi-agent setups
-- REST API endpoints for dashboard integration
+- **Approval modes**: Safe (default), Cautious, Paranoid, Yolo
+- **Progressive trust**: Shadow → DryRun → Assisted → Supervised → SelectiveAutonomy
+- **Circuit breaker**: Sliding-window failure detection (Closed/Open/HalfOpen)
+- **Policy engine**: `.rustant/policies.toml` with predicates and tool scoping
+- **Rollback registry**: Tracks reversible actions with undo info
 
-## Multi-Agent
+See [Safety & Trust](safety.md) for details.
 
-The multi-agent system supports:
+## Memory System
 
-- Agent spawning with parent-child relationships
-- `MessageBus` for inter-agent communication
-- `AgentRouter` for message routing
-- `AgentOrchestrator` for lifecycle management
-- `ResourceLimits` for isolation between agents
+Three tiers: working (context window), short-term (sliding window + pinning), long-term (persistent facts/corrections). Capacity: max_facts=10,000, max_corrections=1,000 with FIFO eviction.
+
+See [Memory System](memory.md) for details.
+
+## Personas
+
+8 adaptive personas: Architect, SecurityGuardian, MlopsEngineer, General, IncidentCommander, ObservabilityExpert, ReliabilityEngineer, DeploymentEngineer. Auto-detect from task, manual override via `/persona set`. Evolution based on task history.
+
+## Codebase Intelligence
+
+- **AST Engine** — Tree-sitter parsing with feature-gated grammars (Rust, Python, JS/TS, Go, Java) + regex fallback
+- **RepoMap** — `CodeGraph` with PageRank for context-aware file ranking
+- **Hydration** — Token-budgeted context assembly combining RepoMap ranking
+- **Verification** — Automated test/lint/build verification after code changes
+
+## Other Subsystems
+
+- **Gateway** — WebSocket server (axum) for remote access with TLS and REST API
+- **Multi-Agent** — Agent spawning, `MessageBus`, `AgentRouter`, `AgentOrchestrator`, `ResourceLimits`
+- **MCP** — JSON-RPC 2.0 with stdio/channel/process transports
+- **Session Manager** — Persistent sessions with auto-save, resume, search, tagging
+- **Project Detection** — Auto-detect language/framework/CI, generate safety whitelists
+- **Project Indexer** — `.gitignore`-aware walking, multi-language signature extraction, incremental re-indexing
+- **Anomaly Detection** — ZScore, IQR, MovingAverage methods for metric analysis
+- **Evaluation** — `TraceEvaluator` with loop detection, safety false positive, cost efficiency evaluators

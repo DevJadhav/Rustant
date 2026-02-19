@@ -7,18 +7,12 @@ Rustant uses a layered configuration system. Settings are applied in this order 
 3. Environment variables
 4. CLI arguments
 
-## Config File
-
-Generate a default config file:
+## Quick Setup
 
 ```bash
-rustant config init
-```
-
-Show the current effective configuration:
-
-```bash
-rustant config show
+rustant config init   # Create default config file
+rustant config show   # Show current effective configuration
+rustant setup         # Interactive wizard
 ```
 
 ## Key Sections
@@ -27,11 +21,20 @@ rustant config show
 
 ```toml
 [llm]
-provider = "openai"        # openai, anthropic, gemini
+provider = "openai"        # openai, anthropic, gemini, azure, ollama, vllm
 model = "gpt-4o"           # Model name
+api_key_env = "OPENAI_API_KEY"
 auth_method = "env"        # env, keyring, oauth
 temperature = 0.7
 max_tokens = 4096
+use_streaming = true       # Enable streaming responses
+
+[llm.retry]
+max_retries = 3
+initial_backoff_ms = 1000
+max_backoff_ms = 60000
+backoff_multiplier = 2.0
+jitter = true
 ```
 
 ### `[safety]` — Security Settings
@@ -42,34 +45,73 @@ approval_mode = "safe"     # safe, cautious, paranoid, yolo
 max_iterations = 50
 denied_paths = ["/etc/shadow", "/root"]
 denied_commands = ["rm -rf /", "mkfs"]
+default_timeout_secs = 60
 ```
 
 ### `[memory]` — Memory Configuration
 
 ```toml
 [memory]
-working_limit = 20
-short_term_limit = 100
-long_term_enabled = true
-auto_summarize = true
+window_size = 20           # Messages in working memory
+enable_persistence = true  # Persistent long-term memory
 ```
 
-### `[ui]` — Interface Settings
+### `[channels]` — Messaging Channels
+
+See [Channels & Messaging](../user-guide/channels.md) for per-channel setup.
 
 ```toml
-[ui]
-use_tui = true
-theme = "dark"
-show_thinking = true
+[channels.slack]
+enabled = true
+bot_token_ref = "keychain:channel:slack:bot_token"
+
+[channels.email]
+enabled = true
+auth_method = "oauth"
+poll_interval_secs = 60
 ```
 
-### `[tools]` — Tool Configuration
+### `[intelligence]` — Channel Intelligence
 
 ```toml
-[tools]
-timeout_secs = 30
-max_file_size_bytes = 10485760  # 10 MB
-shell = "bash"
+[intelligence]
+enabled = true
+
+[intelligence.defaults]
+auto_reply = "full_auto"   # full_auto, auto_with_approval, draft_only, disabled
+digest = "daily"           # off, hourly, daily, weekly
+smart_scheduling = true
+```
+
+### `[cdc]` — Change Data Capture
+
+```toml
+[cdc]
+enabled = true
+default_interval_secs = 60
+sent_record_ttl_days = 7
+style_fact_threshold = 50
+
+[cdc.channel_intervals]
+slack = 30
+email = 300
+```
+
+### `[search]` — Search Engine
+
+```toml
+[search]
+enabled = true
+index_dir = ".rustant/search_index"
+max_results = 20
+```
+
+### `[embeddings]` — Embedding Providers
+
+```toml
+[embeddings]
+provider = "local"         # local, fast, openai, ollama
+model = ""                 # Model name (for openai/ollama)
 ```
 
 ### `[gateway]` — WebSocket Gateway
@@ -83,52 +125,32 @@ auth_tokens = []
 max_connections = 50
 ```
 
-### `[llm.retry]` — API Rate Limiting
+### `[voice]` — Voice Settings
 
 ```toml
-[llm.retry]
-max_retries = 3              # Max retry attempts for transient errors
-initial_backoff_ms = 1000    # Initial backoff delay (1 second)
-max_backoff_ms = 60000       # Maximum backoff delay (60 seconds)
-backoff_multiplier = 2.0     # Exponential backoff multiplier
-jitter = true                # Add randomized jitter to prevent thundering herd
-```
-
-### `[channels]` — Messaging Channels
-
-See the [Channels](../user-guide/channels.md) guide for per-channel configuration.
-
-Channel tokens can use `SecretRef` format for secure credential resolution:
-- `"keychain:<account>"` — resolve from OS keychain
-- `"env:<VAR_NAME>"` — resolve from environment variable
-- Plain string — inline plaintext (deprecated, use `rustant setup migrate-secrets`)
-
-### `[cdc]` — Change Data Capture
-
-```toml
-[cdc]
-enabled = true                  # Enable CDC background polling
-default_interval_secs = 60     # Default polling interval
-sent_record_ttl_days = 7       # Sent message record retention
-style_fact_threshold = 50      # Messages before generating style facts
-
-[cdc.channel_intervals]
-slack = 30                      # Poll Slack every 30 seconds
-email = 300                     # Poll email every 5 minutes
-
-[cdc.channel_enabled]
-slack = true
-email = true
-imessage = false               # Disable iMessage CDC
-```
-
-### `[search]` — Search Engine
-
-```toml
-[search]
+[voice]
 enabled = true
-index_dir = ".rustant/search_index"
-max_results = 20
+stt_provider = "openai"
+tts_voice = "alloy"       # alloy, echo, fable, onyx, nova, shimmer
+```
+
+### `[council]` — LLM Council
+
+```toml
+[council]
+enabled = false
+voting_strategy = "chairman_synthesis"  # chairman_synthesis, highest_score, majority_consensus
+enable_peer_review = true
+max_member_tokens = 4096
+```
+
+### `[personas]` — Adaptive Personas
+
+```toml
+[personas]
+enabled = true
+auto_detect = true
+default = "general"
 ```
 
 ### `[scheduler]` — Cron Jobs
@@ -145,9 +167,52 @@ task = "Summarize yesterday's git commits"
 enabled = true
 ```
 
+### `[feature_flags]` — Runtime Feature Flags
+
+```toml
+[feature_flags]
+prompt_caching = true
+semantic_search = true
+dynamic_personas = false
+evaluation = true
+security_scanning = false
+compliance_engine = false
+incident_response = false
+sre_mode = false
+progressive_trust = false
+global_circuit_breaker = true
+```
+
+### `[sre]` — SRE Mode Configuration
+
+```toml
+[sre]
+enabled = false
+
+[sre.prometheus]
+url = "http://localhost:9090"
+
+[sre.oncall]
+provider = "local"         # local, pagerduty
+
+[sre.daemon]
+enabled = false
+port = 18791
+```
+
+### `[[mcp_servers]]` — External MCP Servers
+
+```toml
+[[mcp_servers]]
+name = "chrome-devtools"
+command = "npx"
+args = ["-y", "chrome-devtools-mcp@latest"]
+auto_connect = true
+```
+
 ## Environment Variables
 
-Any config value can be overridden via environment variables using the prefix `RUSTANT_`:
+Any config value can be overridden via `RUSTANT_` prefix with double underscores for nesting:
 
 ```bash
 export RUSTANT_LLM__PROVIDER=anthropic
@@ -155,7 +220,11 @@ export RUSTANT_LLM__MODEL=claude-sonnet-4-20250514
 export RUSTANT_SAFETY__APPROVAL_MODE=cautious
 ```
 
-Double underscores (`__`) represent nested config sections.
+Common API key variables:
+- `OPENAI_API_KEY` — OpenAI
+- `ANTHROPIC_API_KEY` — Anthropic
+- `GEMINI_API_KEY` — Google Gemini
+- `AZURE_OPENAI_API_KEY` — Azure OpenAI
 
 ## CLI Overrides
 
@@ -165,3 +234,5 @@ rustant --workspace /path/to/project --config custom-config.toml
 rustant --verbose    # Debug logging
 rustant --quiet      # Errors only
 ```
+
+See the [Configuration Reference](../reference/configuration.md) for exhaustive documentation of all settings.

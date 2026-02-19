@@ -15,6 +15,7 @@ Thank you for your interest in contributing to Rustant! This guide will help you
    rustup toolchain install stable
    rustup component add rustfmt clippy
    ```
+   Or simply rely on `rust-toolchain.toml` (pins Rust 1.88.0 with components).
 
 3. **Configure git for tests:**
    ```bash
@@ -26,7 +27,7 @@ Thank you for your interest in contributing to Rustant! This guide will help you
 4. **Build and test:**
    ```bash
    cargo build --workspace
-   cargo test --workspace
+   cargo test --workspace --exclude rustant-ui
    ```
 
 ## Pull Request Process
@@ -36,8 +37,8 @@ Thank you for your interest in contributing to Rustant! This guide will help you
 3. Ensure all checks pass:
    ```bash
    cargo fmt --all -- --check
-   cargo clippy --workspace --all-targets -- -D warnings
-   cargo test --workspace
+   cargo clippy --workspace --all-targets --exclude rustant-ui -- -D warnings
+   cargo test --workspace --exclude rustant-ui
    ```
 4. Write a clear PR description explaining what changed and why.
 5. Submit the PR against `main`.
@@ -55,19 +56,60 @@ Thank you for your interest in contributing to Rustant! This guide will help you
 
 | Crate | Purpose |
 |-------|---------|
-| `rustant-core` | Core library |
-| `rustant-tools` | Built-in tools |
-| `rustant-cli` | CLI binary (published as `rustant` on crates.io) |
-| `rustant-mcp` | MCP protocol |
-| `rustant-plugins` | Plugin system |
-| `rustant-ui` | Dashboard UI |
+| `rustant-core` | Agent orchestrator, brain, memory, safety, channels, gateway, personas, policy, anomaly detection |
+| `rustant-tools` | 72 built-in tools (45 base + 3 iMessage + 24 macOS native) + 5 fullstack tools |
+| `rustant-cli` | CLI binary (published as `rustant` on crates.io), REPL, 110+ slash commands |
+| `rustant-mcp` | MCP protocol server and client (JSON-RPC 2.0) |
+| `rustant-plugins` | Plugin system (native .so/.dll/.dylib + WASM via wasmi) |
+| `rustant-security` | Security scanning (SAST/SCA/secrets), code review, compliance, incident response (33 tools) |
+| `rustant-ml` | ML/AI engineering: data, training, zoo, LLM ops, RAG, eval, inference, research (54 tools) |
+| `rustant-ui` | Tauri-based desktop dashboard |
+
+Dependency flow: `rustant-cli` → core + tools + mcp + security + ml. `rustant-mcp` → core + tools + security. `rustant-security` → core + tools. `rustant-ml` → core + tools.
 
 ## Adding a New Tool
 
 1. Create a new file in `rustant-tools/src/` implementing the `Tool` trait.
 2. Register it in `rustant-tools/src/lib.rs` via `register_builtin_tools()`.
 3. Add tests for the tool.
-4. Update documentation if the tool is user-facing.
+4. Update the tool count assertions in:
+   - `rustant-tools/src/lib.rs`
+   - `rustant-mcp/src/lib.rs`
+   - `rustant-mcp/src/handlers.rs`
+   - `rustant-mcp/src/client.rs`
+5. Add `parse_action_details()` handling in `rustant-core/src/agent.rs`.
+6. If the tool has a risk level above read-only, add `ActionDetails` handling in `rustant-core/src/safety.rs`.
+
+### Dual Tool Registration Pattern
+
+Rustant uses a dual tool registration pattern:
+- `ToolRegistry` in `rustant-tools` holds all tool definitions
+- `Agent` in `rustant-core` has its own `HashMap<String, RegisteredTool>`
+- `register_agent_tools_from_registry()` bridges these using `Arc<ToolRegistry>` as a generic fallback executor
+
+When adding tools, ensure they are registered in the `ToolRegistry` — the bridge function handles the rest.
+
+### Testing Patterns
+
+- `ToolOutput::text()` is a **constructor**, not a getter. Access content via `.content` field.
+- `TempDir::new()` on macOS creates symlinked paths. Always use `dir.path().canonicalize().unwrap()` as the workspace.
+- Tests using `AgentConfig::default()` must set `config.llm.use_streaming = false` for deterministic behavior.
+- `Message.content` is a `Content` enum, not `Option<String>`. Use `.as_text()` to get `Option<&str>`.
+
+## Adding a Security Tool
+
+1. Create a tool wrapper in `rustant-security/src/tools/` using the existing patterns.
+2. Register it in `rustant-security/src/lib.rs` via `register_security_tools()`.
+3. Add `ActionDetails` variant handling in `rustant-core/src/safety.rs` if needed.
+4. Add `TraceEventKind` variant in `rustant-core/src/audit.rs` if it produces auditable events.
+5. Update security tool count assertions.
+
+## Adding an ML Tool
+
+1. Create a tool wrapper in `rustant-ml/src/tools/` using the `ml_tool!` macro.
+2. Register it in `rustant-ml/src/lib.rs` via `register_ml_tools()`.
+3. Add `ActionDetails` variant handling if the tool modifies external state.
+4. Update ML tool count assertions.
 
 ## Adding a New Channel
 
@@ -75,6 +117,15 @@ Thank you for your interest in contributing to Rustant! This guide will help you
 2. Implement the `Channel` trait.
 3. Register it in `rustant-core/src/channels/mod.rs` via `build_channel_manager()`.
 4. Add integration tests.
+
+## Common Pitfalls
+
+- When changing config defaults, update ALL test assertions (unit, integration, AND MCP tests).
+- macOS-only code must use `#[cfg(target_os = "macos")]`.
+- AppleScript strings must go through `sanitize_applescript_string()` for injection prevention.
+- Workflow gate types: use `approval_required` not `approval` (parser rejects the short form).
+- `ToolError::InvalidArguments` has fields `{ name, reason }` not `{ message }`.
+- OpenAI API: never inject system messages between tool_call and tool_result.
 
 ## Reporting Issues
 

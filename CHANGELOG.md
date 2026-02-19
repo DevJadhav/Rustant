@@ -9,59 +9,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **API Rate Limiting & Retry** — Exponential backoff with jitter for all LLM providers (OpenAI, Anthropic, Gemini). `RetryConfig` with configurable max retries (default 3), initial backoff (1s), max backoff (60s), and multiplier (2x). Retryable errors: 429 rate limited, timeouts, connection failures, streaming errors. Non-retryable: auth failures, parse errors. ArXiv API enforces 3-second minimum delay between requests. Slack tool handles `Retry-After` headers
-- **Secret Reference System** — `SecretRef` type for secure credential resolution via OS keychain (`keychain:<account>`), environment variables (`env:<VAR>`), or inline plaintext (deprecated). `migrate_channel_secrets()` utility moves plaintext tokens to keychain. `rustant setup migrate-secrets` CLI command. Backward compatible with deprecation warnings for inline secrets
-- **CDC — Change Data Capture** — Stateful channel polling with cursor-based tracking, reply-chain detection, and communication style learning. `CdcState` persists per-channel cursors to `.rustant/cdc/state.json`. `CdcProcessor` coordinates classify → priority boost → auto-reply → style tracking pipeline. `CommunicationStyleTracker` builds per-sender style profiles (formality, emoji, greetings, topics) and generates `Fact` entries for long-term memory. `/cdc` slash command with status, on/off, interval, enable/disable per channel, cursors, and style subcommands. Enabled by default with 60s polling interval
-- **ArXiv Implementation Pipeline** — 4 new actions for `arxiv_research` tool: `implement` (full TDD project scaffold), `setup_env` (language-specific environment setup), `verify` (lint/test/typecheck commands), `implementation_status` (lifecycle tracking). Supports Python (venv), Rust, TypeScript, Go, C++, Julia with environment isolation. Enhanced `paper_to_code` generates concrete `ProjectScaffold` with dependencies, test stubs (TDD first), implementation stubs, and README. Enhanced `paper_to_notebook` generates actual `.ipynb` JSON with 8-cell structure
-- **LLM Council** — Multi-model deliberation feature inspired by [karpathy/llm-council](https://github.com/karpathy/llm-council). Three-stage protocol: (1) parallel query to all council members, (2) optional anonymous peer review, (3) chairman synthesis. Supports 3+ cloud providers (OpenAI, Anthropic, Gemini) or 3+ Ollama models. Auto-detection of available providers via env vars and Ollama API. New `/council` slash command with `status`, `detect`, and direct question subcommands. Configured via `[council]` in config.toml with `VotingStrategy` (chairman_synthesis, highest_score, majority_consensus), per-member weights, and cost controls
-- **TUI status bar metrics** — Bottom status bar now shows live token count and cost (`12.4k/128k | $0.0342`) alongside input mode hints
-- **TUI sidebar iteration tracking** — Sidebar iteration counter (`Iteration: 1/50`) updates in real-time during agent execution via new `on_iteration_start` callback
-- **Voice direct audio playback** — `/voice speak "text"` plays audio through speakers via macOS `afplay` or Linux `aplay` instead of saving to a temp file
-- **Voice wake word mode** — `rustant --voice` activates "hey rustant" wake word listening: records mic, detects wake word via STT, transcribes commands, processes through agent, speaks response via TTS
-- **Chrome DevTools MCP integration** — External MCP server support via `[[mcp_servers]]` config; `ProcessTransport` spawns and communicates with child processes over NDJSON stdin/stdout; Chrome DevTools MCP (`npx -y chrome-devtools-mcp@latest`) provides 26 browser automation tools (click, navigate, evaluate_script, performance traces, network inspection, screenshots)
-- **External MCP server config** — `ExternalMcpServerConfig` struct in `AgentConfig` for configuring external MCP servers with command, args, env, working directory, and auto-connect toggle
+- **rustant-security crate** — Dedicated security scanning and compliance engine with 33 tool wrappers. Phase 1: unified `Finding` schema, `SecretRedactor` (60+ patterns + Shannon entropy), tree-sitter AST engine (30+ languages), `DependencyGraph` (petgraph) with lockfile parsers (Cargo, npm, yarn, pip, poetry), multi-model `SecurityConsensus`, `MemoryBridge`. Phase 2: code review engine with diff analysis, quality scoring, dead code detection, duplication detection, tech debt tracking, autofix suggestions. Phase 3: SAST (15+ rules), secrets scanner, SCA scanner, container security (Trivy + Dockerfile linter), IAC scanner (12 rules), supply chain typosquatting detection. Phase 4: license scanning (SPDX), policy engine (gate/warn/inform), SBOM generation (CycloneDX/CSV/diff), multi-dimensional risk scoring, VEX support, 6 built-in compliance frameworks, evidence collection. Phase 5: incident detection with MITRE ATT&CK mapping, alert correlation engine with priority scoring, playbook registry with trigger matching, log parsers (6+ formats incl. K8s audit + CloudTrail), action registry with 8 predefined actions, learning engine with hotspot tracking and confidence updates. Reports: SARIF 2.1.0, Markdown, OCSF, HTML, PDF, analytics with MTTR/trends
+- **rustant-ml crate** — ML/AI engineering crate with 54 tool wrappers via `ml_tool!` macro. Four foundational pillars: Safety, Security, Transparency, Interpretability. Phase 0: runtime, config, error handling. Phase 1: data sources, schema, transforms, validation, storage, lineage + feature engineering. Phase 2: experiment tracking, training runner, metrics, checkpoints, hyperparameter sweeps, callbacks, reproducibility. Phase 3: model zoo with registry, cards, download, convert, benchmark, provenance + classical/neural algorithms with evaluation and explainability. Phase 4: LLM fine-tuning, dataset preparation, quantization, evaluation harness, adapter management, alignment, red teaming. Phase 5: RAG pipeline with ingestion, chunking, retrieval, reranking, context assembly, grounding, diagnostics, evaluation, collections. Phase 6: LLM judge, error analysis, domain evaluations, test generators, CI integration, traces, benchmarks, inter-annotator agreement. Phase 7: inference backends (Ollama, vLLM, llama.cpp, Candle), model registry, format conversion, serving, streaming, profiler. Phase 8: research methodology, comparison frameworks, literature review, datasets, reproducibility, bibliography, notebooks, synthesis. Phase 9: AI safety, security, transparency, interpretability pillar modules. Phase 10: 13 tool wrapper modules, 16 slash commands, 8 workflow templates, agent routing
+- **SRE/DevOps tools** (5 new cross-platform tools) — `alert_manager` (create, list, acknowledge, silence, escalate, correlate, group, resolve, history, rules), `deployment_intel` (risk assessment, canary analysis, rollback checks, pre/post-deploy verification), `prometheus` (query, query_range, series, labels, alerts, targets, rules, silence), `kubernetes` (pods, services, deployments, events, logs, describe, top, rollout), `oncall` (schedule, incidents, escalation, PagerDuty integration)
+- **Fullstack development tools** (5 new tools) — `scaffold` (project scaffolding with framework detection), `dev_server` (development server management), `database` (migration and query tools), `test_runner` (multi-framework test execution), `lint` (multi-language linting)
+- **Project templates** (6 new templates) — `react_vite`, `nextjs`, `fastapi`, `rust_axum`, `sveltekit`, `express` in `TemplateLibrary` with alias support and variable substitution
+- **Screen automation tools** (5 new macOS tools) — `macos_gui_scripting` (8 actions for native app UI interaction via System Events), `macos_accessibility` (4 actions for read-only accessibility tree inspection), `macos_screen_analyze` (2 actions for OCR via macOS Vision framework), `macos_contacts` (4 actions for Contacts.app management), `macos_safari` (6 actions for Safari browser automation)
+- **Productivity macOS tools** (3 new tools) — `homekit` (3 actions for smart home control via Shortcuts CLI), `voice_tool` (TTS via macOS `say` command), `photos` (Photos.app automation)
+- **Progressive Trust** — 5-level `TrustLevel` system: Shadow (suggest only), DryRun (dry-run execution), Assisted (execute with approval), Supervised (execute with monitoring), SelectiveAutonomy (autonomous for trusted operations). Escalation requires minimum successful actions and max error rate. Demotion on destructive failures or circuit breaker trips. `/trust` REPL command for level management
+- **Global Circuit Breaker** — Sliding-window circuit breaker with Closed/Open/HalfOpen states. Opens on 3 consecutive failures or 50% failure rate (5-minute window). HalfOpen allows only read-only actions. `/circuit status|open|close|reset` REPL command
+- **Policy Engine** — Custom policies via `.rustant/policies.toml` with predicates: TimeWindow, MaxBlastRadius, MinTrustLevel, RequiresConsensus, MaxConcurrentDeployments. Scoped to specific tools and actions
+- **Anomaly Detection** — Statistical anomaly detection with `DetectionMethod` enum (ZScore, IQR, MovingAverage). `AnomalyDetector.detect()` returns score (0.0-1.0), expected/actual values, expected range. Used by system_monitor and alert correlation
+- **AST engine** — Tree-sitter-based AST parsing with feature-gated grammars for Rust, Python, JavaScript, TypeScript, Go, Java. Regex fallback for unsupported languages. Symbol extraction and cyclomatic complexity calculation
+- **RepoMap** — `CodeGraph` with PageRank ranking on `petgraph::DiGraph` for codebase navigation and context-aware file ranking
+- **Hydration pipeline** — `HydrationPipeline` combining RepoMap ranking with token-budgeted context assembly. Auto-skips projects with fewer than 10 code files
+- **Verification loop** — `VerificationConfig` with max_fix_attempts=3 for automated test/lint/build verification after code changes. `fullstack_verify` workflow template
+- **Adaptive Personas** — 8 personas (Architect, SecurityGuardian, MlopsEngineer, General, IncidentCommander, ObservabilityExpert, ReliabilityEngineer, DeploymentEngineer). `PersonaResolver` maps task classification to persona. Auto-detect from task, manual override via `/persona set`. `PersonaEvolver` proposes refinements based on task history. Persisted metrics to `.rustant/personas/metrics.json`
+- **Prompt Caching** — Provider-level cache support for Anthropic (90% read discount, 25% write premium), OpenAI (50% read discount), and Gemini (75% read discount). `TokenUsage` extended with `cache_read_tokens` and `cache_creation_tokens`. `/cache` shows state, `/cost` shows cache metrics
+- **Embeddings** — Pluggable `Embedder` trait with 4 providers: `LocalEmbedder` (128-dim hash TF-IDF), `FastEmbedder` (384-dim, feature-gated), `OpenAiEmbedder` (1536-dim), `OllamaEmbedder`. Factory: `create_embedder(config)`
+- **Evaluation Framework** — `TraceEvaluator` trait with built-in evaluators: `LoopDetectionEvaluator`, `SafetyFalsePositiveEvaluator`, `CostEfficiencyEvaluator`. `EvaluationPipeline` produces reports with precision/recall/F1
+- **SRE slash commands** — `/incident` (create/list/show/escalate/resolve/postmortem), `/deploy` (status/risk/rollback/canary/history), `/alerts` (list/ack/silence/correlate/rules), `/oncall` (who/schedule/escalate/override), `/circuit` (status/open/close/reset), `/trust` (level/history/promote/demote)
+- **Security slash commands** — `/scan`, `/autofix`, `/quality`, `/debt`, `/complexity`, `/findings`, `/license`, `/sbom`, `/risk`, `/compliance`, `/triage`
+- **ML slash commands** — 16 new commands in AiEngineer category including `/data`, `/train`, `/model`, `/finetune`, `/rag`, `/evaluate`, `/infer`, `/mlresearch`, and more
+- **Development slash commands** — `/init`, `/preview`, `/db`, `/test`, `/lint`, `/deps`, `/verify`, `/repomap`, `/symbols`, `/refs`
+- **Webhook channel** — 13th messaging channel for generic webhook integration
+- **Cron persistence** — Cron scheduler state now persists to `.rustant/cron/state.json` with atomic write pattern. `load_scheduler()` reads state file first, falls back to config
+- **Rollback Registry** — `RollbackEntry` tracks reversible actions with undo info. `RollbackRegistry` (max 100 entries) supports find_by_tool, find_reversible, mark_rolled_back
+- **ArXiv multi-source search** — Paper discovery from arXiv API, Semantic Scholar, and OpenAlex with response caching. Rate limiting per source. Citation graph with PageRank, co-citation analysis, bibliographic coupling
+- **Gemini function_response fix** — `function_response.response` must be a JSON object; non-object values now wrapped in `{"result": value}`
+- **API Rate Limiting & Retry** — Exponential backoff with jitter for all LLM providers. `RetryConfig` with configurable max retries (default 3), initial backoff (1s), max backoff (60s), and multiplier (2x). Retryable: 429, timeouts, connection failures, streaming errors
+- **Secret Reference System** — `SecretRef` type for secure credential resolution via OS keychain, env vars, or inline plaintext (deprecated). `rustant setup migrate-secrets` CLI command
+- **CDC — Change Data Capture** — Stateful channel polling with cursor-based tracking, reply-chain detection, and communication style learning. `/cdc` slash command suite
+- **ArXiv Implementation Pipeline** — `implement`, `setup_env`, `verify`, `implementation_status` actions with 6-language environment isolation
+- **LLM Council** — Multi-model deliberation with parallel query, anonymous peer review, chairman synthesis. `/council` slash command
+- **Voice direct audio playback** — `/voice speak` plays through speakers via `afplay`/`aplay`
+- **Voice wake word mode** — `rustant --voice` activates wake word listening
+- **Chrome DevTools MCP integration** — External MCP server support via `[[mcp_servers]]` config with 26 browser tools
+- **Feature flags** — 10 runtime feature flags: `prompt_caching`, `semantic_search`, `dynamic_personas`, `evaluation`, `security_scanning`, `compliance_engine`, `incident_response`, `sre_mode`, `progressive_trust`, `global_circuit_breaker`
 
 ### Fixed
 
-- **TUI character deletion bug** — Backspace and Delete in TUI input no longer add phantom empty lines. Added explicit handlers with `sanitize_after_delete()` post-processing to strip trailing empty lines from `tui-textarea` internal state
-- **Gemini provider hang** — Added 120s HTTP timeout and 10s connect timeout to the Gemini HTTP client (was zero timeout causing indefinite hangs). Replaced buffered SSE streaming (`response.text().await`) with true incremental streaming via `response.bytes_stream()` + line-by-line parsing, so tokens appear immediately instead of after the entire response completes. Added `warn!()` logging for malformed SSE JSON chunks (previously silently swallowed). Defensive `fix_gemini_turns()` now filters out turns with empty `parts` arrays to prevent Gemini API 400 errors
+- **Gemini provider hang** — 120s HTTP timeout + 10s connect timeout. True incremental SSE streaming. `warn!()` for malformed chunks. Empty `parts` filtering
+- **Gemini API sequencing** — `fix_gemini_turns()` merges consecutive same-role turns, fixes `functionResponse.name`, ensures user-first ordering
+- **Tool registration gap** — All macOS native tools now executable (was: visible to LLM but returned `None`). Fixed via `register_agent_tools_from_registry()` with `Arc<ToolRegistry>` fallback
+- **Cron ephemeral state** — Scheduler now persists to disk; previously each CLI invocation created ephemeral in-memory scheduler
 
 ### Changed
 
-- **Safety transparency dashboard** — `ExplanationPanel` TUI widget (Ctrl+E) showing decision reasoning chains, considered alternatives, confidence scores, and context factors with a navigable timeline
-- **Streaming progress pipeline** — `ProgressBar` TUI widget with spinner animation, tool name, elapsed time, completion gauge, and scrollable shell output
-- **Multi-agent task board** — `TaskBoard` TUI widget (Ctrl+T) showing spawned agent status, roles, current tool, elapsed time, tool call counts, and token usage with detail panel
-- **Project context auto-indexer** — `ProjectIndexer` walks workspace respecting .gitignore, indexes file paths, content summaries, and function signatures (Rust, Python, JS/TS, Go, Java, Ruby, C/C++) into hybrid search engine
-- **Codebase search tool** — `codebase_search` tool for natural language search over indexed project files, functions, and content
-- **Zero-config quick start** — `rustant init` command with auto-detection for 8 project types (Rust, Node, Python, Go, Java, Ruby, C#, C++), framework detection, safety whitelist generation, and example tasks
-- **Web search tool** — `web_search` tool using DuckDuckGo instant answers (privacy-first, no API key required)
-- **Web fetch tool** — `web_fetch` tool to fetch URLs and extract readable text with HTML tag stripping and entity decoding
-- **Document read tool** — `document_read` tool for reading local documents (txt, md, csv, json, yaml, toml, xml, html, and 20+ formats)
-- **Smart edit tool** — `smart_edit` tool with 4 location strategies (exact match, line numbers, function patterns, fuzzy similarity), edit operations (replace, insert, delete), unified diff preview, and auto-checkpoint
-- **Session management** — `SessionManager` with auto-save, resume by name or ID (fuzzy prefix match), list/delete/rename sessions, and task continuation prompts
-- **Session REPL commands** — `/resume`, `/sessions`, `/session save|load|list` commands for session management in interactive mode
-- **Message pinning** — `/pin` and `/unpin` in short-term memory; pinned messages survive context compression and are always included in the context window
-- **Daily workflow templates** — 4 new built-in workflows: `morning_briefing`, `pr_review`, `dependency_audit`, `changelog` (12 total)
-- **Workflows REPL command** — `/workflows` command listing all available workflow templates with descriptions, inputs, and usage examples
-- **Slash command registry** — `CommandRegistry` with 24 commands across 5 categories (Session, Agent, Safety, Development, System), alias resolution, tab completion, and Levenshtein-based "did you mean?" suggestions for typos
-- **Agent clarification mechanism** — `ask_user` pseudo-tool lets the LLM ask clarifying questions mid-task; routed through `AgentCallback::on_clarification_request` to REPL (stdin) and TUI (input panel) with oneshot reply channels
-- **`/compact`** — Manually compress conversation context via `smart_fallback_summary`, freeing memory while preserving structure
-- **`/status`** — Show agent status, current goal, iteration count, token usage, and cost
-- **`/config [key] [value]`** — View or modify runtime configuration (model, approval_mode, max_iterations)
-- **`/doctor`** — Run diagnostic checks on workspace, git, config, LLM provider, tools, memory, and audit chain
-- **`/permissions [mode]`** — View or set approval mode at runtime (safe/cautious/paranoid/yolo)
-- **`/undo`** — Undo last file operation via git checkpoint (ported from TUI to REPL)
-- **`/diff`** — Show file changes since last checkpoint
-- **`/review`** — Review all session file changes across checkpoints
-- **Categorized `/help`** — Replaced hardcoded help text with registry-generated categorized output including aliases
-- **Gemini API sequencing fix** — `fix_gemini_turns()` post-processing merges consecutive same-role turns, fixes `functionResponse.name` to match `functionCall.name`, and ensures user-first message ordering (fixes HTTP 400 errors with multi-tool calls)
-- **CLI-REPL command parity** — 9 CLI subcommands now available as REPL slash commands: `/channel` (`/ch`), `/workflow` (`/wf`), `/voice`, `/browser`, `/auth`, `/canvas`, `/skill`, `/plugin`, `/update`
-- **Workflow routing** — `workflow_routing_hint()` in agent automatically detects task patterns matching built-in workflows (security_scan, code_review, test_generation, etc.) and guides the LLM to run or accomplish them. Platform-independent, works on all OSes
-- **Workflow catalog in system prompt** — Agent now knows about all 17 built-in workflow templates and can route tasks to them
-- **`/verbose` toggle** — `/verbose` (alias `/v`) toggles verbose output in REPL, controlling visibility of tool execution details, status changes, and decision explanations
-- **TUI as default** — `use_tui: true` is now the default; use `--no-tui` for simple REPL
-- **Interactive REPL input** — `repl_input.rs` provides line editing, history, and tab completion
-- **Centralized model pricing** — `model_pricing()` in `models.rs` covers OpenAI, Anthropic, Gemini, and Ollama models
+- **Slash command registry expanded** — 110+ commands across 9 categories (General, Agent, Memory, Safety, Session, Debug, Workflow, Channel, Sre, Development, AiEngineer)
+- **Workflow templates expanded** — 39+ built-in templates (was 12), grouped by category
+- **Tool count** — 72 base tools on macOS (45 base + 3 iMessage + 24 macOS native), plus 33 security tools and 54 ML tools registered separately
+- **Workspace expanded** — 8 crates (added `rustant-security` and `rustant-ml`)
+
+### Removed
+
+- **TUI mode** — Removed ratatui-based TUI interface. REPL is now the sole interactive mode. All TUI-specific widgets (ExplanationPanel, TaskBoard, ProgressBar) and keybindings (Ctrl+E/T/S/D) removed. `--tui` flag removed
 
 ## [1.0.0] - 2026-02-02
 

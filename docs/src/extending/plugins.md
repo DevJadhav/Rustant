@@ -37,11 +37,7 @@ Plugins can intercept agent behavior at seven hook points:
 | `OnSessionEnd` | When a session ends |
 | `OnError` | When an error occurs |
 
-Each hook returns a `HookResult`:
-
-- `Continue` — Allow execution to proceed
-- `Block(reason)` — Stop execution with a reason
-- `Modified` — Continue with modified context
+Each hook returns a `HookResult`: `Continue`, `Block(reason)`, or `Modified`.
 
 ## Creating a Native Plugin
 
@@ -61,16 +57,7 @@ pub extern "C" fn rustant_plugin_create() -> Box<dyn Plugin> {
 
 ## Plugin Security
 
-Plugins declare required capabilities:
-
-- `ToolRegistration` — Can register new tools
-- `HookRegistration` — Can register hooks
-- `FileSystemAccess` — Can access the filesystem
-- `NetworkAccess` — Can make network requests
-- `ShellExecution` — Can execute shell commands
-- `SecretAccess` — Can access stored credentials
-
-The `PluginSecurityValidator` verifies that plugins only request capabilities they need and blocks plugins that exceed their declared scope.
+Plugins declare required capabilities: `ToolRegistration`, `HookRegistration`, `FileSystemAccess`, `NetworkAccess`, `ShellExecution`, `SecretAccess`. The `PluginSecurityValidator` blocks plugins exceeding their declared scope.
 
 ## CLI
 
