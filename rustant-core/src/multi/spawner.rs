@@ -70,7 +70,7 @@ impl AgentSpawner {
         parent_id: Uuid,
     ) -> Result<Uuid, String> {
         if !self.contexts.contains_key(&parent_id) {
-            return Err(format!("Parent agent {} not found", parent_id));
+            return Err(format!("Parent agent {parent_id} not found"));
         }
         if self.contexts.len() >= self.config.max_agents {
             return Err(format!(
@@ -173,7 +173,7 @@ impl AgentSpawner {
         let ctx = self
             .contexts
             .get_mut(agent_id)
-            .ok_or_else(|| format!("Agent {} not found", agent_id))?;
+            .ok_or_else(|| format!("Agent {agent_id} not found"))?;
         ctx.status = status;
         Ok(())
     }

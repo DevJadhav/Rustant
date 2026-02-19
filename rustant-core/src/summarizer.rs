@@ -103,9 +103,9 @@ fn build_summarization_prompt(messages: &[Message]) -> String {
             Content::Text { text } => text.clone(),
             Content::ToolCall {
                 name, arguments, ..
-            } => format!("[Tool Call: {} ({})]", name, arguments),
+            } => format!("[Tool Call: {name} ({arguments})]"),
             Content::ToolResult { output, .. } => {
-                format!("[Tool Result: {}]", output)
+                format!("[Tool Result: {output}]")
             }
             Content::MultiPart { parts } => parts
                 .iter()
@@ -118,15 +118,15 @@ fn build_summarization_prompt(messages: &[Message]) -> String {
                 })
                 .collect::<Vec<_>>()
                 .join(" "),
-            Content::Thinking { thinking, .. } => format!("[Thinking: {}]", thinking),
-            Content::Image { media_type, .. } => format!("[Image: {}]", media_type),
-            Content::Citation { cited_text, .. } => format!("[Citation: {}]", cited_text),
+            Content::Thinking { thinking, .. } => format!("[Thinking: {thinking}]"),
+            Content::Image { media_type, .. } => format!("[Image: {media_type}]"),
+            Content::Citation { cited_text, .. } => format!("[Citation: {cited_text}]"),
             Content::CodeExecution { code, .. } => {
                 format!("[Code: {}]", &code[..code.len().min(100)])
             }
-            Content::SearchResult { query, .. } => format!("[Search: {}]", query),
+            Content::SearchResult { query, .. } => format!("[Search: {query}]"),
         };
-        prompt.push_str(&format!("{}: {}\n", role, text));
+        prompt.push_str(&format!("{role}: {text}\n"));
     }
 
     prompt.push_str("\nProvide a concise summary (3-5 sentences) capturing the essential context:");
@@ -306,7 +306,7 @@ pub fn smart_fallback_summary(messages: &[Message], max_chars: usize) -> String 
     for msg in messages.iter() {
         match &msg.content {
             Content::ToolCall { name, .. } => {
-                parts.push(format!("[Tool: {}]", name));
+                parts.push(format!("[Tool: {name}]"));
             }
             Content::ToolResult { output, .. } => {
                 parts.push(format!("[Result: {}]", truncate_str(output, 80)));
@@ -441,13 +441,11 @@ mod tests {
 
         assert!(
             summary.contains("file_read"),
-            "Summary should contain tool name: {}",
-            summary
+            "Summary should contain tool name: {summary}"
         );
         assert!(
             summary.contains("fix the bug"),
-            "Summary should contain first message: {}",
-            summary
+            "Summary should contain first message: {summary}"
         );
     }
 
@@ -464,13 +462,11 @@ mod tests {
 
         assert!(
             summary.contains("initial request"),
-            "Summary should contain first message: {}",
-            summary
+            "Summary should contain first message: {summary}"
         );
         assert!(
             summary.contains("token handling"),
-            "Summary should contain last message: {}",
-            summary
+            "Summary should contain last message: {summary}"
         );
     }
 

@@ -108,8 +108,7 @@ impl AgentOrchestrator {
             let current = self.tool_call_count(agent_id);
             if current >= max_calls {
                 return Err(format!(
-                    "Agent {} exceeded max_tool_calls limit ({}/{})",
-                    agent_id, current, max_calls
+                    "Agent {agent_id} exceeded max_tool_calls limit ({current}/{max_calls})"
                 ));
             }
         }
@@ -251,7 +250,7 @@ mod tests {
             description: &str,
             _args: &HashMap<String, String>,
         ) -> Result<String, String> {
-            Ok(format!("echo: {}", description))
+            Ok(format!("echo: {description}"))
         }
     }
 

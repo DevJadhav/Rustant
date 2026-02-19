@@ -77,14 +77,12 @@ impl UpdateChecker {
     /// Check if an update is available.
     pub async fn check(&self) -> Result<UpdateCheckResult, UpdateError> {
         let client = reqwest::Client::builder()
-            .user_agent(format!("rustant/{}", CURRENT_VERSION))
+            .user_agent(format!("rustant/{CURRENT_VERSION}"))
             .build()
             .map_err(|e| UpdateError::NetworkError(e.to_string()))?;
 
-        let url = format!(
-            "https://api.github.com/repos/{}/{}/releases/latest",
-            GITHUB_OWNER, GITHUB_REPO
-        );
+        let url =
+            format!("https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest");
 
         let response = client
             .get(&url)
@@ -256,6 +254,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::const_is_empty)]
     fn test_current_version_defined() {
         assert!(!CURRENT_VERSION.is_empty());
     }

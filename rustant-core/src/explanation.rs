@@ -86,6 +86,34 @@ pub enum DecisionType {
         /// The recovery strategy chosen.
         strategy: String,
     },
+    /// The agent selected a model for inference or fine-tuning.
+    ModelSelection {
+        /// The model that was selected.
+        selected_model: String,
+        /// The task type the model is being used for.
+        task_type: String,
+    },
+    /// The agent chose a retrieval strategy for RAG or search.
+    RetrievalStrategy {
+        /// The retrieval strategy chosen.
+        strategy: String,
+        /// Rationale for the strategy choice.
+        rationale: String,
+    },
+    /// The agent overrode a safety rule with justification.
+    SafetyOverride {
+        /// The safety rule that was overridden.
+        rule: String,
+        /// Reason for the override.
+        override_reason: String,
+    },
+    /// The agent made an evaluation judgement via LLM-as-Judge or similar.
+    EvaluationJudgement {
+        /// The evaluator that produced the judgement.
+        evaluator: String,
+        /// The trace ID being evaluated.
+        trace_id: Uuid,
+    },
 }
 
 /// A single step in the agent's reasoning chain.
@@ -462,7 +490,7 @@ mod tests {
             DecisionType::ToolSelection { selected_tool } => {
                 assert_eq!(selected_tool, "read_file");
             }
-            other => panic!("Expected ToolSelection, got {:?}", other),
+            other => panic!("Expected ToolSelection, got {other:?}"),
         }
         assert_eq!(explanation.reasoning_chain.len(), 2);
         assert_eq!(explanation.considered_alternatives.len(), 1);
@@ -485,7 +513,7 @@ mod tests {
                 assert_eq!(error, "connection reset");
                 assert_eq!(strategy, "exponential backoff");
             }
-            other => panic!("Expected ErrorRecovery, got {:?}", other),
+            other => panic!("Expected ErrorRecovery, got {other:?}"),
         }
         assert!((explanation.confidence - 0.7).abs() < f32::EPSILON);
     }
@@ -550,7 +578,7 @@ mod tests {
                 assert_eq!(sub_tasks.len(), 3);
                 assert_eq!(sub_tasks[0], "lint");
             }
-            other => panic!("Expected TaskDecomposition, got {:?}", other),
+            other => panic!("Expected TaskDecomposition, got {other:?}"),
         }
 
         for (i, step) in explanation.reasoning_chain.iter().enumerate() {

@@ -708,7 +708,7 @@ impl LlmProvider for MockLlmProvider {
         let response = self.complete(request).await?;
         if let Some(text) = response.message.content.as_text() {
             for word in text.split_whitespace() {
-                let _ = tx.send(StreamEvent::Token(format!("{} ", word))).await;
+                let _ = tx.send(StreamEvent::Token(format!("{word} "))).await;
             }
         }
         let _ = tx
@@ -779,8 +779,13 @@ Workflows (structured multi-step templates — run via shell_exec "rustant workf
   end_of_day_summary, app_automation, email_triage, arxiv_research,
   knowledge_graph, experiment_tracking, code_analysis, content_pipeline,
   skill_development, career_planning, system_monitoring, life_planning,
-  privacy_audit, self_improvement_loop
+  privacy_audit, self_improvement_loop, compliance_audit
 When a user asks for one of these tasks by name or description, execute the workflow or accomplish it step by step.
+
+Security & compliance workflows:
+  - security_scan: Run comprehensive security analysis (SAST, SCA, secrets, IaC, container, supply chain)
+  - code_review: AI-powered code review with quality metrics and fix suggestions
+  - compliance_audit: Generate compliance evidence (security scan + license check + SBOM + risk score + compliance report)
 
 Security rules:
 - Never execute commands that could damage the system or leak credentials
@@ -1424,14 +1429,12 @@ mod tests {
         // Should be a meaningful positive number
         assert!(
             token_count > 40,
-            "Two tool definitions should count as >40 tokens, got {}",
-            token_count
+            "Two tool definitions should count as >40 tokens, got {token_count}"
         );
         // Sanity: shouldn't be absurdly large
         assert!(
             token_count < 500,
-            "Two simple tool definitions should be <500 tokens, got {}",
-            token_count
+            "Two simple tool definitions should be <500 tokens, got {token_count}"
         );
     }
 
@@ -1457,9 +1460,7 @@ mod tests {
         let with_tools = brain.estimate_tokens_with_tools(&messages, Some(&tools));
         assert!(
             with_tools > without_tools,
-            "Token estimate with tools ({}) should be greater than without ({})",
-            with_tools,
-            without_tools
+            "Token estimate with tools ({with_tools}) should be greater than without ({without_tools})"
         );
     }
 }

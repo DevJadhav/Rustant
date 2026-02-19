@@ -120,7 +120,7 @@ pub async fn fetch_anthropic_models(api_key: &str) -> Result<Vec<ModelInfo>, Llm
         .send()
         .await
         .map_err(|e| LlmError::ApiRequest {
-            message: format!("Failed to fetch Anthropic models: {}", e),
+            message: format!("Failed to fetch Anthropic models: {e}"),
         })?;
 
     let status = response.status();
@@ -134,13 +134,13 @@ pub async fn fetch_anthropic_models(api_key: &str) -> Result<Vec<ModelInfo>, Llm
                 retry_after_secs: 5,
             },
             _ => LlmError::ApiRequest {
-                message: format!("HTTP {} fetching Anthropic models: {}", status, body_text),
+                message: format!("HTTP {status} fetching Anthropic models: {body_text}"),
             },
         });
     }
 
     let body: Value = response.json().await.map_err(|e| LlmError::ResponseParse {
-        message: format!("Invalid JSON in Anthropic models response: {}", e),
+        message: format!("Invalid JSON in Anthropic models response: {e}"),
     })?;
 
     parse_anthropic_models_response(&body)
@@ -224,7 +224,7 @@ pub fn gemini_known_models() -> Vec<ModelInfo> {
 /// Falls back to `gemini_known_models()` on failure.
 pub async fn fetch_gemini_models(api_key: &str) -> Result<Vec<ModelInfo>, LlmError> {
     let base_url = "https://generativelanguage.googleapis.com/v1beta";
-    let url = format!("{}/models?key={}&pageSize=1000", base_url, api_key);
+    let url = format!("{base_url}/models?key={api_key}&pageSize=1000");
 
     debug!(
         url = "GET /v1beta/models",
@@ -237,7 +237,7 @@ pub async fn fetch_gemini_models(api_key: &str) -> Result<Vec<ModelInfo>, LlmErr
         .send()
         .await
         .map_err(|e| LlmError::ApiRequest {
-            message: format!("Failed to fetch Gemini models: {}", e),
+            message: format!("Failed to fetch Gemini models: {e}"),
         })?;
 
     let status = response.status();
@@ -251,13 +251,13 @@ pub async fn fetch_gemini_models(api_key: &str) -> Result<Vec<ModelInfo>, LlmErr
                 retry_after_secs: 5,
             },
             _ => LlmError::ApiRequest {
-                message: format!("HTTP {} fetching Gemini models: {}", status, body_text),
+                message: format!("HTTP {status} fetching Gemini models: {body_text}"),
             },
         });
     }
 
     let body: Value = response.json().await.map_err(|e| LlmError::ResponseParse {
-        message: format!("Invalid JSON in Gemini models response: {}", e),
+        message: format!("Invalid JSON in Gemini models response: {e}"),
     })?;
 
     parse_gemini_models_response(&body)
@@ -347,18 +347,18 @@ pub async fn fetch_openai_models(
     base_url: Option<&str>,
 ) -> Result<Vec<ModelInfo>, LlmError> {
     let base = base_url.unwrap_or("https://api.openai.com/v1");
-    let url = format!("{}/models", base);
+    let url = format!("{base}/models");
 
     debug!(url = %url, "Fetching models from OpenAI-compatible endpoint");
 
     let client = Client::new();
     let response = client
         .get(&url)
-        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Authorization", format!("Bearer {api_key}"))
         .send()
         .await
         .map_err(|e| LlmError::ApiRequest {
-            message: format!("Failed to fetch models: {}", e),
+            message: format!("Failed to fetch models: {e}"),
         })?;
 
     let status = response.status();
@@ -372,13 +372,13 @@ pub async fn fetch_openai_models(
                 retry_after_secs: 5,
             },
             _ => LlmError::ApiRequest {
-                message: format!("HTTP {} fetching models: {}", status, body_text),
+                message: format!("HTTP {status} fetching models: {body_text}"),
             },
         });
     }
 
     let body: Value = response.json().await.map_err(|e| LlmError::ResponseParse {
-        message: format!("Invalid JSON in models response: {}", e),
+        message: format!("Invalid JSON in models response: {e}"),
     })?;
 
     let models = parse_openai_models_response(&body)?;
@@ -551,7 +551,7 @@ mod tests {
             LlmError::ResponseParse { message } => {
                 assert!(message.contains("data"));
             }
-            other => panic!("Expected ResponseParse, got {:?}", other),
+            other => panic!("Expected ResponseParse, got {other:?}"),
         }
     }
 

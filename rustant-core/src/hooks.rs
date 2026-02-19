@@ -119,7 +119,7 @@ impl HookEvent {
             HookEvent::ContextOverflow { usage_percent } => {
                 vars.push((
                     "RUSTANT_HOOK_USAGE_PERCENT".into(),
-                    format!("{:.1}", usage_percent),
+                    format!("{usage_percent:.1}"),
                 ));
             }
             HookEvent::ErrorOccurred { error } => {

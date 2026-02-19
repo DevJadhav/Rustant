@@ -265,13 +265,13 @@ impl std::fmt::Display for ExecutionPlan {
             let tool_info = step
                 .tool
                 .as_deref()
-                .map(|t| format!(" [{}]", t))
+                .map(|t| format!(" [{t}]"))
                 .unwrap_or_default();
 
             let risk_badge = step
                 .risk_level
                 .as_ref()
-                .map(|r| format!(" ({})", r))
+                .map(|r| format!(" ({r})"))
                 .unwrap_or_default();
 
             let approval = if step.requires_approval {
@@ -302,7 +302,7 @@ impl std::fmt::Display for ExecutionPlan {
 
         if let Some(cost) = self.estimated_cost {
             writeln!(f)?;
-            writeln!(f, "Estimated cost: ${:.4}", cost)?;
+            writeln!(f, "Estimated cost: ${cost:.4}")?;
         }
 
         Ok(())
@@ -546,7 +546,7 @@ fn fallback_single_step_plan(goal: &str, raw_text: &str) -> ExecutionPlan {
     let description = if raw_text.len() > 200 {
         format!("Execute task as described: {}...", &raw_text[..200])
     } else {
-        format!("Execute task as described: {}", raw_text)
+        format!("Execute task as described: {raw_text}")
     };
 
     ExecutionPlan {
@@ -980,7 +980,7 @@ mod tests {
             },
         ];
 
-        let display = format!("{}", plan);
+        let display = format!("{plan}");
         assert!(display.contains("Refactor auth"));
         assert!(display.contains("Split into modules"));
         assert!(display.contains("✓")); // completed

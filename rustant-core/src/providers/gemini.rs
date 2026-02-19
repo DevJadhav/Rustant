@@ -82,7 +82,7 @@ impl GeminiProvider {
             .connect_timeout(std::time::Duration::from_secs(10))
             .build()
             .map_err(|e| LlmError::Connection {
-                message: format!("Failed to build HTTP client: {}", e),
+                message: format!("Failed to build HTTP client: {e}"),
             })?;
         let token_counter = TokenCounter::for_model(&config.model);
 
@@ -710,7 +710,7 @@ impl GeminiProvider {
                 retry_after_secs: 30,
             },
             _ => LlmError::ApiRequest {
-                message: format!("HTTP {} from Gemini API: {}", status, body_text),
+                message: format!("HTTP {status} from Gemini API: {body_text}"),
             },
         }
     }
@@ -831,12 +831,12 @@ impl LlmProvider for GeminiProvider {
             .send()
             .await
             .map_err(|e| LlmError::ApiRequest {
-                message: format!("Request to Gemini API failed: {}", e),
+                message: format!("Request to Gemini API failed: {e}"),
             })?;
 
         let status = response.status();
         let body_text = response.text().await.map_err(|e| LlmError::ResponseParse {
-            message: format!("Failed to read response body: {}", e),
+            message: format!("Failed to read response body: {e}"),
         })?;
 
         if !status.is_success() {
@@ -845,7 +845,7 @@ impl LlmProvider for GeminiProvider {
 
         let response_json: Value =
             serde_json::from_str(&body_text).map_err(|e| LlmError::ResponseParse {
-                message: format!("Invalid JSON in response: {}", e),
+                message: format!("Invalid JSON in response: {e}"),
             })?;
 
         Self::parse_response(&response_json)
@@ -883,7 +883,7 @@ impl LlmProvider for GeminiProvider {
             .send()
             .await
             .map_err(|e| LlmError::ApiRequest {
-                message: format!("Streaming request to Gemini API failed: {}", e),
+                message: format!("Streaming request to Gemini API failed: {e}"),
             })?;
 
         let status = response.status();
@@ -903,7 +903,7 @@ impl LlmProvider for GeminiProvider {
 
         while let Some(chunk_result) = byte_stream.next().await {
             let chunk = chunk_result.map_err(|e| LlmError::Streaming {
-                message: format!("Failed to read streaming chunk: {}", e),
+                message: format!("Failed to read streaming chunk: {e}"),
             })?;
 
             let chunk_str = String::from_utf8_lossy(&chunk);
@@ -1099,7 +1099,7 @@ mod tests {
             LlmError::AuthFailed { provider } => {
                 assert!(provider.contains("GEMINI_MISSING_KEY_XYZ"));
             }
-            other => panic!("Expected AuthFailed, got {:?}", other),
+            other => panic!("Expected AuthFailed, got {other:?}"),
         }
     }
 
@@ -1346,7 +1346,7 @@ mod tests {
             LlmError::ResponseParse { message } => {
                 assert!(message.contains("Empty"));
             }
-            other => panic!("Expected ResponseParse, got {:?}", other),
+            other => panic!("Expected ResponseParse, got {other:?}"),
         }
     }
 
@@ -1359,7 +1359,7 @@ mod tests {
             LlmError::ResponseParse { message } => {
                 assert!(message.contains("candidates"));
             }
-            other => panic!("Expected ResponseParse, got {:?}", other),
+            other => panic!("Expected ResponseParse, got {other:?}"),
         }
     }
 
@@ -1395,7 +1395,7 @@ mod tests {
             LlmError::AuthFailed { provider } => {
                 assert_eq!(provider, "Gemini");
             }
-            _ => panic!("Expected AuthFailed, got {:?}", err),
+            _ => panic!("Expected AuthFailed, got {err:?}"),
         }
 
         // 403 -> AuthFailed
@@ -1414,7 +1414,7 @@ mod tests {
             LlmError::RateLimited { retry_after_secs } => {
                 assert_eq!(retry_after_secs, 30);
             }
-            _ => panic!("Expected RateLimited, got {:?}", err),
+            _ => panic!("Expected RateLimited, got {err:?}"),
         }
 
         // 500 -> ApiRequest
@@ -1426,7 +1426,7 @@ mod tests {
             LlmError::ApiRequest { message } => {
                 assert!(message.contains("500"));
             }
-            _ => panic!("Expected ApiRequest, got {:?}", err),
+            _ => panic!("Expected ApiRequest, got {err:?}"),
         }
     }
 

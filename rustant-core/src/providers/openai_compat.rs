@@ -271,7 +271,7 @@ impl OpenAiCompatibleProvider {
                     } => {
                         let url = match source {
                             crate::types::ImageSource::Base64(data) => {
-                                format!("data:{};base64,{}", media_type, data)
+                                format!("data:{media_type};base64,{data}")
                             }
                             crate::types::ImageSource::Url(url) => url.clone(),
                             crate::types::ImageSource::FilePath(_) => String::new(),
@@ -301,7 +301,7 @@ impl OpenAiCompatibleProvider {
                             "```\n{}\n```\nOutput: {}{}",
                             code,
                             output.as_deref().unwrap_or("(none)"),
-                            error.as_deref().map_or(String::new(), |e| format!("\nError: {}", e))
+                            error.as_deref().map_or(String::new(), |e| format!("\nError: {e}"))
                         );
                         json!({
                             "role": role,
@@ -587,10 +587,10 @@ impl OpenAiCompatibleProvider {
                 }
             }
             status if status >= 500 => LlmError::ApiRequest {
-                message: format!("Server error ({}): {}", status, body),
+                message: format!("Server error ({status}): {body}"),
             },
             _ => LlmError::ApiRequest {
-                message: format!("HTTP {}: {}", status, body),
+                message: format!("HTTP {status}: {body}"),
             },
         }
     }
@@ -675,12 +675,12 @@ impl LlmProvider for OpenAiCompatibleProvider {
             .send()
             .await
             .map_err(|e| LlmError::ApiRequest {
-                message: format!("Request failed: {}", e),
+                message: format!("Request failed: {e}"),
             })?;
 
         let status = response.status();
         let response_body = response.text().await.map_err(|e| LlmError::ApiRequest {
-            message: format!("Failed to read response body: {}", e),
+            message: format!("Failed to read response body: {e}"),
         })?;
 
         if !status.is_success() {
@@ -689,7 +689,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
 
         let json: Value =
             serde_json::from_str(&response_body).map_err(|e| LlmError::ResponseParse {
-                message: format!("Invalid JSON: {}", e),
+                message: format!("Invalid JSON: {e}"),
             })?;
 
         Self::parse_response(&json, &self.model)
@@ -774,7 +774,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
             .send()
             .await
             .map_err(|e| LlmError::Streaming {
-                message: format!("Request failed: {}", e),
+                message: format!("Request failed: {e}"),
             })?;
 
         let status = response.status();
@@ -794,7 +794,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
 
         // Read the response body as text chunks (SSE)
         let full_body = response.text().await.map_err(|e| LlmError::Streaming {
-            message: format!("Failed to read stream: {}", e),
+            message: format!("Failed to read stream: {e}"),
         })?;
 
         for line in full_body.lines() {
@@ -1095,7 +1095,7 @@ mod tests {
                 assert_eq!(name, "file_read");
                 assert_eq!(arguments["path"], "/tmp/test.txt");
             }
-            other => panic!("Expected ToolCall, got {:?}", other),
+            other => panic!("Expected ToolCall, got {other:?}"),
         }
         assert_eq!(resp.finish_reason.as_deref(), Some("tool_calls"));
     }
@@ -1115,7 +1115,7 @@ mod tests {
         );
         match err {
             LlmError::AuthFailed { .. } => {}
-            other => panic!("Expected AuthFailed, got {:?}", other),
+            other => panic!("Expected AuthFailed, got {other:?}"),
         }
     }
 
@@ -1127,7 +1127,7 @@ mod tests {
         );
         match err {
             LlmError::RateLimited { .. } => {}
-            other => panic!("Expected RateLimited, got {:?}", other),
+            other => panic!("Expected RateLimited, got {other:?}"),
         }
     }
 
@@ -1141,7 +1141,7 @@ mod tests {
             LlmError::ApiRequest { message } => {
                 assert!(message.contains("500"));
             }
-            other => panic!("Expected ApiRequest, got {:?}", other),
+            other => panic!("Expected ApiRequest, got {other:?}"),
         }
     }
 

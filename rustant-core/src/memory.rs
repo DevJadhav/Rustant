@@ -89,8 +89,7 @@ impl ShortTermMemory {
         // Include summary of older context if available
         if let Some(ref summary) = self.summarized_prefix {
             result.push(Message::system(format!(
-                "[Summary of earlier conversation]\n{}",
-                summary
+                "[Summary of earlier conversation]\n{summary}"
             )));
         }
 
@@ -250,7 +249,7 @@ impl ShortTermMemory {
 
         // Merge with existing summary
         if let Some(ref existing) = self.summarized_prefix {
-            self.summarized_prefix = Some(format!("{}\n\n{}", existing, summary));
+            self.summarized_prefix = Some(format!("{existing}\n\n{summary}"));
         } else {
             self.summarized_prefix = Some(summary);
         }
@@ -785,17 +784,17 @@ impl MemorySystem {
 
         let json =
             serde_json::to_string_pretty(&session).map_err(|e| MemoryError::PersistenceError {
-                message: format!("Failed to serialize session: {}", e),
+                message: format!("Failed to serialize session: {e}"),
             })?;
 
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| MemoryError::PersistenceError {
-                message: format!("Failed to create directory: {}", e),
+                message: format!("Failed to create directory: {e}"),
             })?;
         }
 
         std::fs::write(path, json).map_err(|e| MemoryError::PersistenceError {
-            message: format!("Failed to write session file: {}", e),
+            message: format!("Failed to write session file: {e}"),
         })?;
 
         Ok(())
@@ -804,12 +803,12 @@ impl MemorySystem {
     /// Load a session from a JSON file.
     pub fn load_session(path: &Path) -> Result<Self, MemoryError> {
         let json = std::fs::read_to_string(path).map_err(|e| MemoryError::SessionLoadFailed {
-            message: format!("Failed to read session file: {}", e),
+            message: format!("Failed to read session file: {e}"),
         })?;
 
         let session: Session =
             serde_json::from_str(&json).map_err(|e| MemoryError::SessionLoadFailed {
-                message: format!("Failed to deserialize session: {}", e),
+                message: format!("Failed to deserialize session: {e}"),
             })?;
 
         let mut memory = MemorySystem::new(session.window_size);
@@ -1005,10 +1004,10 @@ impl KnowledgeStore {
             return Ok(Self::new());
         }
         let json = std::fs::read_to_string(path).map_err(|e| MemoryError::PersistenceError {
-            message: format!("Failed to read knowledge store: {}", e),
+            message: format!("Failed to read knowledge store: {e}"),
         })?;
         serde_json::from_str(&json).map_err(|e| MemoryError::PersistenceError {
-            message: format!("Failed to parse knowledge store: {}", e),
+            message: format!("Failed to parse knowledge store: {e}"),
         })
     }
 
@@ -1016,15 +1015,15 @@ impl KnowledgeStore {
     pub fn save(&self, path: &std::path::Path) -> Result<(), MemoryError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| MemoryError::PersistenceError {
-                message: format!("Failed to create knowledge directory: {}", e),
+                message: format!("Failed to create knowledge directory: {e}"),
             })?;
         }
         let json =
             serde_json::to_string_pretty(self).map_err(|e| MemoryError::PersistenceError {
-                message: format!("Failed to serialize knowledge store: {}", e),
+                message: format!("Failed to serialize knowledge store: {e}"),
             })?;
         std::fs::write(path, json).map_err(|e| MemoryError::PersistenceError {
-            message: format!("Failed to write knowledge store: {}", e),
+            message: format!("Failed to write knowledge store: {e}"),
         })
     }
 }
@@ -1261,7 +1260,7 @@ mod tests {
         let mut stm = ShortTermMemory::new(3);
 
         for i in 0..6 {
-            stm.add(Message::user(format!("message {}", i)));
+            stm.add(Message::user(format!("message {i}")));
         }
 
         assert_eq!(stm.len(), 6);
@@ -1277,7 +1276,7 @@ mod tests {
         let mut stm = ShortTermMemory::new(3);
 
         for i in 0..6 {
-            stm.add(Message::user(format!("message {}", i)));
+            stm.add(Message::user(format!("message {i}")));
         }
 
         assert!(stm.needs_compression());
@@ -1308,14 +1307,14 @@ mod tests {
 
         // First batch
         for i in 0..5 {
-            stm.add(Message::user(format!("msg {}", i)));
+            stm.add(Message::user(format!("msg {i}")));
         }
         stm.compress("First summary.".to_string());
         assert_eq!(stm.len(), 2);
 
         // Second batch
         for i in 5..8 {
-            stm.add(Message::user(format!("msg {}", i)));
+            stm.add(Message::user(format!("msg {i}")));
         }
         stm.compress("Second summary.".to_string());
         assert_eq!(stm.len(), 2);
@@ -1836,7 +1835,7 @@ mod tests {
 
         // Add multiple facts
         for i in 0..5 {
-            mem.add_fact(Fact::new(format!("fact number {}", i), "test"));
+            mem.add_fact(Fact::new(format!("fact number {i}"), "test"));
         }
 
         // All 5 should be in long-term memory
@@ -2057,11 +2056,7 @@ mod tests {
 
         let mut ltm = LongTermMemory::new();
         for i in 0..10 {
-            ltm.add_correction(
-                format!("old{}", i),
-                format!("new{}", i),
-                format!("context{}", i),
-            );
+            ltm.add_correction(format!("old{i}"), format!("new{i}"), format!("context{i}"));
         }
 
         distiller.distill(&ltm);

@@ -62,7 +62,7 @@ impl std::fmt::Display for CacheState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CacheState::Cold => write!(f, "Cold"),
-            CacheState::Warm { tokens } => write!(f, "Warm ({} tokens cached)", tokens),
+            CacheState::Warm { tokens } => write!(f, "Warm ({tokens} tokens cached)"),
             CacheState::Hot { tokens, hit_rate } => {
                 write!(
                     f,

@@ -211,7 +211,7 @@ async fn load_tls_config() -> Result<axum_server::tls_rustls::RustlsConfig, LlmE
             return axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path)
                 .await
                 .map_err(|e| LlmError::OAuthFailed {
-                    message: format!("Failed to load mkcert certificates: {}", e),
+                    message: format!("Failed to load mkcert certificates: {e}"),
                 });
         }
     }
@@ -229,7 +229,7 @@ async fn load_tls_config() -> Result<axum_server::tls_rustls::RustlsConfig, LlmE
     let subject_alt_names = vec!["localhost".to_string(), "127.0.0.1".to_string()];
     let CertifiedKey { cert, key_pair } = rcgen::generate_simple_self_signed(subject_alt_names)
         .map_err(|e| LlmError::OAuthFailed {
-            message: format!("Failed to generate self-signed certificate: {}", e),
+            message: format!("Failed to generate self-signed certificate: {e}"),
         })?;
 
     let cert_pem = cert.pem();
@@ -238,7 +238,7 @@ async fn load_tls_config() -> Result<axum_server::tls_rustls::RustlsConfig, LlmE
     axum_server::tls_rustls::RustlsConfig::from_pem(cert_pem.into_bytes(), key_pem.into_bytes())
         .await
         .map_err(|e| LlmError::OAuthFailed {
-            message: format!("Failed to build TLS config: {}", e),
+            message: format!("Failed to build TLS config: {e}"),
         })
 }
 
@@ -257,7 +257,7 @@ async fn start_callback_server(
     let tx = std::sync::Arc::new(tokio::sync::Mutex::new(Some(tx)));
     let app = build_callback_router(tx);
 
-    let bind_addr = format!("127.0.0.1:{}", OAUTH_CALLBACK_PORT);
+    let bind_addr = format!("127.0.0.1:{OAUTH_CALLBACK_PORT}");
 
     if use_tls {
         // Ensure the rustls CryptoProvider is installed (idempotent).
@@ -266,7 +266,7 @@ async fn start_callback_server(
         let tls_config = load_tls_config().await?;
 
         let addr: SocketAddr = bind_addr.parse().map_err(|e| LlmError::OAuthFailed {
-            message: format!("Invalid bind address: {}", e),
+            message: format!("Invalid bind address: {e}"),
         })?;
 
         debug!(
@@ -286,9 +286,8 @@ async fn start_callback_server(
             .await
             .map_err(|e| LlmError::OAuthFailed {
                 message: format!(
-                    "Failed to bind callback server on port {}: {}. \
-                     Make sure no other process is using this port.",
-                    OAUTH_CALLBACK_PORT, e
+                    "Failed to bind callback server on port {OAUTH_CALLBACK_PORT}: {e}. \
+                     Make sure no other process is using this port."
                 ),
             })?;
 
@@ -354,14 +353,14 @@ pub async fn authorize_browser_flow(
         Some(uri) => uri.to_string(),
         None => {
             let scheme = if use_tls { "https" } else { "http" };
-            format!("{}://localhost:{}/auth/callback", scheme, port)
+            format!("{scheme}://localhost:{port}/auth/callback")
         }
     };
 
     // Build authorization URL.
     let mut auth_url =
         url::Url::parse(&config.authorization_url).map_err(|e| LlmError::OAuthFailed {
-            message: format!("Invalid authorization URL: {}", e),
+            message: format!("Invalid authorization URL: {e}"),
         })?;
 
     {
@@ -387,7 +386,7 @@ pub async fn authorize_browser_flow(
     info!("Opening browser for OAuth authorization...");
     debug!(url = %auth_url, "Authorization URL");
     open::that(auth_url.as_str()).map_err(|e| LlmError::OAuthFailed {
-        message: format!("Failed to open browser: {}", e),
+        message: format!("Failed to open browser: {e}"),
     })?;
 
     // Wait for the callback.
@@ -443,7 +442,7 @@ pub async fn authorize_browser_flow(
                 // access token won't work.
                 return Err(LlmError::OAuthFailed {
                     message: format!(
-                        "Failed to exchange OAuth token for an OpenAI API key: {}\n\n\
+                        "Failed to exchange OAuth token for an OpenAI API key: {e}\n\n\
                              This usually means your OpenAI account does not have \
                              Platform API access set up.\n\n\
                              To fix this:\n\
@@ -453,8 +452,7 @@ pub async fn authorize_browser_flow(
                              Alternatively, use a standard API key:\n\
                              1. Get your key from https://platform.openai.com/api-keys\n\
                              2. Set the OPENAI_API_KEY environment variable\n\
-                             3. Set auth_method to empty in .rustant/config.toml",
-                        e
+                             3. Set auth_method to empty in .rustant/config.toml"
                     ),
                 });
             }
@@ -498,17 +496,17 @@ async fn exchange_code_for_token(
         .send()
         .await
         .map_err(|e| LlmError::OAuthFailed {
-            message: format!("Token exchange request failed: {}", e),
+            message: format!("Token exchange request failed: {e}"),
         })?;
 
     let status = response.status();
     let body_text = response.text().await.map_err(|e| LlmError::OAuthFailed {
-        message: format!("Failed to read token response: {}", e),
+        message: format!("Failed to read token response: {e}"),
     })?;
 
     if !status.is_success() {
         return Err(LlmError::OAuthFailed {
-            message: format!("Token exchange failed (HTTP {}): {}", status, body_text),
+            message: format!("Token exchange failed (HTTP {status}): {body_text}"),
         });
     }
 
@@ -550,23 +548,23 @@ async fn obtain_openai_api_key(
         .send()
         .await
         .map_err(|e| LlmError::OAuthFailed {
-            message: format!("API key exchange request failed: {}", e),
+            message: format!("API key exchange request failed: {e}"),
         })?;
 
     let status = response.status();
     let body_text = response.text().await.map_err(|e| LlmError::OAuthFailed {
-        message: format!("Failed to read API key exchange response: {}", e),
+        message: format!("Failed to read API key exchange response: {e}"),
     })?;
 
     if !status.is_success() {
         return Err(LlmError::OAuthFailed {
-            message: format!("API key exchange failed (HTTP {}): {}", status, body_text),
+            message: format!("API key exchange failed (HTTP {status}): {body_text}"),
         });
     }
 
     let json: serde_json::Value =
         serde_json::from_str(&body_text).map_err(|e| LlmError::OAuthFailed {
-            message: format!("Invalid JSON in API key exchange response: {}", e),
+            message: format!("Invalid JSON in API key exchange response: {e}"),
         })?;
 
     json["access_token"]
@@ -581,7 +579,7 @@ async fn obtain_openai_api_key(
 fn parse_token_response(body: &str) -> Result<OAuthToken, LlmError> {
     let json: serde_json::Value =
         serde_json::from_str(body).map_err(|e| LlmError::OAuthFailed {
-            message: format!("Invalid JSON in token response: {}", e),
+            message: format!("Invalid JSON in token response: {e}"),
         })?;
 
     let access_token = json["access_token"]
@@ -656,26 +654,23 @@ pub async fn authorize_device_code_flow(
         .send()
         .await
         .map_err(|e| LlmError::OAuthFailed {
-            message: format!("Device code request failed: {}", e),
+            message: format!("Device code request failed: {e}"),
         })?;
 
     let status = response.status();
     let body_text = response.text().await.map_err(|e| LlmError::OAuthFailed {
-        message: format!("Failed to read device code response: {}", e),
+        message: format!("Failed to read device code response: {e}"),
     })?;
 
     if !status.is_success() {
         return Err(LlmError::OAuthFailed {
-            message: format!(
-                "Device code request failed (HTTP {}): {}",
-                status, body_text
-            ),
+            message: format!("Device code request failed (HTTP {status}): {body_text}"),
         });
     }
 
     let json: serde_json::Value =
         serde_json::from_str(&body_text).map_err(|e| LlmError::OAuthFailed {
-            message: format!("Invalid JSON in device code response: {}", e),
+            message: format!("Invalid JSON in device code response: {e}"),
         })?;
 
     let device_code = json["device_code"]
@@ -699,8 +694,8 @@ pub async fn authorize_device_code_flow(
 
     // Step 2: Display instructions.
     println!();
-    println!("  To authenticate, visit: {}", verification_uri);
-    println!("  Enter this code: {}", user_code);
+    println!("  To authenticate, visit: {verification_uri}");
+    println!("  Enter this code: {user_code}");
     println!();
     println!("  Waiting for authorization...");
 
@@ -728,7 +723,7 @@ pub async fn authorize_device_code_flow(
             .send()
             .await
             .map_err(|e| LlmError::OAuthFailed {
-                message: format!("Token poll request failed: {}", e),
+                message: format!("Token poll request failed: {e}"),
             })?;
 
         let poll_status = poll_response.status();
@@ -736,7 +731,7 @@ pub async fn authorize_device_code_flow(
             .text()
             .await
             .map_err(|e| LlmError::OAuthFailed {
-                message: format!("Failed to read token poll response: {}", e),
+                message: format!("Failed to read token poll response: {e}"),
             })?;
 
         if poll_status.is_success() {
@@ -768,7 +763,7 @@ pub async fn authorize_device_code_flow(
                 }
                 _ => {
                     return Err(LlmError::OAuthFailed {
-                        message: format!("Token poll error: {}", poll_body),
+                        message: format!("Token poll error: {poll_body}"),
                     });
                 }
             }
@@ -776,7 +771,7 @@ pub async fn authorize_device_code_flow(
 
         // Non-JSON error response.
         return Err(LlmError::OAuthFailed {
-            message: format!("Token poll failed (HTTP {}): {}", poll_status, poll_body),
+            message: format!("Token poll failed (HTTP {poll_status}): {poll_body}"),
         });
     }
 }
@@ -803,17 +798,17 @@ pub async fn refresh_token(
         .send()
         .await
         .map_err(|e| LlmError::OAuthFailed {
-            message: format!("Token refresh request failed: {}", e),
+            message: format!("Token refresh request failed: {e}"),
         })?;
 
     let status = response.status();
     let body_text = response.text().await.map_err(|e| LlmError::OAuthFailed {
-        message: format!("Failed to read token refresh response: {}", e),
+        message: format!("Failed to read token refresh response: {e}"),
     })?;
 
     if !status.is_success() {
         return Err(LlmError::OAuthFailed {
-            message: format!("Token refresh failed (HTTP {}): {}", status, body_text),
+            message: format!("Token refresh failed (HTTP {status}): {body_text}"),
         });
     }
 
@@ -851,14 +846,14 @@ pub fn store_oauth_token(
     provider: &str,
     token: &OAuthToken,
 ) -> Result<(), LlmError> {
-    let key = format!("oauth:{}", provider);
+    let key = format!("oauth:{provider}");
     let json = serde_json::to_string(token).map_err(|e| LlmError::OAuthFailed {
-        message: format!("Failed to serialize OAuth token: {}", e),
+        message: format!("Failed to serialize OAuth token: {e}"),
     })?;
     store
         .store_key(&key, &json)
         .map_err(|e| LlmError::OAuthFailed {
-            message: format!("Failed to store OAuth token: {}", e),
+            message: format!("Failed to store OAuth token: {e}"),
         })
 }
 
@@ -867,31 +862,31 @@ pub fn load_oauth_token(
     store: &dyn CredentialStore,
     provider: &str,
 ) -> Result<OAuthToken, LlmError> {
-    let key = format!("oauth:{}", provider);
+    let key = format!("oauth:{provider}");
     let json = store.get_key(&key).map_err(|e| match e {
         CredentialError::NotFound { .. } => LlmError::OAuthFailed {
-            message: format!("No OAuth token found for provider '{}'", provider),
+            message: format!("No OAuth token found for provider '{provider}'"),
         },
         other => LlmError::OAuthFailed {
-            message: format!("Failed to load OAuth token: {}", other),
+            message: format!("Failed to load OAuth token: {other}"),
         },
     })?;
     serde_json::from_str(&json).map_err(|e| LlmError::OAuthFailed {
-        message: format!("Failed to deserialize OAuth token: {}", e),
+        message: format!("Failed to deserialize OAuth token: {e}"),
     })
 }
 
 /// Delete an OAuth token from the credential store.
 pub fn delete_oauth_token(store: &dyn CredentialStore, provider: &str) -> Result<(), LlmError> {
-    let key = format!("oauth:{}", provider);
+    let key = format!("oauth:{provider}");
     store.delete_key(&key).map_err(|e| LlmError::OAuthFailed {
-        message: format!("Failed to delete OAuth token: {}", e),
+        message: format!("Failed to delete OAuth token: {e}"),
     })
 }
 
 /// Check whether an OAuth token exists in the credential store.
 pub fn has_oauth_token(store: &dyn CredentialStore, provider: &str) -> bool {
-    let key = format!("oauth:{}", provider);
+    let key = format!("oauth:{provider}");
     store.has_key(&key)
 }
 
@@ -1019,19 +1014,14 @@ pub fn teams_oauth_config(
         client_id: client_id.to_string(),
         client_secret,
         authorization_url: format!(
-            "https://login.microsoftonline.com/{}/oauth2/v2.0/authorize",
-            tenant_id
+            "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize"
         ),
-        token_url: format!(
-            "https://login.microsoftonline.com/{}/oauth2/v2.0/token",
-            tenant_id
-        ),
+        token_url: format!("https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"),
         scopes: vec!["https://graph.microsoft.com/.default".to_string()],
         audience: None,
         supports_device_code: true,
         device_code_url: Some(format!(
-            "https://login.microsoftonline.com/{}/oauth2/v2.0/devicecode",
-            tenant_id
+            "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/devicecode"
         )),
         extra_auth_params: vec![],
     }
@@ -1121,19 +1111,18 @@ pub async fn authorize_client_credentials_flow(
         .send()
         .await
         .map_err(|e| LlmError::OAuthFailed {
-            message: format!("Client credentials request failed: {}", e),
+            message: format!("Client credentials request failed: {e}"),
         })?;
 
     let status = response.status();
     let body_text = response.text().await.map_err(|e| LlmError::OAuthFailed {
-        message: format!("Failed to read client credentials response: {}", e),
+        message: format!("Failed to read client credentials response: {e}"),
     })?;
 
     if !status.is_success() {
         return Err(LlmError::OAuthFailed {
             message: format!(
-                "Client credentials token request failed (HTTP {}): {}",
-                status, body_text
+                "Client credentials token request failed (HTTP {status}): {body_text}"
             ),
         });
     }
@@ -1146,7 +1135,7 @@ pub async fn authorize_client_credentials_flow(
 /// Format: `user=<email>\x01auth=Bearer <token>\x01\x01`
 /// This is used by Gmail and other providers that support XOAUTH2.
 pub fn build_xoauth2_token(email: &str, access_token: &str) -> String {
-    format!("user={}\x01auth=Bearer {}\x01\x01", email, access_token)
+    format!("user={email}\x01auth=Bearer {access_token}\x01\x01")
 }
 
 /// Base64-encode an XOAUTH2 token for SASL AUTH.
@@ -1334,7 +1323,7 @@ mod tests {
             LlmError::OAuthFailed { message } => {
                 assert!(message.contains("access_token"));
             }
-            other => panic!("Expected OAuthFailed, got {:?}", other),
+            other => panic!("Expected OAuthFailed, got {other:?}"),
         }
     }
 
@@ -1538,10 +1527,8 @@ mod tests {
 
         // Simulate the OAuth callback using plain HTTP.
         let client = reqwest::Client::new();
-        let url = format!(
-            "http://127.0.0.1:{}/auth/callback?code=test-http&state=test-state-http",
-            port
-        );
+        let url =
+            format!("http://127.0.0.1:{port}/auth/callback?code=test-http&state=test-state-http");
         let response = client.get(&url).send().await.unwrap();
         assert!(response.status().is_success());
 

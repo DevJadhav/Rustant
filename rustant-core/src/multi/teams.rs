@@ -242,7 +242,7 @@ mod tests {
         for strat in strats {
             let json = serde_json::to_string(&strat).unwrap();
             let restored: CoordinationStrategy = serde_json::from_str(&json).unwrap();
-            assert_eq!(format!("{:?}", strat), format!("{:?}", restored));
+            assert_eq!(format!("{strat:?}"), format!("{:?}", restored));
         }
     }
 

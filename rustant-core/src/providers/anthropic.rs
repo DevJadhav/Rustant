@@ -339,7 +339,7 @@ impl AnthropicProvider {
                     output.as_deref().unwrap_or("(none)"),
                     error
                         .as_deref()
-                        .map_or(String::new(), |e| format!("Error: {}", e))
+                        .map_or(String::new(), |e| format!("Error: {e}"))
                 );
                 serde_json::json!([{"type": "text", "text": text}])
             }
@@ -580,7 +580,7 @@ impl AnthropicProvider {
                 }
             }
             _ => LlmError::ApiRequest {
-                message: format!("HTTP {} from Anthropic API: {}", status, body_text),
+                message: format!("HTTP {status} from Anthropic API: {body_text}"),
             },
         }
     }
@@ -740,12 +740,12 @@ impl LlmProvider for AnthropicProvider {
             .send()
             .await
             .map_err(|e| LlmError::ApiRequest {
-                message: format!("Request to Anthropic API failed: {}", e),
+                message: format!("Request to Anthropic API failed: {e}"),
             })?;
 
         let status = response.status();
         let body_text = response.text().await.map_err(|e| LlmError::ResponseParse {
-            message: format!("Failed to read response body: {}", e),
+            message: format!("Failed to read response body: {e}"),
         })?;
 
         if !status.is_success() {
@@ -754,7 +754,7 @@ impl LlmProvider for AnthropicProvider {
 
         let response_json: Value =
             serde_json::from_str(&body_text).map_err(|e| LlmError::ResponseParse {
-                message: format!("Invalid JSON in response: {}", e),
+                message: format!("Invalid JSON in response: {e}"),
             })?;
 
         Self::parse_response(&response_json)
@@ -796,7 +796,7 @@ impl LlmProvider for AnthropicProvider {
             .send()
             .await
             .map_err(|e| LlmError::ApiRequest {
-                message: format!("Streaming request to Anthropic API failed: {}", e),
+                message: format!("Streaming request to Anthropic API failed: {e}"),
             })?;
 
         let status = response.status();
@@ -807,7 +807,7 @@ impl LlmProvider for AnthropicProvider {
 
         // Read the SSE stream line by line.
         let body_text = response.text().await.map_err(|e| LlmError::Streaming {
-            message: format!("Failed to read streaming response: {}", e),
+            message: format!("Failed to read streaming response: {e}"),
         })?;
 
         let mut current_block_id: Option<String> = None;
@@ -997,7 +997,7 @@ mod tests {
             LlmError::AuthFailed { provider } => {
                 assert!(provider.contains("ANTHROPIC_MISSING_KEY_XYZ"));
             }
-            other => panic!("Expected AuthFailed, got {:?}", other),
+            other => panic!("Expected AuthFailed, got {other:?}"),
         }
     }
 
@@ -1277,7 +1277,7 @@ mod tests {
             LlmError::AuthFailed { provider } => {
                 assert_eq!(provider, "Anthropic");
             }
-            _ => panic!("Expected AuthFailed, got {:?}", err),
+            _ => panic!("Expected AuthFailed, got {err:?}"),
         }
 
         // 429 -> RateLimited
@@ -1289,7 +1289,7 @@ mod tests {
             LlmError::RateLimited { retry_after_secs } => {
                 assert_eq!(retry_after_secs, 60);
             }
-            _ => panic!("Expected RateLimited, got {:?}", err),
+            _ => panic!("Expected RateLimited, got {err:?}"),
         }
 
         // 429 without retry_after_secs defaults to 30.
@@ -1301,7 +1301,7 @@ mod tests {
             LlmError::RateLimited { retry_after_secs } => {
                 assert_eq!(retry_after_secs, 30);
             }
-            _ => panic!("Expected RateLimited, got {:?}", err),
+            _ => panic!("Expected RateLimited, got {err:?}"),
         }
 
         // 500 -> ApiRequest
@@ -1314,7 +1314,7 @@ mod tests {
                 assert!(message.contains("500"));
                 assert!(message.contains("Internal server error"));
             }
-            _ => panic!("Expected ApiRequest, got {:?}", err),
+            _ => panic!("Expected ApiRequest, got {err:?}"),
         }
     }
 
@@ -1741,7 +1741,7 @@ mod tests {
             LlmError::ResponseParse { message } => {
                 assert!(message.contains("content"));
             }
-            other => panic!("Expected ResponseParse, got {:?}", other),
+            other => panic!("Expected ResponseParse, got {other:?}"),
         }
     }
 

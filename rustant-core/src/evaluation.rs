@@ -29,8 +29,42 @@ pub enum ErrorCategory {
     MisclassifiedTask,
     /// External dependency failure.
     ExternalFailure,
+    /// Model produced fabricated or unsupported claims.
+    ModelHallucination,
+    /// Sensitive data leaked outside allowed boundary.
+    DataLeakage,
+    /// Token budget for the task was exceeded.
+    TokenBudgetExceeded,
+    /// Results could not be reproduced deterministically.
+    ReproducibilityFailure,
+    /// A safety policy or guardrail was violated.
+    SafetyViolation,
+    /// Bias detected in model output or decision.
+    BiasDetected,
     /// Custom/user-defined category.
     Custom(String),
+}
+
+impl std::fmt::Display for ErrorCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WrongToolSelection => write!(f, "Wrong Tool Selection"),
+            Self::IncorrectParameters => write!(f, "Incorrect Parameters"),
+            Self::FalsePositiveSafety => write!(f, "False Positive Safety"),
+            Self::FalseNegativeSafety => write!(f, "False Negative Safety"),
+            Self::InfiniteLoop => write!(f, "Infinite Loop"),
+            Self::ContextOverflow => write!(f, "Context Overflow"),
+            Self::MisclassifiedTask => write!(f, "Misclassified Task"),
+            Self::ExternalFailure => write!(f, "External Failure"),
+            Self::ModelHallucination => write!(f, "Model Hallucination"),
+            Self::DataLeakage => write!(f, "Data Leakage"),
+            Self::TokenBudgetExceeded => write!(f, "Token Budget Exceeded"),
+            Self::ReproducibilityFailure => write!(f, "Reproducibility Failure"),
+            Self::SafetyViolation => write!(f, "Safety Violation"),
+            Self::BiasDetected => write!(f, "Bias Detected"),
+            Self::Custom(s) => write!(f, "Custom({s})"),
+        }
+    }
 }
 
 /// A single evaluation annotation on a trace event.
@@ -180,8 +214,7 @@ impl TraceEvaluator for SafetyFalsePositiveEvaluator {
                             event_index: denied_idx,
                             category: Some(ErrorCategory::FalsePositiveSafety),
                             note: format!(
-                                "Tool '{}' was denied at event {} but later approved at event {}",
-                                tool, denied_idx, i
+                                "Tool '{tool}' was denied at event {denied_idx} but later approved at event {i}"
                             ),
                             severity: 1,
                         });
@@ -695,6 +728,12 @@ mod tests {
             ErrorCategory::ContextOverflow,
             ErrorCategory::MisclassifiedTask,
             ErrorCategory::ExternalFailure,
+            ErrorCategory::ModelHallucination,
+            ErrorCategory::DataLeakage,
+            ErrorCategory::TokenBudgetExceeded,
+            ErrorCategory::ReproducibilityFailure,
+            ErrorCategory::SafetyViolation,
+            ErrorCategory::BiasDetected,
         ];
         for v in variants {
             let json = serde_json::to_string(&v).unwrap();

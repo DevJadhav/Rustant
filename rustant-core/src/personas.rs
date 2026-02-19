@@ -17,6 +17,8 @@ pub enum PersonaId {
     SecurityGuardian,
     /// MLOps & Autonomous Lifecycle Engineer
     MlopsEngineer,
+    /// AI Engineer & Researcher
+    AiEngineer,
     /// No specialized persona (default behavior)
     #[default]
     General,
@@ -28,6 +30,7 @@ impl std::fmt::Display for PersonaId {
             PersonaId::Architect => write!(f, "AI Systems Architect"),
             PersonaId::SecurityGuardian => write!(f, "Security Guardian"),
             PersonaId::MlopsEngineer => write!(f, "MLOps Engineer"),
+            PersonaId::AiEngineer => write!(f, "AI Engineer"),
             PersonaId::General => write!(f, "General"),
         }
     }
@@ -154,6 +157,30 @@ impl PersonaResolver {
             context_label: "MLOps Engineer".into(),
         });
 
+        self.profiles.push(PersonaProfile {
+            id: PersonaId::AiEngineer,
+            system_prompt_addendum: concat!(
+                "You are operating as an AI Engineer & Researcher. ",
+                "Prioritize data pipelines, model training, RAG systems, evaluation, ",
+                "and research workflows. Focus on reproducibility, safety checks (PII scanning, ",
+                "bias detection), model provenance, and source attribution. ",
+                "Prefer ml_*, rag_*, eval_*, inference_*, and research_* tools."
+            )
+            .to_string(),
+            preferred_tools: vec![
+                "ml_train".into(),
+                "ml_data_ingest".into(),
+                "rag_query".into(),
+                "eval_benchmark".into(),
+                "inference_serve".into(),
+                "research_review".into(),
+            ],
+            deprioritized_tools: vec!["macos_gui_scripting".into()],
+            confidence_modifier: 0.1,
+            safety_mode_override: None,
+            context_label: "AI Engineer".into(),
+        });
+
         // General has no addendum
         self.profiles.push(PersonaProfile {
             id: PersonaId::General,
@@ -275,6 +302,7 @@ pub fn parse_persona_id(s: &str) -> Option<PersonaId> {
         "architect" | "arch" => Some(PersonaId::Architect),
         "security" | "sec" | "security_guardian" | "guardian" => Some(PersonaId::SecurityGuardian),
         "mlops" | "mlops_engineer" | "lifecycle" => Some(PersonaId::MlopsEngineer),
+        "ai_engineer" | "ai" | "researcher" | "ml" => Some(PersonaId::AiEngineer),
         "general" | "none" | "default" => Some(PersonaId::General),
         _ => None,
     }
@@ -519,6 +547,7 @@ impl PersonaEvolver {
                     PersonaId::Architect => 0.1,
                     PersonaId::SecurityGuardian => -0.1,
                     PersonaId::MlopsEngineer => 0.05,
+                    PersonaId::AiEngineer => 0.1,
                     PersonaId::General => 0.0,
                 };
                 refinements.push(PersonaRefinement {
@@ -592,7 +621,7 @@ mod tests {
     #[test]
     fn test_resolver_new_without_config() {
         let resolver = PersonaResolver::new(None);
-        assert_eq!(resolver.available_personas().len(), 4);
+        assert_eq!(resolver.available_personas().len(), 5);
         assert_eq!(resolver.active_persona(None), PersonaId::General);
     }
 

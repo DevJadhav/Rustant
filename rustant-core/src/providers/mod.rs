@@ -156,8 +156,7 @@ pub fn resolve_api_key_by_env(env_var: &str) -> Result<String, String> {
     // 2. Fall back to environment variable
     std::env::var(env_var).map_err(|_| {
         format!(
-            "{} not set. Set the environment variable or store it via `rustant auth login`.",
-            env_var
+            "{env_var} not set. Set the environment variable or store it via `rustant auth login`."
         )
     })
 }
@@ -175,15 +174,13 @@ pub fn resolve_api_key_keychain(account: &str) -> Result<String, String> {
         Ok(entry) => match entry.get_password() {
             Ok(key) if !key.is_empty() => Ok(key),
             Ok(_) => Err(format!(
-                "API key '{}' is empty in keychain. Store it via: rustant auth login --service {}",
-                account, account
+                "API key '{account}' is empty in keychain. Store it via: rustant auth login --service {account}"
             )),
             Err(_) => Err(format!(
-                "API key '{}' not found in keychain. Store it via: rustant auth login --service {}",
-                account, account
+                "API key '{account}' not found in keychain. Store it via: rustant auth login --service {account}"
             )),
         },
-        Err(e) => Err(format!("Keychain access failed for '{}': {}", account, e)),
+        Err(e) => Err(format!("Keychain access failed for '{account}': {e}")),
     }
 }
 
@@ -279,7 +276,7 @@ fn create_single_provider_with_key(
 /// Returns an empty vec if Ollama is unreachable or the response is invalid.
 pub async fn list_ollama_models(base_url: Option<&str>) -> Vec<String> {
     let base = base_url.unwrap_or("http://localhost:11434");
-    let url = format!("{}/api/tags", base);
+    let url = format!("{base}/api/tags");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .build()
@@ -303,7 +300,7 @@ pub async fn list_ollama_models(base_url: Option<&str>) -> Vec<String> {
 /// Check if Ollama is running and reachable.
 pub async fn is_ollama_available(base_url: Option<&str>) -> bool {
     let base = base_url.unwrap_or("http://localhost:11434");
-    let url = format!("{}/api/tags", base);
+    let url = format!("{base}/api/tags");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
         .build()
@@ -538,7 +535,7 @@ mod tests {
             LlmError::AuthFailed { provider } => {
                 assert!(provider.contains("RUSTANT_NONEXISTENT_KEY"));
             }
-            other => panic!("Expected AuthFailed, got {:?}", other),
+            other => panic!("Expected AuthFailed, got {other:?}"),
         }
     }
 

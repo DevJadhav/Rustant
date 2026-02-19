@@ -247,11 +247,7 @@ fn compute_hmac(key: &[u8], data: &[u8]) -> String {
 // Tiny hex encoding helper (no external dep needed).
 mod hex {
     pub fn encode(bytes: impl AsRef<[u8]>) -> String {
-        bytes
-            .as_ref()
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect()
+        bytes.as_ref().iter().map(|b| format!("{b:02x}")).collect()
     }
 }
 

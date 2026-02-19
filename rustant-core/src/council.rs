@@ -386,8 +386,7 @@ impl PlanningCouncil {
         // Build synthesis prompt.
         let mut prompt = format!(
             "You are the chairman of an LLM council. Multiple models have responded \
-             to the following question:\n\n\"{}\"\n\n",
-            question
+             to the following question:\n\n\"{question}\"\n\n"
         );
 
         // Add anonymized responses.
@@ -428,8 +427,7 @@ impl PlanningCouncil {
         };
 
         prompt.push_str(&format!(
-            "Your task: {}\n\nProvide your final synthesized answer:",
-            strategy_instruction
+            "Your task: {strategy_instruction}\n\nProvide your final synthesized answer:"
         ));
 
         let request = CompletionRequest {
@@ -637,7 +635,7 @@ pub async fn detect_ollama_models() -> Result<Vec<String>, LlmError> {
         .timeout(std::time::Duration::from_secs(3))
         .build()
         .map_err(|e| LlmError::Connection {
-            message: format!("Failed to build HTTP client: {}", e),
+            message: format!("Failed to build HTTP client: {e}"),
         })?;
 
     let response = client
@@ -645,11 +643,11 @@ pub async fn detect_ollama_models() -> Result<Vec<String>, LlmError> {
         .send()
         .await
         .map_err(|e| LlmError::Connection {
-            message: format!("Ollama not available: {}", e),
+            message: format!("Ollama not available: {e}"),
         })?;
 
     let body: serde_json::Value = response.json().await.map_err(|e| LlmError::ResponseParse {
-        message: format!("Failed to parse Ollama response: {}", e),
+        message: format!("Failed to parse Ollama response: {e}"),
     })?;
 
     let models = body["models"]

@@ -380,7 +380,7 @@ impl ReplayEngine {
 pub fn describe_event(kind: &TraceEventKind) -> String {
     match kind {
         TraceEventKind::TaskStarted { goal, .. } => {
-            format!("Task started: {}", goal)
+            format!("Task started: {goal}")
         }
         TraceEventKind::TaskCompleted {
             success,
@@ -400,16 +400,16 @@ pub fn describe_event(kind: &TraceEventKind) -> String {
         TraceEventKind::ToolRequested {
             tool, risk_level, ..
         } => {
-            format!("Tool requested: {} (risk: {:?})", tool, risk_level)
+            format!("Tool requested: {tool} (risk: {risk_level:?})")
         }
         TraceEventKind::ToolApproved { tool } => {
-            format!("Tool approved: {}", tool)
+            format!("Tool approved: {tool}")
         }
         TraceEventKind::ToolDenied { tool, reason } => {
-            format!("Tool denied: {} - {}", tool, reason)
+            format!("Tool denied: {tool} - {reason}")
         }
         TraceEventKind::ApprovalRequested { tool, .. } => {
-            format!("Approval requested for: {}", tool)
+            format!("Approval requested for: {tool}")
         }
         TraceEventKind::ApprovalDecision { tool, approved } => {
             format!(
@@ -437,29 +437,108 @@ pub fn describe_event(kind: &TraceEventKind) -> String {
             output_tokens,
             ..
         } => {
-            format!(
-                "LLM call: {} ({}/{} tokens)",
-                model, input_tokens, output_tokens
-            )
+            format!("LLM call: {model} ({input_tokens}/{output_tokens} tokens)")
         }
         TraceEventKind::StatusChange { from, to } => {
-            format!("Status: {} -> {}", from, to)
+            format!("Status: {from} -> {to}")
         }
         TraceEventKind::Error { message } => {
-            format!("Error: {}", message)
+            format!("Error: {message}")
         }
         TraceEventKind::PersonaSwitched {
             from,
             to,
             rationale,
         } => {
-            format!("Persona switched: {} -> {} ({})", from, to, rationale)
+            format!("Persona switched: {from} -> {to} ({rationale})")
         }
         TraceEventKind::CacheCreated { provider, tokens } => {
-            format!("Cache created: {} ({} tokens)", provider, tokens)
+            format!("Cache created: {provider} ({tokens} tokens)")
         }
         TraceEventKind::CacheInvalidated { provider, reason } => {
-            format!("Cache invalidated: {} ({})", provider, reason)
+            format!("Cache invalidated: {provider} ({reason})")
+        }
+        // AI/ML audit events
+        TraceEventKind::ModelInferencePerformed { model, backend, .. } => {
+            format!("Model inference: {model} ({backend})")
+        }
+        TraceEventKind::TrainingCompleted {
+            experiment_id,
+            epochs,
+            ..
+        } => {
+            format!("Training completed: {experiment_id} ({epochs} epochs)")
+        }
+        TraceEventKind::RagQueryExecuted {
+            collection,
+            chunks_retrieved,
+            ..
+        } => {
+            format!("RAG query: {collection} ({chunks_retrieved} chunks)")
+        }
+        TraceEventKind::AiSafetyCheckPerformed {
+            check_type, result, ..
+        } => {
+            format!("AI safety check: {check_type} ({result})")
+        }
+        TraceEventKind::RedTeamAttackTested {
+            attack_type,
+            result,
+        } => {
+            format!("Red team test: {attack_type} ({result})")
+        }
+        TraceEventKind::DataPipelineAudited {
+            action, dataset, ..
+        } => {
+            format!("Data pipeline: {action} on {dataset}")
+        }
+        // Security & compliance audit events
+        TraceEventKind::SecurityScanCompleted {
+            scanner,
+            target,
+            findings_count,
+            ..
+        } => {
+            format!("Security scan: {scanner} on {target} ({findings_count} findings)")
+        }
+        TraceEventKind::FindingDetected {
+            severity, title, ..
+        } => {
+            format!("Finding [{severity}]: {title}")
+        }
+        TraceEventKind::FindingSuppressed {
+            finding_id, reason, ..
+        } => {
+            format!("Finding suppressed: {finding_id} ({reason})")
+        }
+        TraceEventKind::PolicyEvaluated {
+            policy_id, result, ..
+        } => {
+            format!("Policy {policy_id}: {result}")
+        }
+        TraceEventKind::ComplianceReportGenerated {
+            framework,
+            compliance_rate,
+            ..
+        } => {
+            format!(
+                "Compliance report: {} ({:.0}%)",
+                framework,
+                compliance_rate * 100.0
+            )
+        }
+        TraceEventKind::IncidentActionTaken {
+            action_type,
+            target,
+            success,
+            ..
+        } => {
+            format!(
+                "Incident: {} on {} ({})",
+                action_type,
+                target,
+                if *success { "ok" } else { "failed" }
+            )
         }
     }
 }

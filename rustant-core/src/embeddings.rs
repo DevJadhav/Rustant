@@ -280,7 +280,7 @@ impl OpenAiEmbedder {
         text: &str,
         dims: usize,
     ) -> Vec<f32> {
-        let url = format!("{}/v1/embeddings", base_url);
+        let url = format!("{base_url}/v1/embeddings");
         let body = serde_json::json!({
             "model": model,
             "input": text,
@@ -385,7 +385,7 @@ impl OllamaEmbedder {
         text: &str,
         dims: usize,
     ) -> Vec<f32> {
-        let url = format!("{}/api/embed", base_url);
+        let url = format!("{base_url}/api/embed");
         let body = serde_json::json!({
             "model": model,
             "input": text,
@@ -484,6 +484,54 @@ pub fn create_embedder(config: &EmbeddingConfig) -> Box<dyn Embedder> {
     }
 }
 
+/// Caching wrapper around any Embedder implementation.
+pub struct CachedEmbedder {
+    inner: Box<dyn Embedder>,
+    cache: std::sync::Mutex<HashMap<u64, Vec<f32>>>,
+}
+
+impl CachedEmbedder {
+    pub fn new(inner: Box<dyn Embedder>) -> Self {
+        Self {
+            inner,
+            cache: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn hash_text(text: &str) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        text.hash(&mut hasher);
+        hasher.finish()
+    }
+}
+
+impl Embedder for CachedEmbedder {
+    fn embed(&self, text: &str) -> Vec<f32> {
+        let key = Self::hash_text(text);
+        {
+            let cache = self.cache.lock().unwrap();
+            if let Some(cached) = cache.get(&key) {
+                return cached.clone();
+            }
+        }
+        let embedding = self.inner.embed(text);
+        {
+            let mut cache = self.cache.lock().unwrap();
+            cache.insert(key, embedding.clone());
+        }
+        embedding
+    }
+
+    fn dimensions(&self) -> usize {
+        self.inner.dimensions()
+    }
+
+    fn provider_name(&self) -> &str {
+        self.inner.provider_name()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -503,8 +551,7 @@ mod tests {
         let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
         assert!(
             (norm - 1.0).abs() < 0.01,
-            "Expected normalized vector, got norm={}",
-            norm
+            "Expected normalized vector, got norm={norm}"
         );
     }
 
@@ -661,8 +708,7 @@ mod tests {
             let simple_vec = simple.embed(text);
             assert_eq!(
                 local_vec, simple_vec,
-                "LocalEmbedder and SimpleEmbedder differ for text: '{}'",
-                text
+                "LocalEmbedder and SimpleEmbedder differ for text: '{text}'"
             );
         }
     }

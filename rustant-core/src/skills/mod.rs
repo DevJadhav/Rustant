@@ -55,7 +55,7 @@ impl SkillRegistry {
     /// Activate a skill by name. Returns an error if the skill does not exist.
     pub fn activate(&mut self, name: &str) -> Result<(), String> {
         if !self.skills.contains_key(name) {
-            return Err(format!("Skill '{}' not found", name));
+            return Err(format!("Skill '{name}' not found"));
         }
         if !self.active_skills.iter().any(|s| s == name) {
             self.active_skills.push(name.to_string());
@@ -141,7 +141,7 @@ impl SkillLoader {
     /// Load a single skill file.
     pub fn load_file(&self, path: &Path) -> Result<SkillDefinition, ParseError> {
         let content = std::fs::read_to_string(path)
-            .map_err(|e| ParseError::InvalidYaml(format!("Failed to read file: {}", e)))?;
+            .map_err(|e| ParseError::InvalidYaml(format!("Failed to read file: {e}")))?;
         parse_skill_md(&content)
     }
 }

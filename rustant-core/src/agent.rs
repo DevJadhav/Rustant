@@ -245,6 +245,9 @@ pub struct Agent {
     consecutive_failures: (String, usize),
     /// Recent decision explanations for transparency (capped at 50).
     recent_explanations: Vec<DecisionExplanation>,
+    /// Optional output redactor for stripping secrets before storage.
+    /// Set by CLI when security features are enabled.
+    output_redactor: Option<crate::redact::SharedRedactor>,
     /// Whether plan mode is active (generate plan before executing).
     plan_mode: bool,
     /// The current plan being generated, reviewed, or executed.
@@ -324,6 +327,7 @@ impl Agent {
             job_manager,
             consecutive_failures: (String::new(), 0),
             recent_explanations: Vec::new(),
+            output_redactor: None,
             plan_mode: plan_mode_enabled,
             current_plan: None,
             persona_resolver,
@@ -555,6 +559,26 @@ impl Agent {
                 knowledge_addendum.push_str(&hint);
             }
         }
+        // Hydration: inject relevant codebase context if configured
+        if let Some(ref hydration_config) = self.config.hydration
+            && hydration_config.enabled
+        {
+            let workspace = std::env::current_dir().unwrap_or_default();
+            let pipeline = crate::hydration::HydrationPipeline::new(hydration_config.clone());
+            if pipeline.should_hydrate(&workspace) {
+                let result = pipeline.hydrate(&workspace, task);
+                if !result.context_text.is_empty() {
+                    knowledge_addendum.push_str("\n\n## Relevant Codebase Context\n");
+                    knowledge_addendum.push_str(&result.context_text);
+                    debug!(
+                        files = result.file_count,
+                        tokens = result.estimated_tokens,
+                        "Hydration injected context"
+                    );
+                }
+            }
+        }
+
         self.brain.set_knowledge_addendum(knowledge_addendum);
 
         self.memory.add_message(Message::user(task));
@@ -641,7 +665,7 @@ impl Agent {
                     let enriched = if top.is_empty() {
                         message.clone()
                     } else {
-                        format!("{}. Top consumers: {}", message, top)
+                        format!("{message}. Top consumers: {top}")
                     };
                     self.callback
                         .on_budget_warning(&enriched, BudgetSeverity::Exceeded)
@@ -659,7 +683,7 @@ impl Agent {
                     let enriched = if top.is_empty() {
                         message.clone()
                     } else {
-                        format!("{}. Top consumers: {}", message, top)
+                        format!("{message}. Top consumers: {top}")
                     };
                     self.callback
                         .on_budget_warning(&enriched, BudgetSeverity::Warning)
@@ -744,8 +768,7 @@ impl Agent {
                             );
                             self.callback
                                 .on_assistant_message(&format!(
-                                    "[Routed: {} → {}]",
-                                    name, corrected_name
+                                    "[Routed: {name} → {corrected_name}]"
                                 ))
                                 .await;
                             (corrected_name, corrected_args)
@@ -771,7 +794,7 @@ impl Agent {
                             tokens
                         }
                         Err(e) => {
-                            let error_msg = format!("Tool error: {}", e);
+                            let error_msg = format!("Tool error: {e}");
                             let tokens = error_msg.len() / 4;
                             let result_msg = Message::tool_result(id, &error_msg, true);
                             self.memory.add_message(result_msg);
@@ -789,6 +812,36 @@ impl Agent {
                         }
                     } else {
                         self.consecutive_failures = (String::new(), 0);
+                    }
+
+                    // Verification hook: after file writes, optionally run lint/test/typecheck
+                    if result.is_ok()
+                        && (actual_name == "file_write"
+                            || actual_name == "file_patch"
+                            || actual_name == "smart_edit")
+                        && let Some(ref verify_config) = self.config.verification
+                        && verify_config.run_on_file_write
+                    {
+                        let workspace = std::env::current_dir().unwrap_or_default();
+                        let verify_result = crate::verification::runner::run_verification(
+                            &workspace,
+                            verify_config,
+                        )
+                        .await;
+                        if !verify_result.passed {
+                            let feedback =
+                                crate::verification::feedback::format_feedback(&verify_result);
+                            let feedback_msg = Message::tool_result(
+                                id,
+                                format!("[Verification failed]\n{feedback}"),
+                                true,
+                            );
+                            self.memory.add_message(feedback_msg);
+                            debug!(
+                                errors = verify_result.error_count(),
+                                "Verification failed after file write"
+                            );
+                        }
                     }
 
                     // Check context compression
@@ -831,8 +884,7 @@ impl Agent {
                                         );
                                         self.callback
                                             .on_assistant_message(&format!(
-                                                "[Routed: {} → {}]",
-                                                name, cn
+                                                "[Routed: {name} → {cn}]"
                                             ))
                                             .await;
                                         (cn, ca)
@@ -853,7 +905,7 @@ impl Agent {
                                         tokens
                                     }
                                     Err(e) => {
-                                        let error_msg = format!("Tool error: {}", e);
+                                        let error_msg = format!("Tool error: {e}");
                                         let tokens = error_msg.len() / 4;
                                         let msg = Message::tool_result(id, &error_msg, true);
                                         self.memory.add_message(msg);
@@ -873,6 +925,39 @@ impl Agent {
                                 }
                                 *self.tool_token_usage.entry(name.to_string()).or_insert(0) +=
                                     result_tokens;
+
+                                // Verification hook (same as single ToolCall path)
+                                if result.is_ok()
+                                    && (actual_name == "file_write"
+                                        || actual_name == "file_patch"
+                                        || actual_name == "smart_edit")
+                                    && let Some(ref verify_config) = self.config.verification
+                                    && verify_config.run_on_file_write
+                                {
+                                    let workspace = std::env::current_dir().unwrap_or_default();
+                                    let verify_result =
+                                        crate::verification::runner::run_verification(
+                                            &workspace,
+                                            verify_config,
+                                        )
+                                        .await;
+                                    if !verify_result.passed {
+                                        let feedback =
+                                            crate::verification::feedback::format_feedback(
+                                                &verify_result,
+                                            );
+                                        let feedback_msg = Message::tool_result(
+                                            id,
+                                            format!("[Verification failed]\n{feedback}"),
+                                            true,
+                                        );
+                                        self.memory.add_message(feedback_msg);
+                                        debug!(
+                                            errors = verify_result.error_count(),
+                                            "Verification failed after file write (multipart)"
+                                        );
+                                    }
+                                }
                             }
                             _ => {}
                         }
@@ -972,7 +1057,7 @@ impl Agent {
                             "Retrying streaming after transient error"
                         );
                         self.callback
-                            .on_token(&format!("\n[Retrying in {}s due to: {}]\n", wait, e))
+                            .on_token(&format!("\n[Retrying in {wait}s due to: {e}]\n"))
                             .await;
                         tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
                         last_error = Some(e);
@@ -1087,9 +1172,7 @@ impl Agent {
                 }
                 StreamEvent::ThinkingDelta(delta) => {
                     // Accumulate thinking text (displayed in verbose mode by callback)
-                    self.callback
-                        .on_token(&format!("[Thinking] {}", delta))
-                        .await;
+                    self.callback.on_token(&format!("[Thinking] {delta}")).await;
                 }
                 StreamEvent::ThinkingComplete { .. } => {
                     // Thinking phase complete — no action needed for streaming
@@ -1109,7 +1192,7 @@ impl Agent {
 
         // Wait for the producer to finish and propagate errors
         producer.await.map_err(|e| LlmError::Streaming {
-            message: format!("Streaming task panicked: {}", e),
+            message: format!("Streaming task panicked: {e}"),
         })??;
 
         // Track usage in brain
@@ -1217,7 +1300,7 @@ impl Agent {
         let action = SafetyGuardian::create_rich_action_request(
             tool_name,
             tool.risk_level,
-            format!("Execute tool: {}", tool_name),
+            format!("Execute tool: {tool_name}"),
             details,
             approval_context,
         );
@@ -1231,10 +1314,10 @@ impl Agent {
             PermissionResult::Denied { reason } => {
                 // Emit explanation for safety denial decision
                 let mut builder = ExplanationBuilder::new(DecisionType::ErrorRecovery {
-                    error: format!("Permission denied for tool '{}'", tool_name),
+                    error: format!("Permission denied for tool '{tool_name}'"),
                     strategy: "Returning error to LLM for re-planning".to_string(),
                 });
-                builder.add_reasoning_step(format!("Denied: {}", reason), None);
+                builder.add_reasoning_step(format!("Denied: {reason}"), None);
                 builder.set_confidence(1.0);
                 let explanation = builder.build();
                 self.callback.on_decision_explanation(&explanation).await;
@@ -1272,7 +1355,7 @@ impl Agent {
                     ApprovalDecision::Deny => {
                         // Emit explanation for user denial decision
                         let mut builder = ExplanationBuilder::new(DecisionType::ErrorRecovery {
-                            error: format!("User denied approval for tool '{}'", tool_name),
+                            error: format!("User denied approval for tool '{tool_name}'"),
                             strategy: "Returning error to LLM for re-planning".to_string(),
                         });
                         builder.add_reasoning_step(
@@ -1329,7 +1412,7 @@ impl Agent {
 
             // Emit explanation for contract violation
             let mut builder = ExplanationBuilder::new(DecisionType::ErrorRecovery {
-                error: format!("Contract violation: {:?}", contract_result),
+                error: format!("Contract violation: {contract_result:?}"),
                 strategy: "Returning error to LLM for re-planning".to_string(),
             });
             builder.set_confidence(1.0);
@@ -1339,7 +1422,7 @@ impl Agent {
 
             return Err(ToolError::PermissionDenied {
                 name: tool_name.to_string(),
-                reason: format!("Safety contract violation: {:?}", contract_result),
+                reason: format!("Safety contract violation: {contract_result:?}"),
             });
         }
 
@@ -1384,10 +1467,12 @@ impl Agent {
                     } else {
                         output.content.clone()
                     };
+                    // Redact secrets before storing in long-term memory
+                    let redacted_summary = self.redact_output(&summary);
                     self.memory.long_term.add_fact(
                         crate::memory::Fact::new(
-                            format!("Tool '{}' result: {}", tool_name, summary),
-                            format!("tool:{}", tool_name),
+                            format!("Tool '{tool_name}' result: {redacted_summary}"),
+                            format!("tool:{tool_name}"),
                         )
                         .with_tags(vec!["tool_result".to_string(), tool_name.to_string()]),
                     );
@@ -1462,7 +1547,7 @@ impl Agent {
             }
             ActionDetails::ShellCommand { command } => {
                 ctx = ctx
-                    .with_reasoning(format!("Executing shell command: {}", command))
+                    .with_reasoning(format!("Executing shell command: {command}"))
                     .with_consequence("Shell command will run in the agent workspace".to_string());
                 if risk_level >= RiskLevel::Execute {
                     ctx = ctx.with_consequence(
@@ -1472,12 +1557,12 @@ impl Agent {
             }
             ActionDetails::NetworkRequest { host, method } => {
                 ctx = ctx
-                    .with_reasoning(format!("Making {} request to {}", method, host))
-                    .with_consequence(format!("Network request will be sent to {}", host));
+                    .with_reasoning(format!("Making {method} request to {host}"))
+                    .with_consequence(format!("Network request will be sent to {host}"));
             }
             ActionDetails::GitOperation { operation } => {
                 ctx = ctx
-                    .with_reasoning(format!("Git operation: {}", operation))
+                    .with_reasoning(format!("Git operation: {operation}"))
                     .with_reversibility(ReversibilityInfo {
                         is_reversible: true,
                         undo_description: Some(
@@ -1487,7 +1572,7 @@ impl Agent {
                     });
             }
             _ => {
-                ctx = ctx.with_reasoning(format!("Executing {} tool", tool_name));
+                ctx = ctx.with_reasoning(format!("Executing {tool_name} tool"));
             }
         }
 
@@ -1545,7 +1630,7 @@ impl Agent {
                     .unwrap_or("");
                 let truncated = truncate_str(msg, 80);
                 ActionDetails::GitOperation {
-                    operation: format!("commit: {}", truncated),
+                    operation: format!("commit: {truncated}"),
                 }
             }
             // macOS native tools
@@ -1559,9 +1644,7 @@ impl Agent {
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 ActionDetails::Other {
-                    info: format!("{} {} {}", tool_name, action, title)
-                        .trim()
-                        .to_string(),
+                    info: format!("{tool_name} {action} {title}").trim().to_string(),
                 }
             }
             "macos_app_control" => {
@@ -1574,7 +1657,7 @@ impl Agent {
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 ActionDetails::ShellCommand {
-                    command: format!("{} {}", action, app).trim().to_string(),
+                    command: format!("{action} {app}").trim().to_string(),
                 }
             }
             "macos_clipboard" => {
@@ -1583,7 +1666,7 @@ impl Agent {
                     .and_then(|v| v.as_str())
                     .unwrap_or("read");
                 ActionDetails::Other {
-                    info: format!("clipboard {}", action),
+                    info: format!("clipboard {action}"),
                 }
             }
             "macos_screenshot" => {
@@ -1609,7 +1692,7 @@ impl Agent {
                     ActionDetails::FileDelete { path: path.into() }
                 } else {
                     ActionDetails::Other {
-                        info: format!("Finder: {} {}", action, path),
+                        info: format!("Finder: {action} {path}"),
                     }
                 }
             }
@@ -1640,11 +1723,11 @@ impl Agent {
                         .unwrap_or("(no subject)")
                         .to_string();
                     ActionDetails::Other {
-                        info: format!("SEND EMAIL to {} — subject: {}", to, subject),
+                        info: format!("SEND EMAIL to {to} — subject: {subject}"),
                     }
                 } else {
                     ActionDetails::Other {
-                        info: format!("macos_mail: {}", action),
+                        info: format!("macos_mail: {action}"),
                     }
                 }
             }
@@ -1668,7 +1751,7 @@ impl Agent {
                     }
                 } else {
                     ActionDetails::Other {
-                        info: format!("macos_safari: {}", action),
+                        info: format!("macos_safari: {action}"),
                     }
                 }
             }
@@ -1689,10 +1772,10 @@ impl Agent {
                 let query = arguments["query"]
                     .as_str()
                     .or_else(|| arguments["name"].as_str())
-                    .map(|q| format!("'{}'", q))
+                    .map(|q| format!("'{q}'"))
                     .unwrap_or_default();
                 ActionDetails::Other {
-                    info: format!("Contacts: {} {}", action, query),
+                    info: format!("Contacts: {action} {query}"),
                 }
             }
             "macos_gui_scripting" | "macos_accessibility" => {
@@ -1812,7 +1895,7 @@ impl Agent {
                         priority: MessagePriority::Normal,
                     },
                     _ => ActionDetails::Other {
-                        info: format!("slack:{}", action),
+                        info: format!("slack:{action}"),
                     },
                 }
             }
@@ -1990,7 +2073,7 @@ impl Agent {
                             .and_then(|v| v.as_str())
                             .unwrap_or("unknown");
                         ActionDetails::FileDelete {
-                            path: format!(".rustant/{}/", domain).into(),
+                            path: format!(".rustant/{domain}/").into(),
                         }
                     }
                     "set_boundary" | "encrypt_store" => ActionDetails::FileWrite {
@@ -2018,6 +2101,587 @@ impl Agent {
                     },
                 }
             }
+            // ML data pipeline tools → DataPipeline
+            name if name.starts_with("ml_data_") => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let dataset = arguments
+                    .get("dataset")
+                    .or_else(|| arguments.get("dataset_id"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let contains_pii = arguments
+                    .get("contains_pii")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                ActionDetails::DataPipeline {
+                    action,
+                    dataset,
+                    contains_pii,
+                }
+            }
+            // ML feature tools → DataPipeline
+            name if name.starts_with("ml_feature_") => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let feature = arguments
+                    .get("name")
+                    .or_else(|| arguments.get("feature_id"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                ActionDetails::DataPipeline {
+                    action,
+                    dataset: feature,
+                    contains_pii: false,
+                }
+            }
+            // ML training tools → ModelTraining
+            "ml_train" | "ml_experiment" | "ml_hyperparams" | "ml_checkpoint" | "ml_metrics" => {
+                let framework = arguments
+                    .get("framework")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let model_type = arguments
+                    .get("model_type")
+                    .or_else(|| arguments.get("model"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let dataset_id = arguments
+                    .get("dataset_id")
+                    .or_else(|| arguments.get("dataset"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                ActionDetails::ModelTraining {
+                    framework,
+                    model_type,
+                    dataset_id,
+                }
+            }
+            // Also match ml_train_* prefix variants (e.g. ml_train_distributed)
+            name if name.starts_with("ml_train") => {
+                let framework = arguments
+                    .get("framework")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let model_type = arguments
+                    .get("model_type")
+                    .or_else(|| arguments.get("model"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let dataset_id = arguments
+                    .get("dataset_id")
+                    .or_else(|| arguments.get("dataset"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                ActionDetails::ModelTraining {
+                    framework,
+                    model_type,
+                    dataset_id,
+                }
+            }
+            // ML model management, finetune, quantize, eval, adapter, chat dataset → ModelInference
+            "ml_model_registry" | "ml_model_export" | "ml_model_compare" | "ml_finetune"
+            | "ml_quantize" | "ml_eval" | "ml_adapter" | "ml_chat_dataset" => {
+                let model_name = arguments
+                    .get("model_name")
+                    .or_else(|| arguments.get("model"))
+                    .or_else(|| arguments.get("model_id"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let backend = arguments
+                    .get("backend")
+                    .or_else(|| arguments.get("framework"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                ActionDetails::ModelInference {
+                    model_name,
+                    backend,
+                    action,
+                }
+            }
+            // Catch-all for ml_model_* prefix
+            name if name.starts_with("ml_model_") => {
+                let model_name = arguments
+                    .get("model_name")
+                    .or_else(|| arguments.get("model"))
+                    .or_else(|| arguments.get("model_id"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let backend = arguments
+                    .get("backend")
+                    .or_else(|| arguments.get("framework"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                ActionDetails::ModelInference {
+                    model_name,
+                    backend,
+                    action,
+                }
+            }
+            // RAG tools → RagQuery
+            name if name.starts_with("rag_") => {
+                let query_type = arguments
+                    .get("query_type")
+                    .or_else(|| arguments.get("action"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let collection = arguments
+                    .get("collection")
+                    .or_else(|| arguments.get("index"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("default")
+                    .to_string();
+                let top_k = arguments
+                    .get("top_k")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(10) as usize;
+                ActionDetails::RagQuery {
+                    query_type,
+                    collection,
+                    top_k,
+                }
+            }
+            // Eval tools → EvaluationRun
+            name if name.starts_with("eval_") => {
+                let evaluator = arguments
+                    .get("evaluator")
+                    .or_else(|| arguments.get("metric"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let scope = arguments
+                    .get("scope")
+                    .or_else(|| arguments.get("dataset"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let traces_count = arguments
+                    .get("traces_count")
+                    .or_else(|| arguments.get("num_samples"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize;
+                ActionDetails::EvaluationRun {
+                    evaluator,
+                    scope,
+                    traces_count,
+                }
+            }
+            // Research tools → ResearchAction
+            name if name.starts_with("research_") => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let source = arguments
+                    .get("source")
+                    .or_else(|| arguments.get("provider"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let query = arguments
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                ActionDetails::ResearchAction {
+                    action,
+                    source,
+                    query,
+                }
+            }
+            // Inference tools → ModelInference
+            name if name.starts_with("inference_") => {
+                let model_name = arguments
+                    .get("model_name")
+                    .or_else(|| arguments.get("model"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let backend = arguments
+                    .get("backend")
+                    .or_else(|| arguments.get("runtime"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(name.strip_prefix("inference_").unwrap_or("unknown"))
+                    .to_string();
+                ActionDetails::ModelInference {
+                    model_name,
+                    backend,
+                    action,
+                }
+            }
+            // AI tools — dispatch by sub-prefix
+            name if name.starts_with("ai_") => {
+                let suffix = name.strip_prefix("ai_").unwrap_or(name);
+                if suffix.starts_with("safety")
+                    || suffix.starts_with("pii")
+                    || suffix.starts_with("bias")
+                    || suffix.starts_with("alignment")
+                {
+                    // Safety/compliance AI tools → EvaluationRun
+                    let evaluator = arguments
+                        .get("evaluator")
+                        .or_else(|| arguments.get("check_type"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(suffix)
+                        .to_string();
+                    let scope = arguments
+                        .get("scope")
+                        .or_else(|| arguments.get("target"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let traces_count = arguments
+                        .get("traces_count")
+                        .or_else(|| arguments.get("num_samples"))
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as usize;
+                    ActionDetails::EvaluationRun {
+                        evaluator,
+                        scope,
+                        traces_count,
+                    }
+                } else if suffix.starts_with("red_team")
+                    || suffix.starts_with("adversarial")
+                    || suffix.starts_with("provenance")
+                {
+                    // Adversarial/provenance AI tools → ModelInference
+                    let model_name = arguments
+                        .get("model_name")
+                        .or_else(|| arguments.get("model"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let backend = arguments
+                        .get("backend")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let action = arguments
+                        .get("action")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(suffix)
+                        .to_string();
+                    ActionDetails::ModelInference {
+                        model_name,
+                        backend,
+                        action,
+                    }
+                } else if suffix.starts_with("explain")
+                    || suffix.starts_with("data_lineage")
+                    || suffix.starts_with("source")
+                {
+                    // Explainability/lineage AI tools → ResearchAction
+                    let action = arguments
+                        .get("action")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(suffix)
+                        .to_string();
+                    let source = arguments
+                        .get("source")
+                        .or_else(|| arguments.get("model"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let query = arguments
+                        .get("query")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    ActionDetails::ResearchAction {
+                        action,
+                        source,
+                        query,
+                    }
+                } else if suffix.starts_with("attention")
+                    || suffix.starts_with("feature_importance")
+                    || suffix.starts_with("counterfactual")
+                {
+                    // Interpretability AI tools → EvaluationRun
+                    let evaluator = arguments
+                        .get("evaluator")
+                        .or_else(|| arguments.get("method"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(suffix)
+                        .to_string();
+                    let scope = arguments
+                        .get("scope")
+                        .or_else(|| arguments.get("model"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let traces_count = arguments
+                        .get("traces_count")
+                        .or_else(|| arguments.get("num_samples"))
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as usize;
+                    ActionDetails::EvaluationRun {
+                        evaluator,
+                        scope,
+                        traces_count,
+                    }
+                } else {
+                    // Fallback for unrecognized ai_* tools
+                    ActionDetails::Other {
+                        info: format!("ai_tool: {name} {arguments}"),
+                    }
+                }
+            }
+            // --- Fullstack development tools ---
+            "scaffold" => {
+                let template = arguments
+                    .get("template")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let target_dir = arguments
+                    .get("name")
+                    .or_else(|| arguments.get("target_dir"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(".")
+                    .to_string();
+                let framework = arguments
+                    .get("framework")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                ActionDetails::Scaffold {
+                    template,
+                    target_dir,
+                    framework,
+                }
+            }
+            "dev_server" => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("status")
+                    .to_string();
+                let port = arguments
+                    .get("port")
+                    .and_then(|v| v.as_u64())
+                    .map(|p| p as u16);
+                ActionDetails::DevServer { action, port }
+            }
+            "database" => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("status")
+                    .to_string();
+                let database = arguments
+                    .get("database")
+                    .or_else(|| arguments.get("db_path"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let reversible = matches!(action.as_str(), "query" | "schema" | "status");
+                ActionDetails::DatabaseOperation {
+                    action,
+                    database,
+                    reversible,
+                }
+            }
+            "test_runner" => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("run_all")
+                    .to_string();
+                let scope = arguments
+                    .get("file")
+                    .or_else(|| arguments.get("test_name"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| format!("{action}: {s}"))
+                    .unwrap_or_else(|| action.clone());
+                let framework = arguments
+                    .get("framework")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                ActionDetails::TestExecution { scope, framework }
+            }
+            "lint" => {
+                let action = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("check")
+                    .to_string();
+                let auto_fix = matches!(action.as_str(), "fix" | "format");
+                ActionDetails::LintCheck { action, auto_fix }
+            }
+            // --- Security scanning tools ---
+            "security_scan"
+            | "sast_scan"
+            | "sca_scan"
+            | "secrets_scan"
+            | "secrets_validate"
+            | "container_scan"
+            | "dockerfile_lint"
+            | "iac_scan"
+            | "terraform_check"
+            | "k8s_lint"
+            | "supply_chain_check"
+            | "vulnerability_check" => {
+                let scanner = tool_name
+                    .replace("_scan", "")
+                    .replace("_check", "")
+                    .replace("_lint", "");
+                let target = arguments
+                    .get("path")
+                    .or_else(|| arguments.get("image"))
+                    .or_else(|| arguments.get("package"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(".")
+                    .to_string();
+                let scope = arguments
+                    .get("scanners")
+                    .or_else(|| arguments.get("scope"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("all")
+                    .to_string();
+                ActionDetails::SecurityScan {
+                    scanner,
+                    target,
+                    scope,
+                }
+            }
+            // --- Code review & quality tools ---
+            "analyze_diff" | "code_review" | "suggest_fix" | "quality_score"
+            | "complexity_check" | "dead_code_detect" | "duplicate_detect" | "tech_debt_report" => {
+                let target = arguments
+                    .get("path")
+                    .or_else(|| arguments.get("diff"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(".")
+                    .to_string();
+                ActionDetails::SecurityScan {
+                    scanner: tool_name.to_string(),
+                    target,
+                    scope: "review".to_string(),
+                }
+            }
+            // --- Apply fix (write action) ---
+            "apply_fix" => {
+                let path = arguments
+                    .get("file")
+                    .or_else(|| arguments.get("path"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let size = arguments
+                    .get("replacement")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.len())
+                    .unwrap_or(0);
+                ActionDetails::FileWrite {
+                    path: path.into(),
+                    size_bytes: size,
+                }
+            }
+            // --- Compliance tools ---
+            "license_check" | "sbom_generate" | "sbom_diff" | "policy_check"
+            | "compliance_report" | "audit_export" | "risk_score" => {
+                let framework = arguments
+                    .get("framework")
+                    .or_else(|| arguments.get("format"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("general")
+                    .to_string();
+                let scope = arguments
+                    .get("path")
+                    .or_else(|| arguments.get("scope"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("workspace")
+                    .to_string();
+                ActionDetails::ComplianceCheck { framework, scope }
+            }
+            // --- Incident response tools ---
+            "threat_detect" | "log_analyze" | "alert_triage" => {
+                let scanner = tool_name.to_string();
+                let target = arguments
+                    .get("path")
+                    .or_else(|| arguments.get("log_file"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(".")
+                    .to_string();
+                ActionDetails::SecurityScan {
+                    scanner,
+                    target,
+                    scope: "incident".to_string(),
+                }
+            }
+            "incident_respond" => {
+                let action_type = arguments
+                    .get("playbook")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("respond")
+                    .to_string();
+                let target = arguments
+                    .get("target")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let mode = arguments
+                    .get("mode")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("dry_run");
+                ActionDetails::IncidentAction {
+                    action_type,
+                    target,
+                    reversible: mode == "dry_run",
+                    incident_id: arguments
+                        .get("incident_id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                }
+            }
+            "alert_status" => {
+                let action_type = arguments
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("update")
+                    .to_string();
+                let target = arguments
+                    .get("alert_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                ActionDetails::IncidentAction {
+                    action_type,
+                    target,
+                    reversible: true,
+                    incident_id: None,
+                }
+            }
             _ => ActionDetails::Other {
                 info: arguments.to_string(),
             },
@@ -2040,11 +2704,48 @@ impl Agent {
             _ => return None,
         };
 
+        // ML-specific workflow routing with tailored tool guidance
+        let ml_hint = match workflow {
+            "ml_data_pipeline" => Some(
+                "WORKFLOW ROUTING: For this data pipeline task, use ml_data_* tools \
+                 (ml_data_ingest, ml_data_transform, ml_data_validate, ml_data_split). \
+                 Start with data ingestion, then clean/transform, validate schema, \
+                 and split into train/val/test sets.",
+            ),
+            "ml_training_experiment" => Some(
+                "WORKFLOW ROUTING: For this training experiment, use ml_train, \
+                 ml_experiment, ml_hyperparams, ml_metrics, and ml_checkpoint tools. \
+                 Set up the experiment first, configure hyperparameters, start training, \
+                 checkpoint periodically, and log metrics.",
+            ),
+            "ml_rag_setup" => Some(
+                "WORKFLOW ROUTING: For this RAG setup task, use rag_* tools \
+                 (rag_ingest, rag_index, rag_query, rag_evaluate). \
+                 Ingest documents, build the vector index, then test retrieval quality.",
+            ),
+            "ml_llm_finetune" => Some(
+                "WORKFLOW ROUTING: For this fine-tuning task, use ml_finetune, \
+                 ml_chat_dataset, ml_adapter, ml_eval, and ml_quantize tools. \
+                 Prepare the dataset, configure LoRA/QLoRA adapters, run fine-tuning, \
+                 evaluate, and optionally quantize the output model.",
+            ),
+            "ai_safety_audit" => Some(
+                "WORKFLOW ROUTING: For this AI safety audit, use ai_safety_*, ai_pii_*, \
+                 ai_bias_*, and ai_alignment_* tools. Check for PII leakage, test for \
+                 bias across demographic groups, validate alignment properties, and \
+                 generate a compliance report.",
+            ),
+            _ => None,
+        };
+
+        if let Some(hint) = ml_hint {
+            return Some(hint.to_string());
+        }
+
         Some(format!(
-            "WORKFLOW ROUTING: For this task, run the '{}' workflow. \
-             Use shell_exec to run: `rustant workflow run {}` — or accomplish \
-             the task directly step by step using available tools.",
-            workflow, workflow
+            "WORKFLOW ROUTING: For this task, run the '{workflow}' workflow. \
+             Use shell_exec to run: `rustant workflow run {workflow}` — or accomplish \
+             the task directly step by step using available tools."
         ))
     }
 
@@ -2052,6 +2753,64 @@ impl Agent {
     fn tool_routing_hint_from_classification(
         classification: &TaskClassification,
     ) -> Option<String> {
+        // ML tool routing — intercept ML-related workflows with tool-specific hints
+        // before generic workflow routing
+        if let TaskClassification::Workflow(name) = classification {
+            let ml_tool_hint = match name.as_str() {
+                n if n.contains("train") || n.contains("experiment") => Some(
+                    "TOOL ROUTING: For model training tasks, use 'ml_train' to start training runs, \
+                     'ml_experiment' to manage experiments, 'ml_hyperparams' for hyperparameter tuning, \
+                     'ml_checkpoint' for saving/loading checkpoints, and 'ml_metrics' to log metrics. \
+                     Use 'ml_finetune' for fine-tuning pre-trained models.",
+                ),
+                n if n.contains("rag") || n.contains("retrieval") || n.contains("ingest") => Some(
+                    "TOOL ROUTING: For RAG tasks, use 'rag_ingest' to load documents, \
+                     'rag_index' to build/update the vector index, 'rag_query' to perform \
+                     retrieval-augmented queries, and 'rag_evaluate' to assess retrieval quality. \
+                     Do NOT use web_fetch or shell_exec for document ingestion.",
+                ),
+                n if n.contains("eval") || n.contains("benchmark") || n.contains("judge") => Some(
+                    "TOOL ROUTING: For evaluation tasks, use 'eval_run' to execute evaluations, \
+                     'eval_compare' to compare model outputs, 'eval_report' to generate reports, \
+                     and 'eval_dataset' to manage evaluation datasets. Use 'ai_bias_check' for \
+                     fairness evaluation.",
+                ),
+                n if n.contains("inference")
+                    || n.contains("serve")
+                    || n.contains("deploy_model") =>
+                {
+                    Some(
+                        "TOOL ROUTING: For model serving/inference tasks, use 'inference_serve' to start \
+                     a model server, 'inference_predict' for batch predictions, 'inference_benchmark' \
+                     for latency testing, and 'ml_quantize' for model optimization.",
+                    )
+                }
+                n if n.contains("research") || n.contains("literature") || n.contains("paper") => {
+                    Some(
+                        "TOOL ROUTING: For ML research tasks, use 'research_search' to find papers, \
+                     'research_summarize' for paper summaries, 'research_compare' to compare approaches, \
+                     and 'research_implement' to generate code from papers. Also consider 'arxiv_research' \
+                     for ArXiv-specific searches.",
+                    )
+                }
+                n if n.contains("safety")
+                    || n.contains("pii")
+                    || n.contains("bias")
+                    || n.contains("compliance") =>
+                {
+                    Some(
+                        "TOOL ROUTING: For AI safety tasks, use 'ai_safety_check' for general safety evaluation, \
+                     'ai_pii_scan' for PII detection, 'ai_bias_check' for fairness testing, and \
+                     'ai_alignment_eval' for alignment verification. Generate reports with 'eval_report'.",
+                    )
+                }
+                _ => None,
+            };
+            if let Some(hint) = ml_tool_hint {
+                return Some(hint.to_string());
+            }
+        }
+
         // Workflow routing (platform-independent, checked first)
         if let Some(hint) = Self::workflow_routing_hint(classification) {
             return Some(hint);
@@ -2152,7 +2911,7 @@ impl Agent {
             _ => return None,
         };
 
-        Some(format!("TOOL ROUTING: {}", tool_hint))
+        Some(format!("TOOL ROUTING: {tool_hint}"))
     }
 
     /// Non-macOS fallback — workflow routing + cross-platform tool routing.
@@ -2160,6 +2919,64 @@ impl Agent {
     fn tool_routing_hint_from_classification(
         classification: &TaskClassification,
     ) -> Option<String> {
+        // ML tool routing — intercept ML-related workflows with tool-specific hints
+        // before generic workflow routing
+        if let TaskClassification::Workflow(name) = classification {
+            let ml_tool_hint = match name.as_str() {
+                n if n.contains("train") || n.contains("experiment") => Some(
+                    "TOOL ROUTING: For model training tasks, use 'ml_train' to start training runs, \
+                     'ml_experiment' to manage experiments, 'ml_hyperparams' for hyperparameter tuning, \
+                     'ml_checkpoint' for saving/loading checkpoints, and 'ml_metrics' to log metrics. \
+                     Use 'ml_finetune' for fine-tuning pre-trained models.",
+                ),
+                n if n.contains("rag") || n.contains("retrieval") || n.contains("ingest") => Some(
+                    "TOOL ROUTING: For RAG tasks, use 'rag_ingest' to load documents, \
+                     'rag_index' to build/update the vector index, 'rag_query' to perform \
+                     retrieval-augmented queries, and 'rag_evaluate' to assess retrieval quality. \
+                     Do NOT use web_fetch or shell_exec for document ingestion.",
+                ),
+                n if n.contains("eval") || n.contains("benchmark") || n.contains("judge") => Some(
+                    "TOOL ROUTING: For evaluation tasks, use 'eval_run' to execute evaluations, \
+                     'eval_compare' to compare model outputs, 'eval_report' to generate reports, \
+                     and 'eval_dataset' to manage evaluation datasets. Use 'ai_bias_check' for \
+                     fairness evaluation.",
+                ),
+                n if n.contains("inference")
+                    || n.contains("serve")
+                    || n.contains("deploy_model") =>
+                {
+                    Some(
+                        "TOOL ROUTING: For model serving/inference tasks, use 'inference_serve' to start \
+                     a model server, 'inference_predict' for batch predictions, 'inference_benchmark' \
+                     for latency testing, and 'ml_quantize' for model optimization.",
+                    )
+                }
+                n if n.contains("research") || n.contains("literature") || n.contains("paper") => {
+                    Some(
+                        "TOOL ROUTING: For ML research tasks, use 'research_search' to find papers, \
+                     'research_summarize' for paper summaries, 'research_compare' to compare approaches, \
+                     and 'research_implement' to generate code from papers. Also consider 'arxiv_research' \
+                     for ArXiv-specific searches.",
+                    )
+                }
+                n if n.contains("safety")
+                    || n.contains("pii")
+                    || n.contains("bias")
+                    || n.contains("compliance") =>
+                {
+                    Some(
+                        "TOOL ROUTING: For AI safety tasks, use 'ai_safety_check' for general safety evaluation, \
+                     'ai_pii_scan' for PII detection, 'ai_bias_check' for fairness testing, and \
+                     'ai_alignment_eval' for alignment verification. Generate reports with 'eval_report'.",
+                    )
+                }
+                _ => None,
+            };
+            if let Some(hint) = ml_tool_hint {
+                return Some(hint.to_string());
+            }
+        }
+
         // Workflow routing (platform-independent, checked first)
         if let Some(hint) = Self::workflow_routing_hint(classification) {
             return Some(hint);
@@ -2340,7 +3157,7 @@ impl Agent {
 
         // Add reasoning based on the tool and arguments
         builder.add_reasoning_step(
-            format!("Selected tool '{}' (risk: {})", tool_name, risk_level),
+            format!("Selected tool '{tool_name}' (risk: {risk_level})"),
             None,
         );
 
@@ -2357,10 +3174,7 @@ impl Agent {
 
         // Context factors from memory and safety state
         if let Some(goal) = &self.memory.working.current_goal {
-            builder.add_context_factor(
-                &format!("Current goal: {}", goal),
-                FactorInfluence::Positive,
-            );
+            builder.add_context_factor(&format!("Current goal: {goal}"), FactorInfluence::Positive);
         }
 
         builder.add_context_factor(
@@ -2645,7 +3459,7 @@ impl Agent {
             .take(n)
             .map(|(name, tokens)| {
                 let pct = (**tokens as f64 / total as f64 * 100.0) as u8;
-                format!("{} ({}%)", name, pct)
+                format!("{name} ({pct}%)")
             })
             .collect();
         top.join(", ")
@@ -2683,6 +3497,22 @@ impl Agent {
         }
     }
 
+    // --- Redaction ---
+
+    /// Set the output redactor for stripping secrets from tool outputs before
+    /// they are stored in long-term memory or audit trails.
+    pub fn set_output_redactor(&mut self, redactor: crate::redact::SharedRedactor) {
+        self.output_redactor = Some(redactor);
+    }
+
+    /// Apply redaction if a redactor is configured, otherwise return unchanged.
+    fn redact_output(&self, text: &str) -> String {
+        match &self.output_redactor {
+            Some(redactor) => redactor.redact(text),
+            None => text.to_string(),
+        }
+    }
+
     // --- Plan Mode ---
 
     /// Toggle plan mode on or off.
@@ -2716,10 +3546,8 @@ impl Agent {
             .collect();
         let tools_str = tool_list.join("\n");
 
-        let plan_prompt = format!(
-            "{}\n\nAvailable tools:\n{}\n\nTask: {}",
-            PLAN_GENERATION_PROMPT, tools_str, task
-        );
+        let plan_prompt =
+            format!("{PLAN_GENERATION_PROMPT}\n\nAvailable tools:\n{tools_str}\n\nTask: {task}");
 
         // Use a temporary conversation for plan generation (don't pollute memory)
         let messages = vec![Message::system(&plan_prompt), Message::user(task)];
@@ -2792,7 +3620,7 @@ impl Agent {
                             .await;
                         Ok(output.content)
                     }
-                    Err(e) => Err(format!("{}", e)),
+                    Err(e) => Err(format!("{e}")),
                 }
             } else {
                 // No specific tool — let the LLM handle this step
@@ -2824,7 +3652,7 @@ impl Agent {
                         self.memory.add_message(resp.message);
                         Ok(text)
                     }
-                    Err(e) => Err(format!("{}", e)),
+                    Err(e) => Err(format!("{e}")),
                 }
             };
 
@@ -2893,7 +3721,7 @@ impl Agent {
             if !answer.is_empty() {
                 // Add clarification answer to context for potential re-generation
                 self.memory
-                    .add_message(Message::user(format!("Q: {} A: {}", question, answer)));
+                    .add_message(Message::user(format!("Q: {question} A: {answer}")));
             }
         }
 
@@ -3215,7 +4043,7 @@ mod tests {
             executor: Box::new(|args: serde_json::Value| {
                 Box::pin(async move {
                     let text = args["text"].as_str().unwrap_or("no text");
-                    Ok(ToolOutput::text(format!("Echo: {}", text)))
+                    Ok(ToolOutput::text(format!("Echo: {text}")))
                 })
             }),
         });
@@ -3295,7 +4123,7 @@ mod tests {
             RustantError::Agent(AgentError::MaxIterationsReached { max }) => {
                 assert_eq!(max, 50);
             }
-            e => panic!("Expected MaxIterationsReached, got: {:?}", e),
+            e => panic!("Expected MaxIterationsReached, got: {e:?}"),
         }
     }
 
@@ -3325,7 +4153,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             RustantError::Agent(AgentError::Cancelled) => {}
-            e => panic!("Expected Cancelled, got: {:?}", e),
+            e => panic!("Expected Cancelled, got: {e:?}"),
         }
     }
 
@@ -3384,7 +4212,7 @@ mod tests {
             DecisionType::ToolSelection { selected_tool } => {
                 assert_eq!(selected_tool, "echo");
             }
-            other => panic!("Expected ToolSelection, got {:?}", other),
+            other => panic!("Expected ToolSelection, got {other:?}"),
         }
     }
 
@@ -3416,7 +4244,7 @@ mod tests {
             executor: Box::new(|args: serde_json::Value| {
                 Box::pin(async move {
                     let text = args["text"].as_str().unwrap_or("no text");
-                    Ok(ToolOutput::text(format!("Echo: {}", text)))
+                    Ok(ToolOutput::text(format!("Echo: {text}")))
                 })
             }),
         });
@@ -3557,7 +4385,7 @@ mod tests {
             ActionDetails::FileRead { path } => {
                 assert_eq!(path, std::path::PathBuf::from("src/lib.rs"));
             }
-            other => panic!("Expected FileRead, got {:?}", other),
+            other => panic!("Expected FileRead, got {other:?}"),
         }
     }
 
@@ -3577,7 +4405,7 @@ mod tests {
                 assert_eq!(path, std::path::PathBuf::from("x.rs"));
                 assert_eq!(size_bytes, 5); // "hello".len()
             }
-            other => panic!("Expected FileWrite, got {:?}", other),
+            other => panic!("Expected FileWrite, got {other:?}"),
         }
     }
 
@@ -3589,7 +4417,7 @@ mod tests {
             ActionDetails::ShellCommand { command } => {
                 assert_eq!(command, "cargo test");
             }
-            other => panic!("Expected ShellCommand, got {:?}", other),
+            other => panic!("Expected ShellCommand, got {other:?}"),
         }
     }
 
@@ -3601,16 +4429,14 @@ mod tests {
             ActionDetails::GitOperation { operation } => {
                 assert!(
                     operation.contains("commit"),
-                    "Expected 'commit' in '{}'",
-                    operation
+                    "Expected 'commit' in '{operation}'"
                 );
                 assert!(
                     operation.contains("fix bug"),
-                    "Expected 'fix bug' in '{}'",
-                    operation
+                    "Expected 'fix bug' in '{operation}'"
                 );
             }
-            other => panic!("Expected GitOperation, got {:?}", other),
+            other => panic!("Expected GitOperation, got {other:?}"),
         }
     }
 
@@ -3642,8 +4468,7 @@ mod tests {
         let reasoning = ctx.reasoning.unwrap();
         assert!(
             reasoning.contains("100 bytes"),
-            "Reasoning should mention size: {}",
-            reasoning
+            "Reasoning should mention size: {reasoning}"
         );
         assert!(
             !ctx.consequences.is_empty(),
@@ -3713,7 +4538,7 @@ mod tests {
             executor: Box::new(|args: serde_json::Value| {
                 Box::pin(async move {
                     let text = args["text"].as_str().unwrap_or("no text");
-                    Ok(ToolOutput::text(format!("Echo: {}", text)))
+                    Ok(ToolOutput::text(format!("Echo: {text}")))
                 })
             }),
         });
@@ -3965,7 +4790,7 @@ mod tests {
             agent.register_tool(RegisteredTool {
                 definition: ToolDefinition {
                     name: name.to_string(),
-                    description: format!("{} tool", name),
+                    description: format!("{name} tool"),
                     parameters: serde_json::json!({"type": "object"}),
                 },
                 risk_level: RiskLevel::ReadOnly,
