@@ -1,0 +1,74 @@
+name: Release Checks
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to validate (e.g. 1.0.2)'
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config libdbus-1-dev libssl-dev perl build-essential jq
+
+      - name: Verify version consistency
+        run: |
+          EXPECTED="${{ inputs.version }}"
+          ACTUAL=$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[] | select(.name == "rustant") | .version')
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "ERROR: Expected version $EXPECTED but Cargo.toml has $ACTUAL"
+            exit 1
+          fi
+          echo "Version $ACTUAL matches expected $EXPECTED"
+
+      - name: Check CHANGELOG has entry
+        run: |
+          if ! grep -q "\[${{ inputs.version }}\]" CHANGELOG.md; then
+            echo "ERROR: CHANGELOG.md has no entry for version ${{ inputs.version }}"
+            exit 1
+          fi
+
+      - name: Configure git for tests
+        run: |
+          git config --global user.email "test@test.com"
+          git config --global user.name "Test User"
+          git config --global commit.gpgsign false
+
+      - name: Run full test suite
+        run: cargo test --workspace --exclude rustant-ui
+
+      - name: Dry-run publish (all crates)
+        run: |
+          for crate in rustant-core rustant-tools rustant-plugins rustant-security rustant-ml rustant-mcp rustant; do
+            echo "Dry-run publishing $crate..."
+            cargo publish -p "$crate" --dry-run --allow-dirty
+          done
+
+      - name: Build release binary
+        run: cargo build --workspace --release --exclude rustant-ui
+
+      - name: Check binary size
+        run: |
+          SIZE=$(stat -c%s target/release/rustant 2>/dev/null || stat -f%z target/release/rustant 2>/dev/null)
+          echo "Binary size: $SIZE bytes ($(( SIZE / 1024 / 1024 )) MB)"
+          if [ "$SIZE" -gt 104857600 ]; then
+            echo "ERROR: Binary exceeds 100MB limit"
+            exit 1
+          fi

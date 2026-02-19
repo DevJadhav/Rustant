@@ -1,0 +1,56 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'rustant-core/**'
+      - 'rustant-tools/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'rustant-core/**'
+      - 'rustant-tools/**'
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  benchmark:
+    name: Run Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config libdbus-1-dev libssl-dev perl build-essential
+
+      - name: Run benchmarks (core)
+        run: cargo bench -p rustant-core -- --output-format bencher | tee core-bench.txt
+
+      - name: Run benchmarks (tools)
+        run: cargo bench -p rustant-tools -- --output-format bencher | tee tools-bench.txt
+
+      - name: Store benchmark results
+        if: github.ref == 'refs/heads/main'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: Rustant Benchmarks
+          tool: cargo
+          output-file-path: core-bench.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: '130%'
+          comment-on-alert: true
+          fail-on-alert: false

@@ -23,6 +23,14 @@ target
 # Rustant config may contain credentials — never commit
 .rustant
 
+# macOS system files
+.DS_Store
+**/.DS_Store
+
+# Stale build artifacts
+*.rlib
+
+# Working documents
 plan.md
 CLAUDE.md
 verification.md

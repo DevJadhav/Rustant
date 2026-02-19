@@ -6,8 +6,15 @@ on:
   pull_request:
     branches: [ main ]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: short
   RUSTFLAGS: "-Dwarnings"
 
 jobs:
@@ -20,8 +27,7 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
-          components: rustfmt, clippy
+          cache: true
 
       - name: Install system dependencies
         run: |
@@ -34,8 +40,8 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --exclude rustant-ui -- -D warnings
 
-  test:
-    name: Test (${{ matrix.os }})
+  test-core:
+    name: Test Core (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     needs: check
     strategy:
@@ -48,7 +54,7 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          cache: true
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -62,13 +68,206 @@ jobs:
           git config --global user.name "Test User"
           git config --global commit.gpgsign false
 
-      - name: Run tests
-        run: cargo test --workspace --exclude rustant-ui
+      - name: Test rustant-core
+        run: cargo test -p rustant-core
+
+  test-tools:
+    name: Test Tools (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: true
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config libdbus-1-dev libssl-dev perl build-essential
+
+      - name: Configure git for tests
+        run: |
+          git config --global user.email "test@test.com"
+          git config --global user.name "Test User"
+          git config --global commit.gpgsign false
+
+      - name: Test rustant-tools
+        run: cargo test -p rustant-tools
+
+  test-security:
+    name: Test Security
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config libdbus-1-dev libssl-dev perl build-essential
+
+      - name: Configure git for tests
+        run: |
+          git config --global user.email "test@test.com"
+          git config --global user.name "Test User"
+          git config --global commit.gpgsign false
+
+      - name: Test rustant-security
+        run: cargo test -p rustant-security
+
+  test-ml:
+    name: Test ML
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config libdbus-1-dev libssl-dev perl build-essential
+
+      - name: Configure git for tests
+        run: |
+          git config --global user.email "test@test.com"
+          git config --global user.name "Test User"
+          git config --global commit.gpgsign false
+
+      - name: Test rustant-ml
+        run: cargo test -p rustant-ml
+
+  test-mcp-plugins:
+    name: Test MCP & Plugins
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config libdbus-1-dev libssl-dev perl build-essential
+
+      - name: Configure git for tests
+        run: |
+          git config --global user.email "test@test.com"
+          git config --global user.name "Test User"
+          git config --global commit.gpgsign false
+
+      - name: Test rustant-mcp and rustant-plugins
+        run: cargo test -p rustant-mcp -p rustant-plugins
+
+  test-cli:
+    name: Test CLI
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config libdbus-1-dev libssl-dev perl build-essential
+
+      - name: Configure git for tests
+        run: |
+          git config --global user.email "test@test.com"
+          git config --global user.name "Test User"
+          git config --global commit.gpgsign false
+
+      - name: Test rustant CLI
+        run: cargo test -p rustant
+
+  test-features:
+    name: Feature Matrix (${{ matrix.crate }} ${{ matrix.label }})
+    runs-on: ubuntu-latest
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { crate: rustant-core, features: "--no-default-features", label: "no-defaults" }
+          - { crate: rustant-security, features: "--no-default-features", label: "no-defaults" }
+          - { crate: rustant-security, features: "--features sast-all", label: "sast-all" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config libdbus-1-dev libssl-dev perl build-essential
+
+      - name: Configure git for tests
+        run: |
+          git config --global user.email "test@test.com"
+          git config --global user.name "Test User"
+          git config --global commit.gpgsign false
+
+      - name: Test with feature flags
+        run: cargo test -p ${{ matrix.crate }} ${{ matrix.features }}
+
+  doctest:
+    name: Doctests & Rustdoc
+    runs-on: ubuntu-latest
+    needs: check
+    env:
+      RUSTDOCFLAGS: "-D warnings"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake pkg-config libdbus-1-dev libssl-dev perl build-essential
+
+      - name: Run doctests
+        run: cargo test --doc --workspace --exclude rustant-ui
+
+      - name: Build rustdoc
+        run: cargo doc --workspace --exclude rustant-ui --no-deps
 
   audit:
     name: Security Audit
     runs-on: ubuntu-latest
-    needs: test
+    needs: check
     steps:
       - uses: actions/checkout@v4
 
@@ -81,14 +280,14 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test-core, test-tools, test-security, test-ml, test-mcp-plugins, test-cli]
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          cache: true
 
       - name: Install system dependencies
         run: |
