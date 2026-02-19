@@ -65,7 +65,7 @@ fn validate_arguments(tool_name: &str, schema: &Value, arguments: &Value) -> Res
                 Ok(())
             } else {
                 Err(McpError::InvalidParams {
-                    message: format!("Schema validation failed for '{}': {}", tool_name, msg),
+                    message: format!("Schema validation failed for '{tool_name}': {msg}"),
                 })
             }
         }
@@ -84,6 +84,8 @@ pub struct RequestHandler {
     injection_detector: Option<InjectionDetector>,
     /// Rate limiter for tool calls.
     rate_limiter: Option<McpRateLimiter>,
+    /// Secret redactor applied to all tool outputs before returning to client.
+    secret_redactor: rustant_security::SecretRedactor,
 }
 
 impl RequestHandler {
@@ -122,6 +124,7 @@ impl RequestHandler {
             mcp_safety,
             injection_detector,
             rate_limiter,
+            secret_redactor: rustant_security::SecretRedactor::new(),
         }
     }
 
@@ -156,7 +159,7 @@ impl RequestHandler {
         };
 
         serde_json::to_value(result).map_err(|e| McpError::InternalError {
-            message: format!("Failed to serialize initialize result: {}", e),
+            message: format!("Failed to serialize initialize result: {e}"),
         })
     }
 
@@ -185,7 +188,7 @@ impl RequestHandler {
 
         let result = ListToolsResult { tools };
         serde_json::to_value(result).map_err(|e| McpError::InternalError {
-            message: format!("Failed to serialize tools list: {}", e),
+            message: format!("Failed to serialize tools list: {e}"),
         })
     }
 
@@ -217,7 +220,7 @@ impl RequestHandler {
         // Verify the tool exists before executing
         if self.tool_registry.get(tool_name).is_none() {
             return Err(McpError::ToolError {
-                message: format!("Tool not found: {}", tool_name),
+                message: format!("Tool not found: {tool_name}"),
             });
         }
 
@@ -240,7 +243,7 @@ impl RequestHandler {
             if self.mcp_safety.denied_tools.iter().any(|d| d == tool_name) {
                 warn!(tool = %tool_name, "MCP tool denied by policy");
                 return Err(McpError::ToolDenied {
-                    message: format!("Tool '{}' is denied by MCP safety policy", tool_name),
+                    message: format!("Tool '{tool_name}' is denied by MCP safety policy"),
                 });
             }
 
@@ -260,8 +263,7 @@ impl RequestHandler {
                     );
                     return Err(McpError::ToolDenied {
                         message: format!(
-                            "Tool '{}' risk level ({:?}) exceeds max allowed ({:?})",
-                            tool_name, tool_risk, max_risk
+                            "Tool '{tool_name}' risk level ({tool_risk:?}) exceeds max allowed ({max_risk:?})"
                         ),
                     });
                 }
@@ -329,6 +331,19 @@ impl RequestHandler {
                     output.content
                 };
 
+                // Redact secrets from tool output before returning to client
+                {
+                    let redaction = self.secret_redactor.redact(&text);
+                    if redaction.count > 0 {
+                        debug!(
+                            tool = %tool_name,
+                            redacted_count = redaction.count,
+                            "Redacted secrets from MCP tool output"
+                        );
+                    }
+                    text = redaction.redacted;
+                }
+
                 // Output injection scan (warn-prefix, don't block)
                 if self.mcp_safety.enabled
                     && self.mcp_safety.scan_outputs
@@ -366,7 +381,7 @@ impl RequestHandler {
                 };
 
                 serde_json::to_value(result).map_err(|e| McpError::InternalError {
-                    message: format!("Failed to serialize tool result: {}", e),
+                    message: format!("Failed to serialize tool result: {e}"),
                 })
             }
             Err(e) => {
@@ -382,15 +397,14 @@ impl RequestHandler {
                 }
 
                 warn!(tool = %tool_name, error = %e, "Tool execution failed");
+                let error_text = self.secret_redactor.redact(&format!("Error: {e}")).redacted;
                 let result = CallToolResult {
-                    content: vec![ToolContent::Text {
-                        text: format!("Error: {}", e),
-                    }],
+                    content: vec![ToolContent::Text { text: error_text }],
                     is_error: Some(true),
                 };
 
                 serde_json::to_value(result).map_err(|e| McpError::InternalError {
-                    message: format!("Failed to serialize error result: {}", e),
+                    message: format!("Failed to serialize error result: {e}"),
                 })
             }
         }
@@ -407,7 +421,7 @@ impl RequestHandler {
 
         let result = ListResourcesResult { resources };
         serde_json::to_value(result).map_err(|e| McpError::InternalError {
-            message: format!("Failed to serialize resources list: {}", e),
+            message: format!("Failed to serialize resources list: {e}"),
         })
     }
 
@@ -423,7 +437,7 @@ impl RequestHandler {
         let result = ReadResourceResult { contents };
 
         serde_json::to_value(result).map_err(|e| McpError::InternalError {
-            message: format!("Failed to serialize resource contents: {}", e),
+            message: format!("Failed to serialize resource contents: {e}"),
         })
     }
 
@@ -434,7 +448,7 @@ impl RequestHandler {
             "initialize" => {
                 let init_params: InitializeParams =
                     serde_json::from_value(params).map_err(|e| McpError::InvalidParams {
-                        message: format!("Invalid initialize params: {}", e),
+                        message: format!("Invalid initialize params: {e}"),
                     })?;
                 self.handle_initialize(init_params)
             }
@@ -446,7 +460,7 @@ impl RequestHandler {
             "tools/call" => {
                 let call_params: CallToolParams =
                     serde_json::from_value(params).map_err(|e| McpError::InvalidParams {
-                        message: format!("Invalid tools/call params: {}", e),
+                        message: format!("Invalid tools/call params: {e}"),
                     })?;
                 self.handle_tools_call(call_params).await
             }
@@ -454,7 +468,7 @@ impl RequestHandler {
             "resources/read" => {
                 let read_params: ReadResourceParams =
                     serde_json::from_value(params).map_err(|e| McpError::InvalidParams {
-                        message: format!("Invalid resources/read params: {}", e),
+                        message: format!("Invalid resources/read params: {e}"),
                     })?;
                 self.handle_resources_read(read_params)
             }
@@ -484,6 +498,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut registry = ToolRegistry::new();
         rustant_tools::register_builtin_tools(&mut registry, dir.path().to_path_buf());
+        rustant_security::register_security_tools(&mut registry);
         let resource_manager = ResourceManager::new(dir.path().to_path_buf());
         let handler = RequestHandler::new(Arc::new(registry), resource_manager);
         (handler, dir)
@@ -551,11 +566,11 @@ mod tests {
 
         let result = handler.handle_tools_list().unwrap();
         let tools = result["tools"].as_array().unwrap();
-        // 40 base + 3 iMessage + 24 macOS native = 67 on macOS
+        // 72 base (macOS) + 33 security = 105; 45 base + 33 security = 78
         #[cfg(target_os = "macos")]
-        assert_eq!(tools.len(), 67);
+        assert_eq!(tools.len(), 105);
         #[cfg(not(target_os = "macos"))]
-        assert_eq!(tools.len(), 40);
+        assert_eq!(tools.len(), 78);
 
         // Check that each tool has required fields
         for tool in tools {

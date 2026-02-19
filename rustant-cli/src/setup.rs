@@ -288,7 +288,7 @@ pub async fn run_setup(workspace: &Path) -> anyhow::Result<()> {
         let token = match rustant_core::oauth::authorize_browser_flow(&oauth_config, None).await {
             Ok(token) => token,
             Err(e) => {
-                println!("  OAuth login failed: {}", e);
+                println!("  OAuth login failed: {e}");
                 println!("  Falling back to API key entry.\n");
                 return run_setup_api_key(workspace, chosen_provider).await;
             }
@@ -298,7 +298,7 @@ pub async fn run_setup(workspace: &Path) -> anyhow::Result<()> {
 
         // Store the OAuth token
         rustant_core::oauth::store_oauth_token(&cred_store, &chosen_provider.name, &token)
-            .map_err(|e| anyhow::anyhow!("Failed to store OAuth token: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to store OAuth token: {e}"))?;
         println!("  OAuth token stored securely in OS credential store.");
 
         api_key = token.access_token;
@@ -314,14 +314,14 @@ pub async fn run_setup(workspace: &Path) -> anyhow::Result<()> {
 
         // Basic format validation
         if let Err(warning) = validate_api_key_format(&chosen_provider.name, &api_key) {
-            println!("  Warning: {}", warning);
+            println!("  Warning: {warning}");
             println!("  Continuing anyway — the key will be validated against the API.\n");
         }
 
         // Store API key
         cred_store
             .store_key(&chosen_provider.name, &api_key)
-            .map_err(|e| anyhow::anyhow!("Failed to store API key: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to store API key: {e}"))?;
         println!("  API key stored securely in OS credential store.");
     }
 
@@ -340,10 +340,7 @@ pub async fn run_setup(workspace: &Path) -> anyhow::Result<()> {
     let models = list_models(&chosen_provider.name, &api_key, base_url.as_deref())
         .await
         .map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to validate credentials: {}. Please check and try again.",
-                e
-            )
+            anyhow::anyhow!("Failed to validate credentials: {e}. Please check and try again.")
         })?;
 
     if models.is_empty() {
@@ -401,7 +398,7 @@ async fn run_setup_ollama(workspace: &Path) -> anyhow::Result<()> {
     let base_url_default = "http://localhost:11434";
 
     if !is_ollama_available(None).await {
-        println!("  Ollama is not reachable at {}", base_url_default);
+        println!("  Ollama is not reachable at {base_url_default}");
         let custom_url: String = Input::new()
             .with_prompt("Enter Ollama base URL (or press Enter to abort)")
             .default(base_url_default.to_string())
@@ -409,8 +406,7 @@ async fn run_setup_ollama(workspace: &Path) -> anyhow::Result<()> {
 
         if !is_ollama_available(Some(&custom_url)).await {
             anyhow::bail!(
-                "Ollama is not reachable at {}. Please ensure Ollama is running (`ollama serve`) and try again.",
-                custom_url
+                "Ollama is not reachable at {custom_url}. Please ensure Ollama is running (`ollama serve`) and try again."
             );
         }
 
@@ -422,7 +418,7 @@ async fn run_setup_ollama(workspace: &Path) -> anyhow::Result<()> {
 
 /// Run the Ollama setup with a confirmed base URL.
 async fn run_setup_ollama_with_url(workspace: &Path, base_url: &str) -> anyhow::Result<()> {
-    println!("  Ollama detected at {}", base_url);
+    println!("  Ollama detected at {base_url}");
     println!("  Fetching available models...\n");
 
     let models = list_ollama_models(Some(base_url)).await;
@@ -464,17 +460,14 @@ async fn run_setup_ollama_with_url(workspace: &Path, base_url: &str) -> anyhow::
         output_cost_per_million: None,
     };
 
-    let api_url = format!("{}/v1", base_url);
+    let api_url = format!("{base_url}/v1");
     update_config(workspace, &provider, &model_info, Some(&api_url), "none")?;
 
     println!(
         "  Configuration saved to {}",
         workspace.join(".rustant").join("config.toml").display()
     );
-    println!(
-        "\n  Setup complete! Using Ollama with model {}.\n",
-        model_id
-    );
+    println!("\n  Setup complete! Using Ollama with model {model_id}.\n");
 
     Ok(())
 }
@@ -538,22 +531,19 @@ async fn run_setup_api_key(workspace: &Path, provider: &ProviderChoice) -> anyho
         .interact()?;
 
     if let Err(warning) = validate_api_key_format(&provider.name, &api_key) {
-        println!("  Warning: {}", warning);
+        println!("  Warning: {warning}");
         println!("  Continuing anyway — the key will be validated against the API.\n");
     }
     cred_store
         .store_key(&provider.name, &api_key)
-        .map_err(|e| anyhow::anyhow!("Failed to store API key: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to store API key: {e}"))?;
     println!("  API key stored securely in OS credential store.");
 
     println!("\n  Validating credentials and fetching available models...");
     let models = list_models(&provider.name, &api_key, None)
         .await
         .map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to validate credentials: {}. Please check and try again.",
-                e
-            )
+            anyhow::anyhow!("Failed to validate credentials: {e}. Please check and try again.")
         })?;
 
     if models.is_empty() {

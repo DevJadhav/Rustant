@@ -186,14 +186,14 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
             if s.chars().count() > 50 {
                 format!("\"{}...\"", truncate_str(s, 50))
             } else {
-                format!("\"{}\"", s)
+                format!("\"{s}\"")
             }
         }),
         "web_search" => args.get("query").and_then(|v| v.as_str()).map(|s| {
             if s.chars().count() > 50 {
                 format!("\"{}...\"", truncate_str(s, 50))
             } else {
-                format!("\"{}\"", s)
+                format!("\"{s}\"")
             }
         }),
         "web_fetch" | "document_read" => args
@@ -208,20 +208,20 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
             if s.chars().count() > 50 {
                 format!("\"{}...\"", truncate_str(s, 50))
             } else {
-                format!("\"{}\"", s)
+                format!("\"{s}\"")
             }
         }),
         // macOS screen automation tools
         "macos_gui_scripting" => {
             let app = args.get("app_name").and_then(|v| v.as_str()).unwrap_or("?");
             let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("?");
-            Some(format!("{} → {}", app, action))
+            Some(format!("{app} → {action}"))
         }
         "macos_accessibility" => {
             let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("?");
             let app = args.get("app_name").and_then(|v| v.as_str());
             if let Some(app) = app {
-                Some(format!("{} → {}", app, action))
+                Some(format!("{app} → {action}"))
             } else {
                 Some(action.to_string())
             }
@@ -234,7 +234,7 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
             let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("?");
             let query = args.get("query").and_then(|v| v.as_str());
             if let Some(q) = query {
-                Some(format!("{}: {}", action, q))
+                Some(format!("{action}: {q}"))
             } else {
                 Some(action.to_string())
             }
@@ -243,7 +243,7 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
             let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("?");
             let url = args.get("url").and_then(|v| v.as_str());
             if let Some(u) = url {
-                Some(format!("{}: {}", action, u))
+                Some(format!("{action}: {u}"))
             } else {
                 Some(action.to_string())
             }
@@ -258,7 +258,7 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
                 .or_else(|| args.get("ref").and_then(|v| v.as_str()));
             let text = args.get("text").and_then(|v| v.as_str());
             match (url, selector, text) {
-                (Some(u), _, _) => Some(format!("{}: {}", action, u)),
+                (Some(u), _, _) => Some(format!("{action}: {u}")),
                 (_, Some(s), _) => Some(format!("{}: {}", action, truncate_str(s, 40))),
                 (_, _, Some(t)) => Some(format!("{}: \"{}\"", action, truncate_str(t, 40))),
                 _ => Some(action.to_string()),
@@ -270,7 +270,7 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
                 .get("recipient")
                 .and_then(|v| v.as_str())
                 .unwrap_or("?");
-            Some(format!("→ {}", recipient))
+            Some(format!("→ {recipient}"))
         }
         "imessage_read" => {
             let contact = args
@@ -288,7 +288,7 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
                 (Some(ch), Some(msg)) => {
                     Some(format!("{}: {} → {}", action, ch, truncate_str(msg, 40)))
                 }
-                (Some(ch), None) => Some(format!("{}: {}", action, ch)),
+                (Some(ch), None) => Some(format!("{action}: {ch}")),
                 _ => Some(action.to_string()),
             }
         }
@@ -316,7 +316,7 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
                 .or_else(|| args.get("arxiv_id"))
                 .and_then(|v| v.as_str());
             Some(if let Some(d) = detail {
-                format!("{}: {}", action, d)
+                format!("{action}: {d}")
             } else {
                 action.to_string()
             })
@@ -333,7 +333,7 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
                 .or_else(|| args.get("query"))
                 .and_then(|v| v.as_str());
             Some(if let Some(d) = detail {
-                format!("{}: {}", action, d)
+                format!("{action}: {d}")
             } else {
                 action.to_string()
             })
@@ -349,7 +349,7 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
                 .or_else(|| args.get("id"))
                 .and_then(|v| v.as_str());
             Some(if let Some(d) = detail {
-                format!("{}: {}", action, d)
+                format!("{action}: {d}")
             } else {
                 action.to_string()
             })
@@ -361,7 +361,7 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
                 .unwrap_or("analyze_architecture");
             let path = args.get("path").and_then(|v| v.as_str());
             Some(if let Some(p) = path {
-                format!("{}: {}", action, p)
+                format!("{action}: {p}")
             } else {
                 action.to_string()
             })
@@ -377,7 +377,7 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
                 .or_else(|| args.get("query"))
                 .and_then(|v| v.as_str());
             Some(if let Some(d) = detail {
-                format!("{}: {}", action, d)
+                format!("{action}: {d}")
             } else {
                 action.to_string()
             })
@@ -392,7 +392,7 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
                 .or_else(|| args.get("skill_id"))
                 .and_then(|v| v.as_str());
             Some(if let Some(d) = detail {
-                format!("{}: {}", action, d)
+                format!("{action}: {d}")
             } else {
                 action.to_string()
             })
@@ -407,7 +407,7 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
                 .or_else(|| args.get("person_name"))
                 .and_then(|v| v.as_str());
             Some(if let Some(d) = detail {
-                format!("{}: {}", action, d)
+                format!("{action}: {d}")
             } else {
                 action.to_string()
             })
@@ -423,7 +423,7 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
                 .or_else(|| args.get("title"))
                 .and_then(|v| v.as_str());
             Some(if let Some(d) = detail {
-                format!("{}: {}", action, d)
+                format!("{action}: {d}")
             } else {
                 action.to_string()
             })
@@ -438,7 +438,7 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
                 .or_else(|| args.get("name"))
                 .and_then(|v| v.as_str());
             Some(if let Some(d) = detail {
-                format!("{}: {}", action, d)
+                format!("{action}: {d}")
             } else {
                 action.to_string()
             })
@@ -453,7 +453,7 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
                 .or_else(|| args.get("domain"))
                 .and_then(|v| v.as_str());
             Some(if let Some(d) = detail {
-                format!("{}: {}", action, d)
+                format!("{action}: {d}")
             } else {
                 action.to_string()
             })
@@ -468,10 +468,219 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
                 .or_else(|| args.get("task_description"))
                 .and_then(|v| v.as_str());
             Some(if let Some(d) = detail {
-                format!("{}: {}", action, d)
+                format!("{action}: {d}")
             } else {
                 action.to_string()
             })
+        }
+        // ML Data Engineering tools (ml_data_*)
+        name if name.starts_with("ml_data") => {
+            let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let detail = args
+                .get("source")
+                .or_else(|| args.get("dataset_id"))
+                .or_else(|| args.get("path"))
+                .and_then(|v| v.as_str());
+            Some(if let Some(d) = detail {
+                format!("{}: {}", action, truncate_str(d, 50))
+            } else {
+                action.to_string()
+            })
+        }
+        // ML Feature Store tools (ml_feature_*)
+        name if name.starts_with("ml_feature") => {
+            let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let detail = args
+                .get("name")
+                .or_else(|| args.get("feature_id"))
+                .and_then(|v| v.as_str());
+            Some(if let Some(d) = detail {
+                format!("{action}: {d}")
+            } else {
+                action.to_string()
+            })
+        }
+        // ML Training tools (ml_train, ml_experiment, ml_hyperparams, ml_checkpoint, ml_metrics)
+        name if name.starts_with("ml_train")
+            || name.starts_with("ml_experiment")
+            || name.starts_with("ml_hyperparams")
+            || name.starts_with("ml_checkpoint")
+            || name.starts_with("ml_metrics") =>
+        {
+            let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let detail = args
+                .get("name")
+                .or_else(|| args.get("run_id"))
+                .or_else(|| args.get("experiment_id"))
+                .and_then(|v| v.as_str());
+            Some(if let Some(d) = detail {
+                format!("{action}: {d}")
+            } else {
+                action.to_string()
+            })
+        }
+        // ML Model Zoo tools (ml_model_*)
+        name if name.starts_with("ml_model") => {
+            let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let detail = args
+                .get("model_id")
+                .or_else(|| args.get("name"))
+                .or_else(|| args.get("query"))
+                .and_then(|v| v.as_str());
+            Some(if let Some(d) = detail {
+                format!("{action}: {d}")
+            } else {
+                action.to_string()
+            })
+        }
+        // ML LLM Fine-tuning tools (ml_finetune, ml_chat_dataset, ml_quantize, ml_eval, ml_adapter)
+        name if name.starts_with("ml_finetune")
+            || name.starts_with("ml_chat")
+            || name.starts_with("ml_quantize")
+            || name.starts_with("ml_eval")
+            || name.starts_with("ml_adapter") =>
+        {
+            let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let detail = args
+                .get("model_id")
+                .or_else(|| args.get("dataset_id"))
+                .or_else(|| args.get("adapter_id"))
+                .and_then(|v| v.as_str());
+            Some(if let Some(d) = detail {
+                format!("{action}: {d}")
+            } else {
+                action.to_string()
+            })
+        }
+        // RAG tools (rag_*)
+        name if name.starts_with("rag_") => {
+            let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let detail = args
+                .get("collection")
+                .or_else(|| args.get("query"))
+                .or_else(|| args.get("path"))
+                .and_then(|v| v.as_str());
+            Some(if let Some(d) = detail {
+                format!("{}: {}", action, truncate_str(d, 50))
+            } else {
+                action.to_string()
+            })
+        }
+        // Evaluation tools (eval_*)
+        name if name.starts_with("eval_") => {
+            let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let detail = args
+                .get("suite")
+                .or_else(|| args.get("model_id"))
+                .or_else(|| args.get("report_id"))
+                .and_then(|v| v.as_str());
+            Some(if let Some(d) = detail {
+                format!("{action}: {d}")
+            } else {
+                action.to_string()
+            })
+        }
+        // Inference tools (inference_*)
+        name if name.starts_with("inference_") => {
+            let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let detail = args
+                .get("model_id")
+                .or_else(|| args.get("instance_id"))
+                .and_then(|v| v.as_str());
+            Some(if let Some(d) = detail {
+                format!("{action}: {d}")
+            } else {
+                action.to_string()
+            })
+        }
+        // Research tools (research_*)
+        name if name.starts_with("research_") => {
+            let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let detail = args
+                .get("query")
+                .or_else(|| args.get("paper_id"))
+                .or_else(|| args.get("title"))
+                .and_then(|v| v.as_str());
+            Some(if let Some(d) = detail {
+                format!("{}: {}", action, truncate_str(d, 50))
+            } else {
+                action.to_string()
+            })
+        }
+        // AI Safety/Security/Transparency/Interpretability tools (ai_*)
+        name if name.starts_with("ai_") => {
+            let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let detail = args
+                .get("model_id")
+                .or_else(|| args.get("target"))
+                .or_else(|| args.get("dataset_id"))
+                .or_else(|| args.get("query"))
+                .and_then(|v| v.as_str());
+            Some(if let Some(d) = detail {
+                format!("{action}: {d}")
+            } else {
+                action.to_string()
+            })
+        }
+        // Fullstack development tools
+        "scaffold" => {
+            let template = args.get("template").and_then(|v| v.as_str()).unwrap_or("?");
+            let name = args.get("name").and_then(|v| v.as_str()).unwrap_or(".");
+            Some(format!("{template} → {name}"))
+        }
+        "dev_server" => {
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("status");
+            let port = args.get("port").and_then(|v| v.as_u64());
+            if let Some(p) = port {
+                Some(format!("{action} (port {p})"))
+            } else {
+                Some(action.to_string())
+            }
+        }
+        "database" => {
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("status");
+            let db = args
+                .get("database")
+                .or_else(|| args.get("db_path"))
+                .and_then(|v| v.as_str());
+            if let Some(d) = db {
+                Some(format!("{action} ({d})"))
+            } else {
+                Some(action.to_string())
+            }
+        }
+        "test_runner" => {
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("run_all");
+            let file = args
+                .get("file")
+                .or_else(|| args.get("test_name"))
+                .and_then(|v| v.as_str());
+            if let Some(f) = file {
+                Some(format!("{action}: {f}"))
+            } else {
+                Some(action.to_string())
+            }
+        }
+        "lint" => {
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("check");
+            let path = args.get("path").and_then(|v| v.as_str());
+            if let Some(p) = path {
+                Some(format!("{action} {p}"))
+            } else {
+                Some(action.to_string())
+            }
         }
         _ => None,
     }
@@ -502,13 +711,13 @@ impl AgentCallback for CliCallback {
             // Streaming tokens already displayed this content — just terminate the line.
             println!();
         } else {
-            println!("\n\x1b[32mRustant:\x1b[0m {}", message);
+            println!("\n\x1b[32mRustant:\x1b[0m {message}");
         }
     }
 
     async fn on_token(&self, token: &str) {
         self.has_streamed.store(true, Ordering::SeqCst);
-        print!("{}", token);
+        print!("{token}");
         let _ = io::stdout().flush();
     }
 
@@ -520,10 +729,10 @@ impl AgentCallback for CliCallback {
 
         // Show rich context if available
         if let Some(ref reasoning) = action.approval_context.reasoning {
-            println!("  \x1b[90mReason:\x1b[0m {}", reasoning);
+            println!("  \x1b[90mReason:\x1b[0m {reasoning}");
         }
         for consequence in &action.approval_context.consequences {
-            println!("  \x1b[90mConsequence:\x1b[0m {}", consequence);
+            println!("  \x1b[90mConsequence:\x1b[0m {consequence}");
         }
         if let Some(ref rev) = action.approval_context.reversibility {
             let rev_label = if rev.is_reversible {
@@ -531,14 +740,14 @@ impl AgentCallback for CliCallback {
             } else {
                 "\x1b[31mirreversible\x1b[0m"
             };
-            print!("  \x1b[90mReversible:\x1b[0m {}", rev_label);
+            print!("  \x1b[90mReversible:\x1b[0m {rev_label}");
             if let Some(ref desc) = rev.undo_description {
-                print!(" ({})", desc);
+                print!(" ({desc})");
             }
             println!();
         }
         if let Some(ref preview) = action.approval_context.preview {
-            println!("  \x1b[36mPreview:\x1b[0m {}", preview);
+            println!("  \x1b[36mPreview:\x1b[0m {preview}");
         }
 
         print!("  [y]es / [n]o / [a]pprove all similar > ");
@@ -563,9 +772,9 @@ impl AgentCallback for CliCallback {
         }
         let detail = extract_tool_detail(tool_name, args);
         if let Some(ref detail) = detail {
-            println!("\x1b[36m  [{}: {}] executing...\x1b[0m", tool_name, detail);
+            println!("\x1b[36m  [{tool_name}: {detail}] executing...\x1b[0m");
         } else {
-            println!("\x1b[36m  [{}] executing...\x1b[0m", tool_name);
+            println!("\x1b[36m  [{tool_name}] executing...\x1b[0m");
         }
     }
 
@@ -578,10 +787,7 @@ impl AgentCallback for CliCallback {
         } else {
             output.content.clone()
         };
-        println!(
-            "\x1b[36m  [{}] completed in {}ms\x1b[0m\n  {}",
-            tool_name, duration_ms, preview
-        );
+        println!("\x1b[36m  [{tool_name}] completed in {duration_ms}ms\x1b[0m\n  {preview}");
     }
 
     async fn on_status_change(&self, status: AgentStatus) {
@@ -604,10 +810,7 @@ impl AgentCallback for CliCallback {
         let input = usage.input_tokens;
         let output = usage.output_tokens;
         let total_cost = cost.total();
-        print!(
-            "\r\x1b[90m  [tokens: {}/{} | cost: ${:.4}]\x1b[0m",
-            input, output, total_cost
-        );
+        print!("\r\x1b[90m  [tokens: {input}/{output} | cost: ${total_cost:.4}]\x1b[0m");
         let _ = io::stdout().flush();
     }
 
@@ -638,8 +841,7 @@ impl AgentCallback for CliCallback {
             return;
         }
         println!(
-            "\x1b[33m  [Cost estimate: ~{} tokens, ~${:.4}]\x1b[0m",
-            estimated_tokens, estimated_cost
+            "\x1b[33m  [Cost estimate: ~{estimated_tokens} tokens, ~${estimated_cost:.4}]\x1b[0m"
         );
         let _ = io::stdout().flush();
     }
@@ -647,17 +849,17 @@ impl AgentCallback for CliCallback {
     async fn on_budget_warning(&self, message: &str, severity: rustant_core::BudgetSeverity) {
         match severity {
             rustant_core::BudgetSeverity::Warning => {
-                println!("\x1b[33m  [Budget Warning] {}\x1b[0m", message);
+                println!("\x1b[33m  [Budget Warning] {message}\x1b[0m");
             }
             rustant_core::BudgetSeverity::Exceeded => {
-                println!("\x1b[31m  [Budget Exceeded] {}\x1b[0m", message);
+                println!("\x1b[31m  [Budget Exceeded] {message}\x1b[0m");
             }
         }
         let _ = io::stdout().flush();
     }
 
     async fn on_clarification_request(&self, question: &str) -> String {
-        println!("\n\x1b[33m?\x1b[0m {}", question);
+        println!("\n\x1b[33m?\x1b[0m {question}");
         print!("\x1b[1;34m> \x1b[0m");
         let _ = io::stdout().flush();
 
@@ -679,8 +881,7 @@ impl AgentCallback for CliCallback {
                 hint,
             } => {
                 println!(
-                    "\x1b[33m  [Context: {}% used ({}/{})] {}\x1b[0m",
-                    usage_percent, total_tokens, context_window, hint
+                    "\x1b[33m  [Context: {usage_percent}% used ({total_tokens}/{context_window})] {hint}\x1b[0m"
                 );
             }
             rustant_core::ContextHealthEvent::Critical {
@@ -690,8 +891,7 @@ impl AgentCallback for CliCallback {
                 hint,
             } => {
                 println!(
-                    "\x1b[31m  [Context: {}% used ({}/{})] {}\x1b[0m",
-                    usage_percent, total_tokens, context_window, hint
+                    "\x1b[31m  [Context: {usage_percent}% used ({total_tokens}/{context_window})] {hint}\x1b[0m"
                 );
             }
             rustant_core::ContextHealthEvent::Compressed {
@@ -705,13 +905,12 @@ impl AgentCallback for CliCallback {
                     "fallback truncation"
                 };
                 let pinned_info = if *pinned_preserved > 0 {
-                    format!(", {} pinned messages preserved", pinned_preserved)
+                    format!(", {pinned_preserved} pinned messages preserved")
                 } else {
                     String::new()
                 };
                 println!(
-                    "\x1b[90m  [Context compressed: {} messages via {}{}]\x1b[0m",
-                    messages_compressed, method, pinned_info
+                    "\x1b[90m  [Context compressed: {messages_compressed} messages via {method}{pinned_info}]\x1b[0m"
                 );
             }
         }
@@ -719,7 +918,7 @@ impl AgentCallback for CliCallback {
     }
 
     async fn on_plan_generating(&self, goal: &str) {
-        println!("\n\x1b[34m[Planning]\x1b[0m Generating plan for: {}", goal);
+        println!("\n\x1b[34m[Planning]\x1b[0m Generating plan for: {goal}");
         let _ = io::stdout().flush();
     }
 
@@ -798,7 +997,7 @@ impl AgentCallback for CliCallback {
         let tool_info = step
             .tool
             .as_deref()
-            .map(|t| format!(" [{}]", t))
+            .map(|t| format!(" [{t}]"))
             .unwrap_or_default();
         println!(
             "\x1b[34m  [Step {}]\x1b[0m {}{}...",
@@ -843,7 +1042,7 @@ fn print_contextual_hints(agent: &Agent) {
     if !hints.is_empty() {
         println!();
         for hint in hints {
-            println!("\x1b[33m  {}\x1b[0m", hint);
+            println!("\x1b[33m  {hint}\x1b[0m");
         }
     }
 }
@@ -869,7 +1068,7 @@ fn show_onboarding(workspace: &Path) {
         let framework_note = info
             .framework
             .as_ref()
-            .map(|f| format!(" ({} framework)", f))
+            .map(|f| format!(" ({f} framework)"))
             .unwrap_or_default();
         println!(
             "  Detected a \x1b[1m{}{}\x1b[0m project.",
@@ -880,7 +1079,7 @@ fn show_onboarding(workspace: &Path) {
     println!("  Here are some things you can try:");
     println!();
     for task in tasks.iter().take(3) {
-        println!("    {}", task);
+        println!("    {task}");
     }
     println!();
     println!("  Quick reference:");
@@ -955,9 +1154,29 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
     let config_ref = config.clone();
     let mut agent = Agent::new(provider, config, callback);
 
+    // Attach output redactor for secret stripping before memory storage
+    agent.set_output_redactor(rustant_core::create_basic_redactor());
+
     // Register built-in tools as agent tools
     let mut registry = ToolRegistry::new();
     register_builtin_tools(&mut registry, workspace.clone());
+
+    // Register security tools if the security_scanning feature flag is enabled
+    if config_ref
+        .features
+        .as_ref()
+        .is_some_and(|f| f.security_scanning)
+    {
+        rustant_security::register_security_tools(&mut registry);
+        tracing::info!("Security scanning tools registered");
+    }
+
+    // Register ML tools if the ai_engineer feature flag is enabled
+    if config_ref.features.as_ref().is_some_and(|f| f.ai_engineer) {
+        rustant_ml::register_ml_tools(&mut registry, workspace.clone());
+        tracing::info!("AI/ML engineering tools registered");
+    }
+
     register_agent_tools_from_registry(&mut agent, &registry, &workspace);
 
     // Register browser tools if the browser feature is enabled.
@@ -979,8 +1198,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                 if msg_count > 0 {
                     *agent.memory_mut() = memory;
                     println!(
-                        "\x1b[90m  Recovered previous session ({} messages). Type /clear to start fresh.\x1b[0m",
-                        msg_count
+                        "\x1b[90m  Recovered previous session ({msg_count} messages). Type /clear to start fresh.\x1b[0m"
                     );
                 }
             }
@@ -1070,7 +1288,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                                             println!("Session saved as '{}'.", entry.name);
                                         }
                                         Err(e) => {
-                                            println!("Failed to save session: {}", e);
+                                            println!("Failed to save session: {e}");
                                         }
                                     }
                                 }
@@ -1086,16 +1304,12 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     if !arg1.is_empty() {
                         // Topic-specific help
                         match cmd_registry.help_for(arg1) {
-                            Some(help) => println!("\n{}", help),
+                            Some(help) => println!("\n{help}"),
                             None => {
-                                println!(
-                                    "No help found for '{}'. Try /help for all commands.",
-                                    arg1
-                                );
-                                if let Some(suggestion) =
-                                    cmd_registry.suggest(&format!("/{}", arg1))
+                                println!("No help found for '{arg1}'. Try /help for all commands.");
+                                if let Some(suggestion) = cmd_registry.suggest(&format!("/{arg1}"))
                                 {
-                                    println!("Did you mean: {} ?", suggestion);
+                                    println!("Did you mean: {suggestion} ?");
                                 }
                             }
                         }
@@ -1149,7 +1363,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                 }
                 "/setup" => {
                     if let Err(e) = crate::setup::run_setup(&workspace).await {
-                        println!("Setup failed: {}", e);
+                        println!("Setup failed: {e}");
                     }
                     continue;
                 }
@@ -1255,7 +1469,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     } else if arg2.is_empty() {
                         arg1.to_string()
                     } else {
-                        format!("{} {}", arg1, arg2)
+                        format!("{arg1} {arg2}")
                     };
                     handle_council_command(&question, &config_ref);
                     continue;
@@ -1283,14 +1497,14 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                         }
                         "" => {
                             let status = if agent.plan_mode() { "ON" } else { "OFF" };
-                            println!("Plan mode: \x1b[1m{}\x1b[0m", status);
+                            println!("Plan mode: \x1b[1m{status}\x1b[0m");
                             if let Some(plan) = agent.current_plan() {
                                 println!();
                                 display_plan(plan);
                             }
                         }
                         _ => {
-                            println!("Unknown subcommand '{}'. Usage: /plan [on|off|show]", arg1);
+                            println!("Unknown subcommand '{arg1}'. Usage: /plan [on|off|show]");
                         }
                     }
                     continue;
@@ -1328,7 +1542,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                         }
                     };
                     if let Err(e) = crate::commands::handle_channel(action, &workspace).await {
-                        println!("\x1b[31mError: {}\x1b[0m", e);
+                        println!("\x1b[31mError: {e}\x1b[0m");
                     }
                     continue;
                 }
@@ -1385,7 +1599,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                         }
                     };
                     if let Err(e) = crate::commands::handle_workflow(action, &workspace).await {
-                        println!("\x1b[31mError: {}\x1b[0m", e);
+                        println!("\x1b[31mError: {e}\x1b[0m");
                     }
                     continue;
                 }
@@ -1410,7 +1624,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                         }
                     };
                     if let Err(e) = crate::commands::handle_voice(action).await {
-                        println!("\x1b[31mError: {}\x1b[0m", e);
+                        println!("\x1b[31mError: {e}\x1b[0m");
                     }
                     continue;
                 }
@@ -1441,7 +1655,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                         }
                     };
                     if let Err(e) = crate::commands::handle_browser(action, &workspace).await {
-                        println!("\x1b[31mError: {}\x1b[0m", e);
+                        println!("\x1b[31mError: {e}\x1b[0m");
                     }
                     continue;
                 }
@@ -1473,7 +1687,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                         }
                     };
                     if let Err(e) = crate::commands::handle_auth(action, &workspace).await {
-                        println!("\x1b[31mError: {}\x1b[0m", e);
+                        println!("\x1b[31mError: {e}\x1b[0m");
                     }
                     continue;
                 }
@@ -1502,7 +1716,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                         }
                     };
                     if let Err(e) = crate::commands::handle_canvas(action).await {
-                        println!("\x1b[31mError: {}\x1b[0m", e);
+                        println!("\x1b[31mError: {e}\x1b[0m");
                     }
                     continue;
                 }
@@ -1533,7 +1747,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                         }
                     };
                     if let Err(e) = crate::commands::handle_skill(action).await {
-                        println!("\x1b[31mError: {}\x1b[0m", e);
+                        println!("\x1b[31mError: {e}\x1b[0m");
                     }
                     continue;
                 }
@@ -1555,7 +1769,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                         }
                     };
                     if let Err(e) = crate::commands::handle_plugin(action).await {
-                        println!("\x1b[31mError: {}\x1b[0m", e);
+                        println!("\x1b[31mError: {e}\x1b[0m");
                     }
                     continue;
                 }
@@ -1569,7 +1783,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                         }
                     };
                     if let Err(e) = crate::commands::handle_update(action).await {
-                        println!("\x1b[31mError: {}\x1b[0m", e);
+                        println!("\x1b[31mError: {e}\x1b[0m");
                     }
                     continue;
                 }
@@ -1580,19 +1794,19 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                             let cfg = config_ref.clone();
                             let ws = workspace.clone();
                             let on_text = Arc::new(|text: String| {
-                                println!("\n\x1b[36m  [Voice] \x1b[0m{}", text);
+                                println!("\n\x1b[36m  [Voice] \x1b[0m{text}");
                             });
                             match ts.voice_start(cfg, ws, on_text).await {
                                 Ok(()) => println!(
                                     "\x1b[32m  Voice command mode ON\x1b[0m — listening for speech..."
                                 ),
-                                Err(e) => println!("\x1b[31mError starting voice: {}\x1b[0m", e),
+                                Err(e) => println!("\x1b[31mError starting voice: {e}\x1b[0m"),
                             }
                         }
                         "off" | "" if toggle_state.voice_active().await => {
                             match toggle_state.voice_stop().await {
                                 Ok(()) => println!("\x1b[33m  Voice command mode OFF\x1b[0m"),
-                                Err(e) => println!("\x1b[31mError stopping voice: {}\x1b[0m", e),
+                                Err(e) => println!("\x1b[31mError stopping voice: {e}\x1b[0m"),
                             }
                         }
                         "status" => {
@@ -1621,7 +1835,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                                 Ok(()) => {
                                     println!("\x1b[31m  ● REC\x1b[0m Meeting recording started")
                                 }
-                                Err(e) => println!("\x1b[31mError: {}\x1b[0m", e),
+                                Err(e) => println!("\x1b[31mError: {e}\x1b[0m"),
                             }
                         }
                         "stop" | "" if toggle_state.meeting_active().await => {
@@ -1635,7 +1849,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                                         } else {
                                             result.transcript.clone()
                                         };
-                                        println!("  Transcript preview: {}", preview);
+                                        println!("  Transcript preview: {preview}");
                                     } else {
                                         println!(
                                             "  No transcript available (check OPENAI_API_KEY)"
@@ -1645,14 +1859,14 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                                         println!("  Saved to Notes.app");
                                     }
                                 }
-                                Err(e) => println!("\x1b[31mError: {}\x1b[0m", e),
+                                Err(e) => println!("\x1b[31mError: {e}\x1b[0m"),
                             }
                         }
                         "status" => {
                             if let Some(status) = toggle_state.meeting_status().await {
                                 println!("\x1b[31m  ● REC\x1b[0m Recording active");
                                 if let Some(title) = &status.title {
-                                    println!("  Title: {}", title);
+                                    println!("  Title: {title}");
                                 }
                                 println!("  Elapsed: {}s", status.elapsed_secs);
                             } else {
@@ -1690,7 +1904,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                         };
                         match tool.execute(args).await {
                             Ok(output) => println!("{}", output.content),
-                            Err(e) => println!("\x1b[31mError: {}\x1b[0m", e),
+                            Err(e) => println!("\x1b[31mError: {e}\x1b[0m"),
                         }
                     }
                     #[cfg(not(target_os = "macos"))]
@@ -1790,7 +2004,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                         "budget" => {
                             let budget_str = arg2.trim();
                             if let Ok(budget) = budget_str.parse::<usize>() {
-                                println!("Thinking budget set to {} tokens.", budget);
+                                println!("Thinking budget set to {budget} tokens.");
                             } else {
                                 println!("Usage: /think budget <N> (e.g., /think budget 4096)");
                             }
@@ -1826,7 +2040,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
 
                     let path = std::path::Path::new(image_path);
                     if !path.exists() {
-                        println!("\x1b[31mFile not found: {}\x1b[0m", image_path);
+                        println!("\x1b[31mFile not found: {image_path}\x1b[0m");
                         continue;
                     }
 
@@ -1837,8 +2051,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                         .to_lowercase();
                     if !["png", "jpg", "jpeg", "gif", "webp"].contains(&ext.as_str()) {
                         println!(
-                            "\x1b[31mUnsupported image format: {}. Use PNG, JPEG, GIF, or WebP.\x1b[0m",
-                            ext
+                            "\x1b[31mUnsupported image format: {ext}. Use PNG, JPEG, GIF, or WebP.\x1b[0m"
                         );
                         continue;
                     }
@@ -1898,10 +2111,10 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                                         result.total_cost.total()
                                     );
                                 }
-                                Err(e) => println!("\x1b[31mError: {}\x1b[0m", e),
+                                Err(e) => println!("\x1b[31mError: {e}\x1b[0m"),
                             }
                         }
-                        Err(e) => println!("\x1b[31mFailed to read image: {}\x1b[0m", e),
+                        Err(e) => println!("\x1b[31mFailed to read image: {e}\x1b[0m"),
                     }
                     continue;
                 }
@@ -1950,7 +2163,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                         let schema_str = if arg2.is_empty() {
                             arg1.to_string()
                         } else {
-                            format!("{} {}", arg1, arg2)
+                            format!("{arg1} {arg2}")
                         };
                         match serde_json::from_str::<serde_json::Value>(&schema_str) {
                             Ok(_schema) => {
@@ -1964,7 +2177,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                                 }
                             }
                             Err(e) => {
-                                println!("\x1b[31mInvalid JSON schema: {}\x1b[0m", e);
+                                println!("\x1b[31mInvalid JSON schema: {e}\x1b[0m");
                                 println!(
                                     "Usage: /structured {{\"type\":\"object\",\"properties\":{{...}}}}"
                                 );
@@ -1976,7 +2189,7 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                 "/capabilities" | "/caps" => {
                     let provider = agent.brain().provider();
                     let model = agent.brain().model_name();
-                    println!("Provider Capabilities (model: {}):", model);
+                    println!("Provider Capabilities (model: {model}):");
                     println!(
                         "  Vision:            {}",
                         if provider.supports_vision() {
@@ -2122,15 +2335,354 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     }
                     continue;
                 }
+                // ── Fullstack development commands ──────────────────────────
+                "/init" => {
+                    if arg1.is_empty() {
+                        println!("Available project templates:");
+                        for info in rustant_tools::templates::list_templates() {
+                            println!(
+                                "  \x1b[36m{}\x1b[0m — {} ({})",
+                                info.name, info.description, info.framework
+                            );
+                        }
+                        println!("\nUsage: /init <template> [project-name]");
+                    } else {
+                        let template_name = arg1;
+                        let project_name = if arg2.is_empty() { "my-project" } else { arg2 };
+                        match rustant_tools::templates::get_template(template_name) {
+                            Some(template) => {
+                                let target = std::path::Path::new(project_name);
+                                if target.exists() {
+                                    println!(
+                                        "\x1b[31mDirectory '{project_name}' already exists.\x1b[0m"
+                                    );
+                                } else {
+                                    match std::fs::create_dir_all(target) {
+                                        Ok(_) => {
+                                            let mut created = 0;
+                                            for file in &template.files {
+                                                let path = target.join(&file.path);
+                                                if let Some(parent) = path.parent() {
+                                                    let _ = std::fs::create_dir_all(parent);
+                                                }
+                                                if std::fs::write(&path, &file.content).is_ok() {
+                                                    created += 1;
+                                                }
+                                            }
+                                            println!(
+                                                "\x1b[32mCreated {project_name} with {created} files.\x1b[0m"
+                                            );
+                                            if !template.post_install.is_empty() {
+                                                println!("\nNext steps:");
+                                                println!("  cd {project_name}");
+                                                for cmd in &template.post_install {
+                                                    println!("  {cmd}");
+                                                }
+                                            }
+                                        }
+                                        Err(e) => println!(
+                                            "\x1b[31mFailed to create directory: {e}\x1b[0m"
+                                        ),
+                                    }
+                                }
+                            }
+                            None => {
+                                println!("\x1b[31mUnknown template: {template_name}\x1b[0m");
+                                println!("Run /init to see available templates.");
+                            }
+                        }
+                    }
+                    continue;
+                }
+                "/preview" => {
+                    let sub = if arg1.is_empty() { "status" } else { arg1 };
+                    match sub {
+                        "start" => {
+                            let ws = std::env::current_dir().unwrap_or_default();
+                            let project = rustant_core::project_detect::detect_project(&ws);
+                            let cmd = match &project.project_type {
+                                rustant_core::project_detect::ProjectType::Rust => "cargo run",
+                                rustant_core::project_detect::ProjectType::Python => {
+                                    "python -m uvicorn app.main:app --reload"
+                                }
+                                rustant_core::project_detect::ProjectType::Node => "npm run dev",
+                                _ => "npm run dev",
+                            };
+                            println!("Starting dev server: \x1b[36m{cmd}\x1b[0m");
+                            println!("Use /preview stop to terminate.");
+                            println!("(Hint: use the dev_server tool for full process management)");
+                        }
+                        "stop" => {
+                            println!("Stopping dev server...");
+                            println!(
+                                "(Use the dev_server tool with action='stop' for process management)"
+                            );
+                        }
+                        "status" => {
+                            println!("Dev server status: use the dev_server tool for details.");
+                        }
+                        _ => {
+                            println!("Usage: /preview [start|stop|status]");
+                        }
+                    }
+                    continue;
+                }
+                "/db" => {
+                    let sub = if arg1.is_empty() { "status" } else { arg1 };
+                    match sub {
+                        "status" => {
+                            println!("Database status: use the database tool for details.");
+                        }
+                        "migrate" => {
+                            println!("Running migrations...");
+                            println!("(Use the database tool with action='migrate' for execution)");
+                        }
+                        "rollback" => {
+                            println!("Rolling back last migration...");
+                            println!(
+                                "(Use the database tool with action='rollback' for execution)"
+                            );
+                        }
+                        "seed" => {
+                            println!("Seeding database...");
+                            println!("(Use the database tool with action='seed' for execution)");
+                        }
+                        "schema" => {
+                            println!(
+                                "(Use the database tool with action='schema' to inspect schema)"
+                            );
+                        }
+                        _ => {
+                            println!("Usage: /db [status|migrate|rollback|seed|schema]");
+                        }
+                    }
+                    continue;
+                }
+                "/test" => {
+                    let sub = if arg1.is_empty() { "run_all" } else { arg1 };
+                    let ws = std::env::current_dir().unwrap_or_default();
+                    let project = rustant_core::project_detect::detect_project(&ws);
+                    use rustant_core::project_detect::ProjectType;
+                    let cmd = match (sub, &project.project_type) {
+                        ("run_all", ProjectType::Rust) => "cargo test --workspace",
+                        ("run_all", ProjectType::Python) => "pytest",
+                        ("run_all", ProjectType::Go) => "go test ./...",
+                        ("run_all", _) => "npm test",
+                        ("run_changed", _) => "(test_runner tool: run_changed)",
+                        ("coverage", ProjectType::Rust) => "cargo tarpaulin",
+                        ("coverage", _) => "npm run coverage",
+                        _ => {
+                            println!("Usage: /test [run_all|run_changed|coverage] [file]");
+                            continue;
+                        }
+                    };
+                    println!("Running: \x1b[36m{cmd}\x1b[0m");
+                    println!("(Use the test_runner tool for structured output and parsing)");
+                    continue;
+                }
+                "/lint" => {
+                    let sub = if arg1.is_empty() { "check" } else { arg1 };
+                    let ws = std::env::current_dir().unwrap_or_default();
+                    let project = rustant_core::project_detect::detect_project(&ws);
+                    use rustant_core::project_detect::ProjectType;
+                    let cmd = match (sub, &project.project_type) {
+                        ("check", ProjectType::Rust) => "cargo clippy --workspace -- -D warnings",
+                        ("check", ProjectType::Python) => "ruff check .",
+                        ("check", _) => "npx eslint .",
+                        ("fix", ProjectType::Rust) => "cargo clippy --fix --allow-dirty",
+                        ("fix", ProjectType::Python) => "ruff check --fix .",
+                        ("fix", _) => "npx eslint --fix .",
+                        ("typecheck", ProjectType::Rust) => "cargo check --workspace",
+                        ("typecheck", ProjectType::Python) => "mypy .",
+                        ("typecheck", _) => "npx tsc --noEmit",
+                        ("format", ProjectType::Rust) => "cargo fmt --all",
+                        ("format", ProjectType::Python) => "ruff format .",
+                        ("format", _) => "npx prettier --write .",
+                        _ => {
+                            println!("Usage: /lint [check|fix|typecheck|format]");
+                            continue;
+                        }
+                    };
+                    println!("Running: \x1b[36m{cmd}\x1b[0m");
+                    println!("(Use the lint tool for structured diagnostics)");
+                    continue;
+                }
+                "/deps" => {
+                    let sub = if arg1.is_empty() { "list" } else { arg1 };
+                    let ws = std::env::current_dir().unwrap_or_default();
+                    let project = rustant_core::project_detect::detect_project(&ws);
+                    use rustant_core::project_detect::ProjectType;
+                    match sub {
+                        "list" => {
+                            let manifest = match &project.project_type {
+                                ProjectType::Rust => "Cargo.toml",
+                                ProjectType::Python => "requirements.txt / pyproject.toml",
+                                _ => "package.json",
+                            };
+                            println!("Dependencies defined in: \x1b[36m{manifest}\x1b[0m");
+                        }
+                        "add" => {
+                            if arg2.is_empty() {
+                                println!("Usage: /deps add <package>");
+                            } else {
+                                let cmd = match &project.project_type {
+                                    ProjectType::Rust => format!("cargo add {arg2}"),
+                                    ProjectType::Python => format!("pip install {arg2}"),
+                                    _ => format!("npm install {arg2}"),
+                                };
+                                println!("Run: \x1b[36m{cmd}\x1b[0m");
+                            }
+                        }
+                        "remove" => {
+                            if arg2.is_empty() {
+                                println!("Usage: /deps remove <package>");
+                            } else {
+                                let cmd = match &project.project_type {
+                                    ProjectType::Rust => format!("cargo remove {arg2}"),
+                                    ProjectType::Python => format!("pip uninstall {arg2}"),
+                                    _ => format!("npm uninstall {arg2}"),
+                                };
+                                println!("Run: \x1b[36m{cmd}\x1b[0m");
+                            }
+                        }
+                        "outdated" => {
+                            let cmd = match &project.project_type {
+                                ProjectType::Rust => "cargo outdated",
+                                ProjectType::Python => "pip list --outdated",
+                                _ => "npm outdated",
+                            };
+                            println!("Run: \x1b[36m{cmd}\x1b[0m");
+                        }
+                        "audit" => {
+                            let cmd = match &project.project_type {
+                                ProjectType::Rust => "cargo audit",
+                                ProjectType::Python => "pip-audit",
+                                _ => "npm audit",
+                            };
+                            println!("Run: \x1b[36m{cmd}\x1b[0m");
+                        }
+                        _ => {
+                            println!("Usage: /deps [list|add|remove|outdated|audit] [package]");
+                        }
+                    }
+                    continue;
+                }
+                "/verify" => {
+                    let ws = std::env::current_dir().unwrap_or_default();
+                    println!("Running full verification pipeline...");
+                    let vconfig = rustant_core::verification::VerificationConfig::default();
+                    let result =
+                        rustant_core::verification::runner::run_verification(&ws, &vconfig).await;
+                    if result.passed {
+                        println!("\x1b[32mVerification passed!\x1b[0m");
+                    } else {
+                        let feedback =
+                            rustant_core::verification::feedback::format_feedback(&result);
+                        println!("{feedback}");
+                    }
+                    continue;
+                }
+                "/repomap" => {
+                    let ws = std::env::current_dir().unwrap_or_default();
+                    println!("Building repository map...");
+                    let repo_map = rustant_core::repo_map::RepoMap::build(&ws);
+                    println!("{}", repo_map.format_summary());
+                    continue;
+                }
+                "/symbols" => {
+                    if arg1.is_empty() {
+                        println!("Usage: /symbols <query>");
+                        println!(
+                            "  Search for functions, structs, classes, etc. across the codebase."
+                        );
+                    } else {
+                        let ws = std::env::current_dir().unwrap_or_default();
+                        println!("Building symbol index...");
+                        let repo_map = rustant_core::repo_map::RepoMap::build(&ws);
+                        let found = repo_map.search_symbols(arg1);
+                        if found.is_empty() {
+                            println!("No symbols matching '{arg1}'.");
+                        } else {
+                            println!("Symbols matching '{arg1}':");
+                            for sym in found.iter().take(30) {
+                                println!(
+                                    "  \x1b[36m{}\x1b[0m [{}] {}:{}",
+                                    sym.name, sym.kind, sym.file, sym.start_line
+                                );
+                            }
+                            if found.len() > 30 {
+                                println!("  ... and {} more", found.len() - 30);
+                            }
+                        }
+                    }
+                    continue;
+                }
+                "/refs" => {
+                    if arg1.is_empty() {
+                        println!("Usage: /refs <symbol-name>");
+                        println!("  Find all references to a symbol.");
+                    } else {
+                        let ws = std::env::current_dir().unwrap_or_default();
+                        println!("Building reference graph...");
+                        let repo_map = rustant_core::repo_map::RepoMap::build(&ws);
+                        let found_refs = repo_map.find_references(arg1);
+                        if found_refs.is_empty() {
+                            println!("No references to '{arg1}'.");
+                        } else {
+                            println!("References to '{arg1}':");
+                            for r in found_refs.iter().take(30) {
+                                println!("  {}:{} ({:?})", r.from_file, r.from_line, r.kind);
+                            }
+                            if found_refs.len() > 30 {
+                                println!("  ... and {} more", found_refs.len() - 30);
+                            }
+                        }
+                    }
+                    continue;
+                }
+                "/alerts" => {
+                    let task = "List active security alerts, show their status, severity, and any correlations.";
+                    agent.reset_cancellation();
+                    *shared_cancel_token.lock().await = agent.cancellation_token();
+                    interrupt_count.store(0, std::sync::atomic::Ordering::SeqCst);
+                    match agent.process_task(task).await {
+                        Ok(result) => {
+                            println!(
+                                "\x1b[90m  [{} iterations, {} tokens, ${:.4}]\x1b[0m",
+                                result.iterations,
+                                result.total_usage.total(),
+                                result.total_cost.total()
+                            );
+                        }
+                        Err(e) => println!("\x1b[31mError: {e}\x1b[0m"),
+                    }
+                    continue;
+                }
+                "/triage" => {
+                    let task =
+                        "Run AI-powered alert triage to prioritize and correlate active alerts.";
+                    agent.reset_cancellation();
+                    *shared_cancel_token.lock().await = agent.cancellation_token();
+                    interrupt_count.store(0, std::sync::atomic::Ordering::SeqCst);
+                    match agent.process_task(task).await {
+                        Ok(result) => {
+                            println!(
+                                "\x1b[90m  [{} iterations, {} tokens, ${:.4}]\x1b[0m",
+                                result.iterations,
+                                result.total_usage.total(),
+                                result.total_cost.total()
+                            );
+                        }
+                        Err(e) => println!("\x1b[31mError: {e}\x1b[0m"),
+                    }
+                    continue;
+                }
                 _ => {
                     // Use registry for unknown command suggestions
                     if let Some(suggestion) = cmd_registry.suggest(cmd) {
-                        println!("Unknown command: {}. Did you mean {}?", cmd, suggestion);
+                        println!("Unknown command: {cmd}. Did you mean {suggestion}?");
                     } else {
-                        println!(
-                            "Unknown command: {}. Type /help for available commands.",
-                            cmd
-                        );
+                        println!("Unknown command: {cmd}. Type /help for available commands.");
                     }
                     continue;
                 }
@@ -2156,18 +2708,18 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                 );
             }
             Err(e) => {
-                println!("\x1b[31mError: {}\x1b[0m", e);
+                println!("\x1b[31mError: {e}\x1b[0m");
                 // Show actionable guidance if available
                 {
                     use rustant_core::error::UserGuidance;
                     if let Some(suggestion) = e.suggestion() {
-                        println!("\x1b[33m  Suggestion: {}\x1b[0m", suggestion);
+                        println!("\x1b[33m  Suggestion: {suggestion}\x1b[0m");
                     }
                     let steps = e.next_steps();
                     if !steps.is_empty() {
                         println!("\x1b[90m  Next steps:\x1b[0m");
                         for step in &steps {
-                            println!("\x1b[90m    - {}\x1b[0m", step);
+                            println!("\x1b[90m    - {step}\x1b[0m");
                         }
                     }
                 }
@@ -2221,8 +2773,28 @@ pub async fn run_single_task(
     let config_ref = config.clone();
     let mut agent = Agent::new(provider, config, callback);
 
+    // Attach output redactor for secret stripping before memory storage
+    agent.set_output_redactor(rustant_core::create_basic_redactor());
+
     let mut registry = ToolRegistry::new();
     register_builtin_tools(&mut registry, workspace.clone());
+
+    // Register security tools if the security_scanning feature flag is enabled
+    if config_ref
+        .features
+        .as_ref()
+        .is_some_and(|f| f.security_scanning)
+    {
+        rustant_security::register_security_tools(&mut registry);
+        tracing::info!("Security scanning tools registered");
+    }
+
+    // Register ML tools if the ai_engineer feature flag is enabled
+    if config_ref.features.as_ref().is_some_and(|f| f.ai_engineer) {
+        rustant_ml::register_ml_tools(&mut registry, workspace.clone());
+        tracing::info!("AI/ML engineering tools registered");
+    }
+
     register_agent_tools_from_registry(&mut agent, &registry, &workspace);
 
     // Register browser tools if the browser feature is enabled.
@@ -2238,7 +2810,7 @@ pub async fn run_single_task(
             }
         }
         Err(e) => {
-            eprintln!("Error: {}", e);
+            eprintln!("Error: {e}");
             std::process::exit(1);
         }
     }
@@ -2533,12 +3105,12 @@ fn handle_audit_command(sub: &str, _arg: &str, agent: &Agent) {
                 let desc = match &entry.event {
                     rustant_core::safety::AuditEvent::ActionRequested {
                         tool, risk_level, ..
-                    } => format!("REQUESTED {} ({})", tool, risk_level),
+                    } => format!("REQUESTED {tool} ({risk_level})"),
                     rustant_core::safety::AuditEvent::ActionApproved { tool } => {
-                        format!("APPROVED  {}", tool)
+                        format!("APPROVED  {tool}")
                     }
                     rustant_core::safety::AuditEvent::ActionDenied { tool, reason } => {
-                        format!("DENIED    {} ({})", tool, reason)
+                        format!("DENIED    {tool} ({reason})")
                     }
                     rustant_core::safety::AuditEvent::ActionExecuted {
                         tool,
@@ -2546,17 +3118,17 @@ fn handle_audit_command(sub: &str, _arg: &str, agent: &Agent) {
                         duration_ms,
                     } => {
                         let status = if *success { "ok" } else { "FAIL" };
-                        format!("EXECUTED  {} [{}] {}ms", tool, status, duration_ms)
+                        format!("EXECUTED  {tool} [{status}] {duration_ms}ms")
                     }
                     rustant_core::safety::AuditEvent::ApprovalRequested { tool, .. } => {
-                        format!("APPROVAL? {}", tool)
+                        format!("APPROVAL? {tool}")
                     }
                     rustant_core::safety::AuditEvent::ApprovalDecision { tool, approved } => {
                         let decision = if *approved { "yes" } else { "no" };
-                        format!("DECISION  {} -> {}", tool, decision)
+                        format!("DECISION  {tool} -> {decision}")
                     }
                 };
-                println!("  [{}] {}", ts, desc);
+                println!("  [{ts}] {desc}");
             }
         }
         "verify" => {
@@ -2575,14 +3147,14 @@ fn handle_audit_command(sub: &str, _arg: &str, agent: &Agent) {
             let format = _arg;
             match format {
                 "json" => match serde_json::to_string_pretty(&log) {
-                    Ok(json) => println!("{}", json),
-                    Err(e) => println!("Export error: {}", e),
+                    Ok(json) => println!("{json}"),
+                    Err(e) => println!("Export error: {e}"),
                 },
                 "jsonl" => {
                     for entry in log {
                         match serde_json::to_string(entry) {
-                            Ok(line) => println!("{}", line),
-                            Err(e) => println!("Export error: {}", e),
+                            Ok(line) => println!("{line}"),
+                            Err(e) => println!("Export error: {e}"),
                         }
                     }
                 }
@@ -2597,7 +3169,7 @@ fn handle_audit_command(sub: &str, _arg: &str, agent: &Agent) {
                             } => (
                                 "requested",
                                 tool.as_str(),
-                                format!("{} - {}", risk_level, description),
+                                format!("{risk_level} - {description}"),
                             ),
                             rustant_core::safety::AuditEvent::ActionApproved { tool } => {
                                 ("approved", tool.as_str(), String::new())
@@ -2610,7 +3182,7 @@ fn handle_audit_command(sub: &str, _arg: &str, agent: &Agent) {
                                 success,
                                 duration_ms,
                             } => {
-                                let detail = format!("success={} {}ms", success, duration_ms);
+                                let detail = format!("success={success} {duration_ms}ms");
                                 ("executed", tool.as_str(), detail)
                             }
                             rustant_core::safety::AuditEvent::ApprovalRequested {
@@ -2623,7 +3195,7 @@ fn handle_audit_command(sub: &str, _arg: &str, agent: &Agent) {
                             } => (
                                 "approval_decision",
                                 tool.as_str(),
-                                format!("approved={}", approved),
+                                format!("approved={approved}"),
                             ),
                         };
                         println!(
@@ -2636,10 +3208,7 @@ fn handle_audit_command(sub: &str, _arg: &str, agent: &Agent) {
                         );
                     }
                 }
-                _ => println!(
-                    "Unknown format '{}'. Supported: json, jsonl, csv, text",
-                    format
-                ),
+                _ => println!("Unknown format '{format}'. Supported: json, jsonl, csv, text"),
             }
         }
         "query" => {
@@ -2664,7 +3233,7 @@ fn handle_audit_command(sub: &str, _arg: &str, agent: &Agent) {
                 })
                 .collect();
             if matches.is_empty() {
-                println!("No audit entries found for tool '{}'.", tool_name);
+                println!("No audit entries found for tool '{tool_name}'.");
             } else {
                 println!(
                     "Audit entries for '{}' ({} matches):",
@@ -2678,12 +3247,12 @@ fn handle_audit_command(sub: &str, _arg: &str, agent: &Agent) {
                             tool,
                             risk_level,
                             ..
-                        } => format!("REQUESTED {} ({})", tool, risk_level),
+                        } => format!("REQUESTED {tool} ({risk_level})"),
                         rustant_core::safety::AuditEvent::ActionApproved { tool } => {
-                            format!("APPROVED  {}", tool)
+                            format!("APPROVED  {tool}")
                         }
                         rustant_core::safety::AuditEvent::ActionDenied { tool, reason } => {
-                            format!("DENIED    {} ({})", tool, reason)
+                            format!("DENIED    {tool} ({reason})")
                         }
                         rustant_core::safety::AuditEvent::ActionExecuted {
                             tool,
@@ -2691,17 +3260,17 @@ fn handle_audit_command(sub: &str, _arg: &str, agent: &Agent) {
                             duration_ms,
                         } => {
                             let status = if *success { "ok" } else { "FAIL" };
-                            format!("EXECUTED  {} [{}] {}ms", tool, status, duration_ms)
+                            format!("EXECUTED  {tool} [{status}] {duration_ms}ms")
                         }
                         rustant_core::safety::AuditEvent::ApprovalRequested { tool, .. } => {
-                            format!("APPROVAL? {}", tool)
+                            format!("APPROVAL? {tool}")
                         }
                         rustant_core::safety::AuditEvent::ApprovalDecision { tool, approved } => {
                             let decision = if *approved { "yes" } else { "no" };
-                            format!("DECISION  {} -> {}", tool, decision)
+                            format!("DECISION  {tool} -> {decision}")
                         }
                     };
-                    println!("  [{}] {}", ts, desc);
+                    println!("  [{ts}] {desc}");
                 }
             }
         }
@@ -2719,7 +3288,7 @@ fn handle_session_command(sub: &str, name: &str, agent: &mut Agent, workspace: &
             let mut mgr = match rustant_core::SessionManager::new(workspace) {
                 Ok(m) => m,
                 Err(e) => {
-                    println!("Failed to initialize session manager: {}", e);
+                    println!("Failed to initialize session manager: {e}");
                     return;
                 }
             };
@@ -2727,7 +3296,7 @@ fn handle_session_command(sub: &str, name: &str, agent: &mut Agent, workspace: &
             let total_tokens = agent.brain().total_usage().total();
             match mgr.save_checkpoint(agent.memory(), total_tokens) {
                 Ok(()) => println!("Session '{}' saved.", entry.name),
-                Err(e) => println!("Failed to save session: {}", e),
+                Err(e) => println!("Failed to save session: {e}"),
             }
         }
         "load" => {
@@ -2738,19 +3307,19 @@ fn handle_session_command(sub: &str, name: &str, agent: &mut Agent, workspace: &
             let mut mgr = match rustant_core::SessionManager::new(workspace) {
                 Ok(m) => m,
                 Err(e) => {
-                    println!("Failed to initialize session manager: {}", e);
+                    println!("Failed to initialize session manager: {e}");
                     return;
                 }
             };
             match mgr.resume_session(name) {
                 Ok((mem, continuation)) => {
                     *agent.memory_mut() = mem;
-                    println!("Session '{}' loaded.", name);
+                    println!("Session '{name}' loaded.");
                     if !continuation.is_empty() {
-                        println!("{}", continuation);
+                        println!("{continuation}");
                     }
                 }
-                Err(e) => println!("Failed to load session: {}", e),
+                Err(e) => println!("Failed to load session: {e}"),
             }
         }
         "list" => {
@@ -2805,7 +3374,7 @@ fn handle_pin_command(arg: &str, agent: &mut Agent) {
         if count == 0 {
             println!("No pinned messages. Use /pin <n> to pin a message by position.");
         } else {
-            println!("Pinned messages ({}):", count);
+            println!("Pinned messages ({count}):");
             for i in 0..mem.short_term.len() {
                 if mem.short_term.is_pinned(i) {
                     let msgs = mem.short_term.messages();
@@ -2832,7 +3401,7 @@ fn handle_pin_command(arg: &str, agent: &mut Agent) {
         Ok(n) => {
             let mem = agent.memory_mut();
             if mem.short_term.pin(n) {
-                println!("Pinned message #{} (will survive context compression).", n);
+                println!("Pinned message #{n} (will survive context compression).");
             } else {
                 println!(
                     "Invalid message index {}. Current messages: 0..{}",
@@ -2853,9 +3422,9 @@ fn handle_unpin_command(arg: &str, agent: &mut Agent) {
         Ok(n) => {
             let mem = agent.memory_mut();
             if mem.short_term.unpin(n) {
-                println!("Unpinned message #{}.", n);
+                println!("Unpinned message #{n}.");
             } else {
-                println!("Message #{} was not pinned.", n);
+                println!("Message #{n} was not pinned.");
             }
         }
         Err(_) => {
@@ -2928,7 +3497,7 @@ fn handle_workflows_command() {
                 println!("    Inputs: {}", inputs.join(", "));
             }
         } else {
-            println!("  {}", name);
+            println!("  {name}");
         }
     }
 
@@ -2953,7 +3522,7 @@ fn handle_resume_command(query: &str, agent: &mut Agent, workspace: &Path) {
     let mut mgr = match rustant_core::SessionManager::new(workspace) {
         Ok(m) => m,
         Err(e) => {
-            println!("Failed to initialize session manager: {}", e);
+            println!("Failed to initialize session manager: {e}");
             return;
         }
     };
@@ -2974,12 +3543,12 @@ fn handle_resume_command(query: &str, agent: &mut Agent, workspace: &Path) {
                 .add_message(rustant_core::types::Message::system(continuation));
             println!("\x1b[32mSession resumed!\x1b[0m");
             if !goal.is_empty() {
-                println!("  Goal: {}", goal);
+                println!("  Goal: {goal}");
             }
-            println!("  Messages restored: {}", msg_count);
+            println!("  Messages restored: {msg_count}");
         }
         Err(e) => {
-            println!("Failed to resume: {}", e);
+            println!("Failed to resume: {e}");
             println!("Use /sessions to list available sessions.");
         }
     }
@@ -2992,16 +3561,16 @@ fn handle_sessions_command(sub: &str, arg: &str, workspace: &Path) {
             let mgr = match rustant_core::SessionManager::new(workspace) {
                 Ok(m) => m,
                 Err(e) => {
-                    println!("Failed to initialize session manager: {}", e);
+                    println!("Failed to initialize session manager: {e}");
                     return;
                 }
             };
             let results = mgr.search(arg);
             if results.is_empty() {
-                println!("No sessions matching '{}'.", arg);
+                println!("No sessions matching '{arg}'.");
                 return;
             }
-            println!("Search results for '{}':", arg);
+            println!("Search results for '{arg}':");
             for entry in &results {
                 print_session_entry(entry);
             }
@@ -3015,29 +3584,29 @@ fn handle_sessions_command(sub: &str, arg: &str, workspace: &Path) {
             let mut mgr = match rustant_core::SessionManager::new(workspace) {
                 Ok(m) => m,
                 Err(e) => {
-                    println!("Failed to initialize session manager: {}", e);
+                    println!("Failed to initialize session manager: {e}");
                     return;
                 }
             };
             match mgr.tag_session(parts[0], parts[1]) {
                 Ok(()) => println!("Tagged '{}' with '{}'.", parts[0], parts[1]),
-                Err(e) => println!("Failed to tag session: {}", e),
+                Err(e) => println!("Failed to tag session: {e}"),
             }
         }
         "filter" if !arg.is_empty() => {
             let mgr = match rustant_core::SessionManager::new(workspace) {
                 Ok(m) => m,
                 Err(e) => {
-                    println!("Failed to initialize session manager: {}", e);
+                    println!("Failed to initialize session manager: {e}");
                     return;
                 }
             };
             let results = mgr.filter_by_tag(arg);
             if results.is_empty() {
-                println!("No sessions with tag '{}'.", arg);
+                println!("No sessions with tag '{arg}'.");
                 return;
             }
-            println!("Sessions tagged '{}':", arg);
+            println!("Sessions tagged '{arg}':");
             for entry in &results {
                 print_session_entry(entry);
             }
@@ -3047,7 +3616,7 @@ fn handle_sessions_command(sub: &str, arg: &str, workspace: &Path) {
             let mgr = match rustant_core::SessionManager::new(workspace) {
                 Ok(m) => m,
                 Err(e) => {
-                    println!("Failed to initialize session manager: {}", e);
+                    println!("Failed to initialize session manager: {e}");
                     return;
                 }
             };
@@ -3101,12 +3670,9 @@ fn print_session_entry(entry: &rustant_core::session_manager::SessionEntry) {
 fn handle_compact_command(agent: &mut Agent) {
     let (before, after) = agent.compact();
     if before == after {
-        println!("Nothing to compact ({} messages).", before);
+        println!("Nothing to compact ({before} messages).");
     } else {
-        println!(
-            "Compacted {} messages down to {} (+ summary).",
-            before, after
-        );
+        println!("Compacted {before} messages down to {after} (+ summary).");
     }
 }
 
@@ -3115,11 +3681,11 @@ fn handle_status_command(agent: &Agent) {
     let state = agent.state();
     println!("Agent Status: {}", state.status);
     if let Some(ref goal) = state.current_goal {
-        println!("Current Goal: {}", goal);
+        println!("Current Goal: {goal}");
     }
     println!("Iteration: {}/{}", state.iteration, state.max_iterations);
     if let Some(id) = state.task_id {
-        println!("Task ID: {}", id);
+        println!("Task ID: {id}");
     }
     let usage = agent.brain().total_usage();
     let cost = agent.brain().total_cost();
@@ -3157,8 +3723,7 @@ fn handle_config_command(key: &str, value: &str, agent: &mut Agent) {
             "streaming" => println!("streaming = {}", config.llm.use_streaming),
             "window_size" => println!("window_size = {}", config.memory.window_size),
             _ => println!(
-                "Unknown config key: {}. Available: model, approval_mode, max_iterations, streaming, window_size",
-                key
+                "Unknown config key: {key}. Available: model, approval_mode, max_iterations, streaming, window_size"
             ),
         }
         return;
@@ -3190,21 +3755,20 @@ fn handle_config_command(key: &str, value: &str, agent: &mut Agent) {
                     println!("Approval mode set to: yolo");
                 }
                 _ => println!(
-                    "Invalid approval mode: {}. Options: safe, cautious, paranoid, yolo",
-                    value
+                    "Invalid approval mode: {value}. Options: safe, cautious, paranoid, yolo"
                 ),
             }
         }
         "max_iterations" => {
             if let Ok(n) = value.parse::<usize>() {
                 if !(1..=500).contains(&n) {
-                    println!("max_iterations must be between 1 and 500 (got {})", n);
+                    println!("max_iterations must be between 1 and 500 (got {n})");
                 } else {
                     agent.config_mut().safety.max_iterations = n;
-                    println!("Max iterations set to: {}", n);
+                    println!("Max iterations set to: {n}");
                 }
             } else {
-                println!("Invalid number: {}", value);
+                println!("Invalid number: {value}");
             }
         }
         "streaming" => match value {
@@ -3216,23 +3780,22 @@ fn handle_config_command(key: &str, value: &str, agent: &mut Agent) {
                 agent.config_mut().llm.use_streaming = false;
                 println!("Streaming disabled.");
             }
-            _ => println!("Invalid value: {}. Use true/false.", value),
+            _ => println!("Invalid value: {value}. Use true/false."),
         },
         "window_size" => {
             if let Ok(n) = value.parse::<usize>() {
                 if !(5..=1000).contains(&n) {
-                    println!("window_size must be between 5 and 1000 (got {})", n);
+                    println!("window_size must be between 5 and 1000 (got {n})");
                 } else {
                     agent.config_mut().memory.window_size = n;
-                    println!("Window size set to: {}", n);
+                    println!("Window size set to: {n}");
                 }
             } else {
-                println!("Invalid number: {}", value);
+                println!("Invalid number: {value}");
             }
         }
         _ => println!(
-            "Cannot set '{}'. Settable keys: approval_mode, max_iterations, streaming, window_size",
-            key
+            "Cannot set '{key}'. Settable keys: approval_mode, max_iterations, streaming, window_size"
         ),
     }
 }
@@ -3322,9 +3885,9 @@ async fn handle_doctor_command(agent: &Agent, workspace: &Path) {
     let api_key_var = &config.llm.api_key_env;
     let has_api_key = std::env::var(api_key_var).is_ok();
     if has_api_key {
-        println!("  API key ({}): \x1b[32mset\x1b[0m", api_key_var);
+        println!("  API key ({api_key_var}): \x1b[32mset\x1b[0m");
     } else {
-        println!("  API key ({}): \x1b[31mnot set\x1b[0m", api_key_var);
+        println!("  API key ({api_key_var}): \x1b[31mnot set\x1b[0m");
         issues.push("API key environment variable is not set. Run /setup to configure.");
     }
 
@@ -3363,7 +3926,7 @@ async fn handle_doctor_command(agent: &Agent, workspace: &Path) {
     println!("\n\x1b[1mSafety\x1b[0m");
     println!("  Approval mode: {:?}", config.safety.approval_mode);
     let audit_count = agent.safety().audit_log().len();
-    println!("  Audit entries: {}", audit_count);
+    println!("  Audit entries: {audit_count}");
 
     // 7. Session health
     println!("\n\x1b[1mSessions\x1b[0m");
@@ -3398,10 +3961,10 @@ async fn handle_doctor_command(agent: &Agent, workspace: &Path) {
         println!("\x1b[32m  All checks passed.\x1b[0m");
     } else {
         for warning in &warnings {
-            println!("\x1b[33m  Warning: {}\x1b[0m", warning);
+            println!("\x1b[33m  Warning: {warning}\x1b[0m");
         }
         for issue in &issues {
-            println!("\x1b[31m  Issue: {}\x1b[0m", issue);
+            println!("\x1b[31m  Issue: {issue}\x1b[0m");
         }
         if !issues.is_empty() {
             println!("\n  Run \x1b[1m/setup\x1b[0m to resolve configuration issues.");
@@ -3445,10 +4008,7 @@ fn handle_permissions_command(arg: &str, agent: &mut Agent) {
             println!("Approval mode set to: yolo (auto-approve everything)");
         }
         _ => {
-            println!(
-                "Unknown mode: {}. Options: safe, cautious, paranoid, yolo",
-                arg
-            );
+            println!("Unknown mode: {arg}. Options: safe, cautious, paranoid, yolo");
         }
     }
 }
@@ -3457,7 +4017,7 @@ fn handle_permissions_command(arg: &str, agent: &mut Agent) {
 fn handle_trust_command(agent: &Agent) {
     let safety = agent.safety();
     let mode = safety.approval_mode();
-    let mode_desc = match format!("{:?}", mode).to_lowercase().as_str() {
+    let mode_desc = match format!("{mode:?}").to_lowercase().as_str() {
         "safe" => "Auto-approve read-only operations, ask for writes and executes",
         "cautious" => "Auto-approve reads and reversible writes, ask for executes",
         "paranoid" => "Ask for approval on every single action",
@@ -3467,8 +4027,8 @@ fn handle_trust_command(agent: &Agent) {
 
     println!("Trust Calibration Dashboard");
     println!("============================");
-    println!("  Current mode: {:?}", mode);
-    println!("  {}", mode_desc);
+    println!("  Current mode: {mode:?}");
+    println!("  {mode_desc}");
     println!();
 
     // Per-tool approval stats from audit log
@@ -3502,7 +4062,7 @@ fn handle_trust_command(agent: &Agent) {
         for tool in &all_tools {
             let a = approved.get(*tool).copied().unwrap_or(0);
             let d = denied.get(*tool).copied().unwrap_or(0);
-            println!("    {:<20} approved: {} | denied: {}", tool, a, d);
+            println!("    {tool:<20} approved: {a} | denied: {d}");
         }
 
         // Adaptive suggestions
@@ -3515,14 +4075,12 @@ fn handle_trust_command(agent: &Agent) {
             let d = denied.get(*tool).copied().unwrap_or(0);
             if a > 10 && d == 0 {
                 println!(
-                    "    \x1b[32m+\x1b[0m {} approved {}x with 0 denials — consider auto-approving in config.",
-                    tool, a
+                    "    \x1b[32m+\x1b[0m {tool} approved {a}x with 0 denials — consider auto-approving in config."
                 );
                 has_suggestions = true;
             } else if d > 3 && d > a {
                 println!(
-                    "    \x1b[33m!\x1b[0m {} denied {}x (vs {}x approved) — review safety config.",
-                    tool, d, a
+                    "    \x1b[33m!\x1b[0m {tool} denied {d}x (vs {a}x approved) — review safety config."
                 );
                 has_suggestions = true;
             }
@@ -3534,14 +4092,12 @@ fn handle_trust_command(agent: &Agent) {
 
         if total > 20 && total_denied == 0 {
             println!(
-                "    \x1b[36m*\x1b[0m All {} actions approved with 0 denials. Consider a less restrictive mode.",
-                total
+                "    \x1b[36m*\x1b[0m All {total} actions approved with 0 denials. Consider a less restrictive mode."
             );
             has_suggestions = true;
         } else if total > 10 && total_denied > 0 && (total_denied as f64 / total as f64) > 0.5 {
             println!(
-                "    \x1b[36m*\x1b[0m High denial rate ({}/{}). Review /permissions or add tools to blocklist.",
-                total_denied, total
+                "    \x1b[36m*\x1b[0m High denial rate ({total_denied}/{total}). Review /permissions or add tools to blocklist."
             );
             has_suggestions = true;
         }
@@ -3600,11 +4156,11 @@ fn handle_undo_command(workspace: &Path) {
             if !cp.changed_files.is_empty() {
                 println!("  Restored files:");
                 for f in &cp.changed_files {
-                    println!("    {}", f);
+                    println!("    {f}");
                 }
             }
         }
-        Err(e) => println!("Undo failed: {}", e),
+        Err(e) => println!("Undo failed: {e}"),
     }
 }
 
@@ -3617,10 +4173,10 @@ fn handle_diff_command(workspace: &Path) {
             if diff.is_empty() {
                 println!("No changes since last checkpoint.");
             } else {
-                println!("{}", diff);
+                println!("{diff}");
             }
         }
-        Err(e) => println!("Diff failed: {}", e),
+        Err(e) => println!("Diff failed: {e}"),
     }
 }
 
@@ -3643,7 +4199,7 @@ fn handle_review_command(workspace: &Path) {
             cp.timestamp.format("%H:%M:%S")
         );
         for f in &cp.changed_files {
-            println!("     {}", f);
+            println!("     {f}");
         }
     }
 
@@ -3652,7 +4208,7 @@ fn handle_review_command(workspace: &Path) {
         && !diff.is_empty()
     {
         println!("\nCurrent uncommitted changes:");
-        println!("{}", diff);
+        println!("{diff}");
     }
 }
 
@@ -3716,16 +4272,16 @@ fn handle_digest_command(sub: &str, workspace: &Path) {
             if let Some(latest) = entries.first() {
                 match std::fs::read_to_string(latest.path()) {
                     Ok(content) => {
-                        println!("{}", content);
+                        println!("{content}");
                     }
-                    Err(e) => println!("Failed to read digest: {}", e),
+                    Err(e) => println!("Failed to read digest: {e}"),
                 }
             } else {
                 println!("No markdown digests found. Digests will be generated automatically.");
             }
         }
         _ => {
-            println!("Unknown /digest subcommand: {}", sub);
+            println!("Unknown /digest subcommand: {sub}");
             println!("Usage: /digest          — Show latest digest");
             println!("       /digest history   — List recent digests");
         }
@@ -3747,30 +4303,21 @@ fn handle_replies_command(sub: &str, arg: &str) {
             println!("channel messages. Use /intelligence to check intelligence status.");
         }
         "approve" if !arg.is_empty() => {
-            println!(
-                "Approving reply '{}'... Reply not found in current session.",
-                arg
-            );
+            println!("Approving reply '{arg}'... Reply not found in current session.");
             println!("Pending replies are shown with their IDs when generated.");
         }
         "reject" if !arg.is_empty() => {
-            println!(
-                "Rejecting reply '{}'... Reply not found in current session.",
-                arg
-            );
+            println!("Rejecting reply '{arg}'... Reply not found in current session.");
         }
         "edit" if !arg.is_empty() => {
-            println!(
-                "Editing reply '{}'... Reply not found in current session.",
-                arg
-            );
+            println!("Editing reply '{arg}'... Reply not found in current session.");
             println!("When a reply is pending, use /replies edit <id> to modify before sending.");
         }
         "approve" | "reject" | "edit" => {
-            println!("Usage: /replies {} <reply-id>", sub);
+            println!("Usage: /replies {sub} <reply-id>");
         }
         _ => {
-            println!("Unknown /replies subcommand: {}", sub);
+            println!("Unknown /replies subcommand: {sub}");
             println!("Usage: /replies              — List pending auto-reply drafts");
             println!("       /replies approve <id> — Approve and send a pending reply");
             println!("       /replies reject <id>  — Reject and discard a pending reply");
@@ -3836,14 +4383,13 @@ fn handle_reminders_command(sub: &str, arg: &str, workspace: &Path) {
                             _ => "\x1b[0m",
                         };
                         println!(
-                            "  \x1b[36m{}\x1b[0m {}[{}]\x1b[0m [{}] {} (at {})",
-                            short_id, status_color, status, channel, desc, remind_at
+                            "  \x1b[36m{short_id}\x1b[0m {status_color}[{status}]\x1b[0m [{channel}] {desc} (at {remind_at})"
                         );
                     }
                     println!();
                     println!("Commands: /reminders dismiss <id> | /reminders complete <id>");
                 }
-                Err(e) => println!("Failed to read reminders index: {}", e),
+                Err(e) => println!("Failed to read reminders index: {e}"),
             }
         }
         "dismiss" if !arg.is_empty() => {
@@ -3876,7 +4422,7 @@ fn handle_reminders_command(sub: &str, arg: &str, workspace: &Path) {
                         .map(|(i, _)| i)
                         .collect();
                     match matches.len() {
-                        0 => println!("No reminder found matching '{}'.", arg),
+                        0 => println!("No reminder found matching '{arg}'."),
                         1 => {
                             let r = &mut reminders[matches[0]];
                             r["status"] = serde_json::Value::String("Dismissed".to_string());
@@ -3888,33 +4434,30 @@ fn handle_reminders_command(sub: &str, arg: &str, workspace: &Path) {
                                     let tmp_path = index_path.with_extension("json.tmp");
                                     match std::fs::write(&tmp_path, &json) {
                                         Ok(_) => match std::fs::rename(&tmp_path, &index_path) {
-                                            Ok(_) => println!("Dismissed reminder: {}", desc),
+                                            Ok(_) => println!("Dismissed reminder: {desc}"),
                                             Err(e) => {
                                                 let _ = std::fs::remove_file(&tmp_path);
-                                                println!("Failed to update reminders: {}", e);
+                                                println!("Failed to update reminders: {e}");
                                             }
                                         },
-                                        Err(e) => println!("Failed to write reminders: {}", e),
+                                        Err(e) => println!("Failed to write reminders: {e}"),
                                     }
                                 }
-                                Err(e) => println!("Failed to serialize reminders: {}", e),
+                                Err(e) => println!("Failed to serialize reminders: {e}"),
                             }
                         }
                         n => {
-                            println!(
-                                "Ambiguous: '{}' matches {} reminders. Be more specific:",
-                                arg, n
-                            );
+                            println!("Ambiguous: '{arg}' matches {n} reminders. Be more specific:");
                             for i in &matches {
                                 let id = reminders[*i]["id"].as_str().unwrap_or("?");
                                 let short: String = id.chars().take(8).collect();
                                 let d = reminders[*i]["description"].as_str().unwrap_or("?");
-                                println!("  {} — {}", short, d);
+                                println!("  {short} — {d}");
                             }
                         }
                     }
                 }
-                Err(e) => println!("Failed to read reminders: {}", e),
+                Err(e) => println!("Failed to read reminders: {e}"),
             }
         }
         "complete" if !arg.is_empty() => {
@@ -3949,7 +4492,7 @@ fn handle_reminders_command(sub: &str, arg: &str, workspace: &Path) {
                         .map(|(i, _)| i)
                         .collect();
                     match matches.len() {
-                        0 => println!("No reminder found matching '{}'.", arg),
+                        0 => println!("No reminder found matching '{arg}'."),
                         1 => {
                             let idx = matches[0];
                             reminders[idx]["status"] =
@@ -3964,49 +4507,42 @@ fn handle_reminders_command(sub: &str, arg: &str, workspace: &Path) {
                                     match std::fs::write(&tmp_path, &json) {
                                         Ok(_) => match std::fs::rename(&tmp_path, &index_path) {
                                             Ok(_) => {
-                                                println!("Completed reminder: {}", desc);
+                                                println!("Completed reminder: {desc}");
                                             }
                                             Err(e) => {
                                                 let _ = std::fs::remove_file(&tmp_path);
                                                 println!(
-                                                    "Completed in memory but failed to save: {}",
-                                                    e
+                                                    "Completed in memory but failed to save: {e}"
                                                 );
                                             }
                                         },
                                         Err(e) => {
-                                            println!(
-                                                "Completed in memory but failed to save: {}",
-                                                e
-                                            );
+                                            println!("Completed in memory but failed to save: {e}");
                                         }
                                     }
                                 }
-                                Err(e) => println!("Failed to serialize reminders: {}", e),
+                                Err(e) => println!("Failed to serialize reminders: {e}"),
                             }
                         }
                         n => {
-                            println!(
-                                "Ambiguous: '{}' matches {} reminders. Be more specific:",
-                                arg, n
-                            );
+                            println!("Ambiguous: '{arg}' matches {n} reminders. Be more specific:");
                             for i in &matches {
                                 let id = reminders[*i]["id"].as_str().unwrap_or("?");
                                 let short: String = id.chars().take(8).collect();
                                 let d = reminders[*i]["description"].as_str().unwrap_or("?");
-                                println!("  {} — {}", short, d);
+                                println!("  {short} — {d}");
                             }
                         }
                     }
                 }
-                Err(e) => println!("Failed to read reminders: {}", e),
+                Err(e) => println!("Failed to read reminders: {e}"),
             }
         }
         "dismiss" | "complete" => {
-            println!("Usage: /reminders {} <reminder-id>", sub);
+            println!("Usage: /reminders {sub} <reminder-id>");
         }
         _ => {
-            println!("Unknown /reminders subcommand: {}", sub);
+            println!("Unknown /reminders subcommand: {sub}");
             println!("Usage: /reminders              — List active reminders");
             println!("       /reminders dismiss <id> — Dismiss a reminder");
             println!("       /reminders complete <id> — Mark a reminder as completed");
@@ -4045,7 +4581,7 @@ fn handle_intelligence_command(sub: &str) {
             println!("  Re-enable with /intelligence on.");
         }
         _ => {
-            println!("Unknown /intelligence subcommand: {}", sub);
+            println!("Unknown /intelligence subcommand: {sub}");
             println!("Usage: /intelligence         — Show intelligence status");
             println!("       /intelligence on      — Enable intelligence");
             println!("       /intelligence off     — Disable intelligence");
@@ -4066,7 +4602,7 @@ fn display_plan(plan: &rustant_core::plan::ExecutionPlan) {
         plan.steps.len()
     );
     if let Some(cost) = plan.estimated_cost {
-        println!("\x1b[90mEstimated cost:\x1b[0m ${:.4}", cost);
+        println!("\x1b[90mEstimated cost:\x1b[0m ${cost:.4}");
     }
     println!();
 
@@ -4082,13 +4618,13 @@ fn display_plan(plan: &rustant_core::plan::ExecutionPlan) {
         let tool_info = step
             .tool
             .as_deref()
-            .map(|t| format!(" \x1b[36m[{}]\x1b[0m", t))
+            .map(|t| format!(" \x1b[36m[{t}]\x1b[0m"))
             .unwrap_or_default();
 
         let risk_badge = step
             .risk_level
             .as_ref()
-            .map(|r| format!(" \x1b[33m({})\x1b[0m", r))
+            .map(|r| format!(" \x1b[33m({r})\x1b[0m"))
             .unwrap_or_default();
 
         let approval = if step.requires_approval {
@@ -4210,7 +4746,7 @@ fn handle_council_command(input: &str, config: &AgentConfig) {
                             println!("  api_key_env = \"{}\"", p.api_key_env);
                         }
                         if let Some(ref url) = p.base_url {
-                            println!("  base_url = \"{}\"", url);
+                            println!("  base_url = \"{url}\"");
                         }
                     }
                 } else {
@@ -4241,7 +4777,7 @@ fn handle_council_command(input: &str, config: &AgentConfig) {
             };
 
             println!("\x1b[1mCouncil Deliberation\x1b[0m");
-            println!("Question: {}", question);
+            println!("Question: {question}");
             println!();
 
             let members = rustant_core::create_council_members(&council_cfg);
@@ -4254,7 +4790,7 @@ fn handle_council_command(input: &str, config: &AgentConfig) {
             let council = match rustant_core::PlanningCouncil::new(members, council_cfg) {
                 Ok(c) => c,
                 Err(e) => {
-                    println!("\x1b[31m✗\x1b[0m Failed to create council: {}", e);
+                    println!("\x1b[31m✗\x1b[0m Failed to create council: {e}");
                     return;
                 }
             };
@@ -4271,7 +4807,7 @@ fn handle_council_command(input: &str, config: &AgentConfig) {
                             label, resp.model_name, resp.provider, resp.latency_ms, resp.cost
                         );
                         for line in resp.response_text.lines().take(10) {
-                            println!("    {}", line);
+                            println!("    {line}");
                         }
                         if resp.response_text.lines().count() > 10 {
                             println!(
@@ -4308,7 +4844,7 @@ fn handle_council_command(input: &str, config: &AgentConfig) {
                     );
                 }
                 Err(e) => {
-                    println!("\x1b[31m✗\x1b[0m Council deliberation failed: {}", e);
+                    println!("\x1b[31m✗\x1b[0m Council deliberation failed: {e}");
                 }
             }
         }
@@ -4393,10 +4929,10 @@ fn handle_schedule_command(
                             .and_then(|j| j.next_run)
                             .map(|t| t.format("%Y-%m-%d %H:%M:%S UTC").to_string())
                             .unwrap_or_else(|| "N/A".to_string());
-                        println!("Added job '{}' -- next run: {}", name, next);
+                        println!("Added job '{name}' -- next run: {next}");
                         auto_save_scheduler(agent, workspace);
                     }
-                    Err(e) => println!("Failed to add job: {}", e),
+                    Err(e) => println!("Failed to add job: {e}"),
                 }
             } else {
                 println!("Scheduler is not enabled. Enable it in config.toml under [scheduler].");
@@ -4410,10 +4946,10 @@ fn handle_schedule_command(
             if let Some(scheduler) = agent.cron_scheduler_mut() {
                 match scheduler.remove_job(name) {
                     Ok(()) => {
-                        println!("Removed job '{}'.", name);
+                        println!("Removed job '{name}'.");
                         auto_save_scheduler(agent, workspace);
                     }
-                    Err(e) => println!("Failed to remove job: {}", e),
+                    Err(e) => println!("Failed to remove job: {e}"),
                 }
             } else {
                 println!("Scheduler is not enabled.");
@@ -4427,10 +4963,10 @@ fn handle_schedule_command(
             if let Some(scheduler) = agent.cron_scheduler_mut() {
                 match scheduler.enable_job(name) {
                     Ok(()) => {
-                        println!("Enabled job '{}'.", name);
+                        println!("Enabled job '{name}'.");
                         auto_save_scheduler(agent, workspace);
                     }
-                    Err(e) => println!("Failed to enable job: {}", e),
+                    Err(e) => println!("Failed to enable job: {e}"),
                 }
             } else {
                 println!("Scheduler is not enabled.");
@@ -4444,10 +4980,10 @@ fn handle_schedule_command(
             if let Some(scheduler) = agent.cron_scheduler_mut() {
                 match scheduler.disable_job(name) {
                     Ok(()) => {
-                        println!("Disabled job '{}'.", name);
+                        println!("Disabled job '{name}'.");
                         auto_save_scheduler(agent, workspace);
                     }
-                    Err(e) => println!("Failed to disable job: {}", e),
+                    Err(e) => println!("Failed to disable job: {e}"),
                 }
             } else {
                 println!("Scheduler is not enabled.");
@@ -4484,7 +5020,7 @@ fn handle_schedule_command(
                     println!("Manually triggering job '{}': {}", name, job.config.task);
                     println!("(Note: manual job execution runs in the current session)");
                 } else {
-                    println!("Job '{}' not found.", name);
+                    println!("Job '{name}' not found.");
                 }
             } else {
                 println!("Scheduler is not enabled.");
@@ -4492,8 +5028,7 @@ fn handle_schedule_command(
         }
         _ => {
             println!(
-                "Unknown schedule action: {}. Try: list, add, remove, enable, disable, jobs, run",
-                action
+                "Unknown schedule action: {action}. Try: list, add, remove, enable, disable, jobs, run"
             );
         }
     }
@@ -4541,8 +5076,18 @@ fn handle_why_command(index_str: &str, agent: &Agent) {
         rustant_core::explanation::DecisionType::ParameterChoice { tool, .. } => tool.as_str(),
         rustant_core::explanation::DecisionType::ErrorRecovery { .. } => "N/A",
         rustant_core::explanation::DecisionType::TaskDecomposition { .. } => "N/A",
+        rustant_core::explanation::DecisionType::ModelSelection { selected_model, .. } => {
+            selected_model.as_str()
+        }
+        rustant_core::explanation::DecisionType::RetrievalStrategy { strategy, .. } => {
+            strategy.as_str()
+        }
+        rustant_core::explanation::DecisionType::SafetyOverride { rule, .. } => rule.as_str(),
+        rustant_core::explanation::DecisionType::EvaluationJudgement { evaluator, .. } => {
+            evaluator.as_str()
+        }
     };
-    println!("Tool: {}", tool_name);
+    println!("Tool: {tool_name}");
     println!("Confidence: {:.2}", exp.confidence);
 
     // Reasoning chain
@@ -4640,21 +5185,20 @@ fn handle_persona_command(sub: &str, agent: &mut Agent) {
                 if let Some(id) = parse_persona_id(name) {
                     if let Some(resolver) = agent.persona_resolver_mut() {
                         resolver.set_override(Some(id));
-                        println!("Persona set to: {}", id);
+                        println!("Persona set to: {id}");
                     } else {
                         println!("Persona system not initialized.");
                     }
                 } else {
                     println!(
-                        "Unknown persona: '{}'. Options: architect, security, mlops, general",
-                        name
+                        "Unknown persona: '{name}'. Options: architect, security, mlops, general"
                     );
                 }
             } else if let Some(id) = parse_persona_id(other) {
                 // Allow "/persona architect" shorthand
                 if let Some(resolver) = agent.persona_resolver_mut() {
                     resolver.set_override(Some(id));
-                    println!("Persona set to: {}", id);
+                    println!("Persona set to: {id}");
                 } else {
                     println!("Persona system not initialized.");
                 }

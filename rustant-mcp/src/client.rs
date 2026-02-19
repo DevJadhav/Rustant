@@ -203,7 +203,7 @@ impl McpClient {
         }
 
         response.result.ok_or_else(|| McpError::InternalError {
-            message: format!("Tool '{}' returned no result", tool_name),
+            message: format!("Tool '{tool_name}' returned no result"),
         })
     }
 
@@ -223,7 +223,7 @@ impl McpClient {
 
         let response: JsonRpcResponse =
             serde_json::from_str(&raw).map_err(|e| McpError::ParseError {
-                message: format!("Invalid JSON-RPC response: {}", e),
+                message: format!("Invalid JSON-RPC response: {e}"),
             })?;
 
         if let Some(ref error) = response.error {
@@ -257,6 +257,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut registry = ToolRegistry::new();
         rustant_tools::register_builtin_tools(&mut registry, dir.path().to_path_buf());
+        rustant_security::register_security_tools(&mut registry);
         let server = McpServer::new(Arc::new(registry), dir.path().to_path_buf());
         (server, dir)
     }
@@ -290,11 +291,11 @@ mod tests {
         client.initialize(&mut client_transport).await.unwrap();
 
         let tools = client.discover_tools(&mut client_transport).await.unwrap();
-        // 40 base + 3 iMessage + 24 macOS native = 67 on macOS
+        // 72 base (macOS) + 33 security = 105; 45 base + 33 security = 78
         #[cfg(target_os = "macos")]
-        let expected_tools = 67;
+        let expected_tools = 105;
         #[cfg(not(target_os = "macos"))]
-        let expected_tools = 40;
+        let expected_tools = 78;
         assert_eq!(tools.len(), expected_tools);
         assert_eq!(client.available_tools().len(), expected_tools);
 

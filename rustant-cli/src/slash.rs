@@ -9,9 +9,11 @@ pub enum CommandCategory {
     Session,
     Agent,
     Safety,
+    Security,
     Development,
     System,
     Ui,
+    AiEngineer,
 }
 
 impl CommandCategory {
@@ -20,9 +22,11 @@ impl CommandCategory {
             CommandCategory::Session => "Session",
             CommandCategory::Agent => "Agent",
             CommandCategory::Safety => "Safety",
+            CommandCategory::Security => "Security",
             CommandCategory::Development => "Development",
             CommandCategory::System => "System",
             CommandCategory::Ui => "UI",
+            CommandCategory::AiEngineer => "AI Engineer",
         }
     }
 
@@ -31,9 +35,11 @@ impl CommandCategory {
             CommandCategory::Session,
             CommandCategory::Agent,
             CommandCategory::Safety,
+            CommandCategory::Security,
             CommandCategory::Development,
             CommandCategory::System,
             CommandCategory::Ui,
+            CommandCategory::AiEngineer,
         ]
     }
 }
@@ -694,7 +700,7 @@ impl CommandRegistry {
         // ── ArXiv Research ──
         self.register(CommandInfo {
             name: "/arxiv",
-            aliases: &["/paper", "/research"],
+            aliases: &["/paper"],
             description: "Search and manage arXiv research papers",
             usage:
                 "/arxiv search <query> | fetch <id> | trending [category] | library | analyze <id>",
@@ -1179,6 +1185,714 @@ impl CommandRegistry {
                  Incremental re-indexing detects changed files automatically.",
             ),
         });
+
+        // ── Fullstack Development ──
+        self.register(CommandInfo {
+            name: "/init",
+            aliases: &[],
+            description: "Initialize project from template",
+            usage: "/init <template> <name>",
+            category: CommandCategory::Development,
+
+            detailed_help: Some(
+                "Initialize a new project from a template.\n\n\
+                 Usage:\n  /init <template> <name>  — Create new project from template\n\n\
+                 Templates:\n  react, nextjs, vite, express, fastapi, axum, tauri,\n  \
+                 fullstack-react, fullstack-next, api-only, monorepo\n\n\
+                 Examples:\n  /init nextjs my-app         — Next.js project\n  \
+                 /init fullstack-react shop   — React + API project\n  \
+                 /init axum my-service        — Axum REST service\n\n\
+                 Creates directory structure, installs dependencies,\n\
+                 and configures tooling (linter, formatter, test runner).",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/preview",
+            aliases: &[],
+            description: "Launch or manage dev server",
+            usage: "/preview [start|stop|restart|status]",
+            category: CommandCategory::Development,
+
+            detailed_help: Some(
+                "Launch and manage the local development server.\n\n\
+                 Usage:\n  /preview start    — Start the dev server\n  \
+                 /preview stop     — Stop the running dev server\n  \
+                 /preview restart  — Restart the dev server\n  \
+                 /preview status   — Show dev server status and port\n  \
+                 /preview          — Toggle (start if stopped, show status if running)\n\n\
+                 Auto-detects the project type (npm, cargo, python, etc.)\n\
+                 and runs the appropriate dev command.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/db",
+            aliases: &[],
+            description: "Database operations",
+            usage: "/db [migrate|rollback|seed|query|schema|status]",
+            category: CommandCategory::Development,
+
+            detailed_help: Some(
+                "Manage database schema, migrations, and data.\n\n\
+                 Usage:\n  /db migrate            — Run pending migrations\n  \
+                 /db rollback [n]       — Rollback last n migrations (default 1)\n  \
+                 /db seed               — Seed database with sample data\n  \
+                 /db query <sql>        — Execute a SQL query\n  \
+                 /db schema             — Show current database schema\n  \
+                 /db status             — Show migration status\n\n\
+                 Auto-detects ORM (Diesel, SQLx, Prisma, Drizzle, Knex,\n\
+                 Django, Alembic) and runs the appropriate commands.\n\
+                 Migrations require approval in safe/cautious modes.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/test",
+            aliases: &[],
+            description: "Run tests",
+            usage: "/test [run_all|run_file <file>|run_test <name>|run_changed|coverage]",
+            category: CommandCategory::Development,
+
+            detailed_help: Some(
+                "Run tests with smart defaults based on project type.\n\n\
+                 Usage:\n  /test run_all              — Run all tests\n  \
+                 /test run_file <file>      — Run tests in a specific file\n  \
+                 /test run_test <name>      — Run a single test by name\n  \
+                 /test run_changed          — Run tests for changed files only\n  \
+                 /test coverage             — Run tests with coverage report\n  \
+                 /test                      — Same as /test run_all\n\n\
+                 Auto-detects test runner (cargo test, jest, pytest, vitest, etc.).\n\
+                 Coverage output saved to .rustant/coverage/.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/lint",
+            aliases: &[],
+            description: "Lint and type check",
+            usage: "/lint [check|fix|typecheck|format|format_check]",
+            category: CommandCategory::Development,
+
+            detailed_help: Some(
+                "Run linters, type checkers, and formatters.\n\n\
+                 Usage:\n  /lint check          — Run linter in check mode\n  \
+                 /lint fix            — Run linter with auto-fix\n  \
+                 /lint typecheck      — Run type checker (tsc, mypy, etc.)\n  \
+                 /lint format         — Format code in place\n  \
+                 /lint format_check   — Check formatting without changes\n  \
+                 /lint                — Same as /lint check\n\n\
+                 Auto-detects tools: clippy, eslint, prettier, ruff, black,\n\
+                 tsc, mypy, rustfmt. Fix mode requires approval in safe mode.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/deps",
+            aliases: &[],
+            description: "Manage dependencies",
+            usage: "/deps [list|add|remove|update|audit]",
+            category: CommandCategory::Development,
+
+            detailed_help: Some(
+                "Manage project dependencies.\n\n\
+                 Usage:\n  /deps list              — List all dependencies\n  \
+                 /deps add <pkg> [ver]   — Add a dependency\n  \
+                 /deps remove <pkg>     — Remove a dependency\n  \
+                 /deps update [pkg]     — Update dependencies (all or specific)\n  \
+                 /deps audit            — Security audit of dependencies\n\n\
+                 Auto-detects package manager (cargo, npm, yarn, pnpm, pip, poetry).\n\
+                 Add/remove/update require approval in safe/cautious modes.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/verify",
+            aliases: &[],
+            description: "Run full verification pipeline",
+            usage: "/verify [all|test|lint|typecheck]",
+            category: CommandCategory::Development,
+
+            detailed_help: Some(
+                "Run the full project verification pipeline.\n\n\
+                 Usage:\n  /verify all        — Run all checks: test + lint + typecheck\n  \
+                 /verify test       — Run only tests\n  \
+                 /verify lint       — Run only linter\n  \
+                 /verify typecheck  — Run only type checker\n  \
+                 /verify            — Same as /verify all\n\n\
+                 Runs checks in order: test -> lint -> typecheck.\n\
+                 Stops on first failure by default. Uses the fullstack_verify\n\
+                 workflow template for iterative fix-and-recheck (max 3 iterations).",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/repomap",
+            aliases: &[],
+            description: "Show repository symbol map",
+            usage: "/repomap [build|show|summary]",
+            category: CommandCategory::Development,
+
+            detailed_help: Some(
+                "Generate and display a map of symbols across the repository.\n\n\
+                 Usage:\n  /repomap build    — Build or rebuild the symbol map\n  \
+                 /repomap show     — Show the full symbol map (functions, types, traits)\n  \
+                 /repomap summary  — Show a condensed overview with counts\n  \
+                 /repomap         — Same as /repomap show\n\n\
+                 The symbol map indexes all public APIs, types, traits, and functions.\n\
+                 Supports 50+ languages via the project indexer.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/symbols",
+            aliases: &[],
+            description: "Search symbols across the codebase",
+            usage: "/symbols <query>",
+            category: CommandCategory::Development,
+
+            detailed_help: Some(
+                "Search for symbols (functions, types, traits, etc.) across the codebase.\n\n\
+                 Usage:\n  /symbols <query>    — Search symbols matching query\n\n\
+                 Examples:\n  /symbols parse       — Find all symbols containing 'parse'\n  \
+                 /symbols Agent       — Find types/traits named Agent\n  \
+                 /symbols register_   — Find functions starting with register_\n\n\
+                 Uses the project indexer for fast lookup across 50+ languages.\n\
+                 Results include file path, line number, kind, and signature.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/refs",
+            aliases: &[],
+            description: "Find references to a symbol",
+            usage: "/refs <symbol>",
+            category: CommandCategory::Development,
+
+            detailed_help: Some(
+                "Find all references to a symbol across the codebase.\n\n\
+                 Usage:\n  /refs <symbol>    — Find all references to the symbol\n\n\
+                 Examples:\n  /refs ToolRegistry      — Find all usages of ToolRegistry\n  \
+                 /refs parse_workflow    — Find all call sites for parse_workflow\n  \
+                 /refs CommandCategory   — Find all references to CommandCategory\n\n\
+                 Searches definitions, call sites, imports, and type annotations.\n\
+                 Results include file path, line number, and surrounding context.",
+            ),
+        });
+
+        // ── AI Engineer ──
+        self.register(CommandInfo {
+            name: "/ml",
+            aliases: &[],
+            description: "ML operations overview and status",
+            usage: "/ml [status|pipelines|experiments]",
+            category: CommandCategory::AiEngineer,
+
+            detailed_help: Some(
+                "ML operations overview and status dashboard.\n\n\
+                 Usage:\n  /ml              — Show ML ops overview\n  \
+                 /ml status       — Pipeline and experiment status\n  \
+                 /ml pipelines    — List active ML pipelines\n  \
+                 /ml experiments  — Recent experiment summary\n\n\
+                 Routes to: ml_ops tool for orchestration.\n\
+                 See also: /data, /train, /eval, /inference",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/data",
+            aliases: &[],
+            description: "Data pipeline: ingest, validate, split, version",
+            usage: "/data [ingest|validate|split|version|status]",
+            category: CommandCategory::AiEngineer,
+
+            detailed_help: Some(
+                "Manage data pipelines for ML workflows.\n\n\
+                 Usage:\n  /data ingest <path>       — Ingest dataset from path or URL\n  \
+                 /data validate <dataset>  — Run data quality checks\n  \
+                 /data split <dataset>     — Create train/val/test splits\n  \
+                 /data version <dataset>   — Version a dataset snapshot\n  \
+                 /data status              — Show active data pipelines\n\n\
+                 Routes to: data_pipeline tool.\n\
+                 State stored in .rustant/ml/data/.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/features",
+            aliases: &[],
+            description: "Feature store: define, compute, serve",
+            usage: "/features [define|compute|serve|list|status]",
+            category: CommandCategory::AiEngineer,
+
+            detailed_help: Some(
+                "Manage the feature store for ML models.\n\n\
+                 Usage:\n  /features define <name> <expr>  — Define a new feature\n  \
+                 /features compute <group>       — Compute feature values\n  \
+                 /features serve <group>         — Start feature serving\n  \
+                 /features list                  — List defined features\n  \
+                 /features status                — Feature store status\n\n\
+                 Routes to: feature_store tool.\n\
+                 State stored in .rustant/ml/features/.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/train",
+            aliases: &[],
+            description: "Training: start, status, compare, sweep",
+            usage: "/train [start|status|compare|sweep|stop]",
+            category: CommandCategory::AiEngineer,
+
+            detailed_help: Some(
+                "Manage model training runs.\n\n\
+                 Usage:\n  /train start <config>     — Start a training run\n  \
+                 /train status [id]        — Show training run status\n  \
+                 /train compare <a> <b>    — Compare two training runs\n  \
+                 /train sweep <config>     — Launch hyperparameter sweep\n  \
+                 /train stop [id]          — Stop a running training job\n\n\
+                 Routes to: training tool.\n\
+                 State stored in .rustant/ml/training/.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/finetune",
+            aliases: &[],
+            description: "LLM fine-tuning: start, merge, eval",
+            usage: "/finetune [start|merge|eval|status|list]",
+            category: CommandCategory::AiEngineer,
+
+            detailed_help: Some(
+                "Fine-tune large language models.\n\n\
+                 Usage:\n  /finetune start <model> <data>  — Start fine-tuning job\n  \
+                 /finetune merge <adapter>       — Merge LoRA adapter into base model\n  \
+                 /finetune eval <model>          — Evaluate fine-tuned model\n  \
+                 /finetune status [id]           — Check fine-tuning progress\n  \
+                 /finetune list                  — List fine-tuning jobs\n\n\
+                 Routes to: llm_finetune tool.\n\
+                 Supports LoRA, QLoRA, and full fine-tuning.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/quantize",
+            aliases: &[],
+            description: "Quantization: quantize model, compare",
+            usage: "/quantize [run|compare|status]",
+            category: CommandCategory::AiEngineer,
+
+            detailed_help: Some(
+                "Quantize models for efficient inference.\n\n\
+                 Usage:\n  /quantize run <model> <bits>    — Quantize model (4/8-bit)\n  \
+                 /quantize compare <orig> <quant> — Compare accuracy/speed\n  \
+                 /quantize status                 — Show quantization jobs\n\n\
+                 Routes to: quantization tool.\n\
+                 Supports GPTQ, AWQ, and GGUF formats.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/rag",
+            aliases: &[],
+            description: "RAG pipeline: ingest, query, collection, evaluate",
+            usage: "/rag [ingest|query|collection|evaluate|status]",
+            category: CommandCategory::AiEngineer,
+
+            detailed_help: Some(
+                "Manage Retrieval-Augmented Generation pipelines.\n\n\
+                 Usage:\n  /rag ingest <path>          — Ingest documents into collection\n  \
+                 /rag query <question>       — Query a RAG collection\n  \
+                 /rag collection list        — List collections\n  \
+                 /rag collection create <n>  — Create a new collection\n  \
+                 /rag evaluate <collection>  — Evaluate retrieval quality\n  \
+                 /rag status                 — Show RAG pipeline status\n\n\
+                 Routes to: rag_pipeline tool.\n\
+                 State stored in .rustant/ml/rag/.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/eval",
+            aliases: &[],
+            description: "Evaluation: run, judge, analyze, report",
+            usage: "/eval [run|judge|analyze|report|list]",
+            category: CommandCategory::AiEngineer,
+
+            detailed_help: Some(
+                "Run model evaluations and benchmarks.\n\n\
+                 Usage:\n  /eval run <model> <dataset>   — Run evaluation suite\n  \
+                 /eval judge <a> <b>           — LLM-as-judge comparison\n  \
+                 /eval analyze <run_id>        — Analyze evaluation results\n  \
+                 /eval report <run_id>         — Generate evaluation report\n  \
+                 /eval list                    — List evaluation runs\n\n\
+                 Routes to: evaluation tool.\n\
+                 State stored in .rustant/ml/eval/.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/inference",
+            aliases: &[],
+            description: "Model serving: serve, stop, status",
+            usage: "/inference [serve|stop|status|endpoints]",
+            category: CommandCategory::AiEngineer,
+
+            detailed_help: Some(
+                "Manage model serving and inference endpoints.\n\n\
+                 Usage:\n  /inference serve <model>     — Start serving a model\n  \
+                 /inference stop <endpoint>   — Stop an endpoint\n  \
+                 /inference status            — Show serving status\n  \
+                 /inference endpoints         — List active endpoints\n\n\
+                 Routes to: inference tool.\n\
+                 Supports REST and gRPC endpoints.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/models",
+            aliases: &[],
+            description: "Model zoo: list, download, benchmark",
+            usage: "/models [list|download|benchmark|info]",
+            category: CommandCategory::AiEngineer,
+
+            detailed_help: Some(
+                "Browse and manage the model zoo.\n\n\
+                 Usage:\n  /models list [filter]        — List available models\n  \
+                 /models download <name>      — Download a model\n  \
+                 /models benchmark <name>     — Run benchmarks on a model\n  \
+                 /models info <name>          — Show model details\n\n\
+                 Routes to: model_zoo tool.\n\
+                 State stored in .rustant/ml/models/.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/mlresearch",
+            aliases: &[],
+            description: "ML research tools: review, compare, repro",
+            usage: "/mlresearch [review|compare|repro|survey]",
+            category: CommandCategory::AiEngineer,
+
+            detailed_help: Some(
+                "ML research paper analysis and reproducibility tools.\n\n\
+                 Usage:\n  /mlresearch review <paper>     — Review a research paper\n  \
+                 /mlresearch compare <a> <b>    — Compare methodologies\n  \
+                 /mlresearch repro <paper>      — Reproduce paper results\n  \
+                 /mlresearch survey <topic>     — Generate literature survey\n\n\
+                 Routes to: research_* tools.\n\
+                 See also: /arxiv for paper search and management.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/explain",
+            aliases: &["/interpret"],
+            description: "Interpretability: decision, attention, features",
+            usage: "/explain [decision|attention|features|shap]",
+            category: CommandCategory::AiEngineer,
+
+            detailed_help: Some(
+                "Model interpretability and explainability tools.\n\n\
+                 Usage:\n  /explain decision <model> <input>  — Explain a model decision\n  \
+                 /explain attention <model>         — Visualize attention maps\n  \
+                 /explain features <model>          — Feature importance analysis\n  \
+                 /explain shap <model> <input>      — SHAP value analysis\n\n\
+                 Routes to: interpretability tool.\n\
+                 Supports transformer attention, SHAP, and LIME.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/aisafety",
+            aliases: &[],
+            description: "AI safety: check, pii, bias, alignment",
+            usage: "/aisafety [check|pii|bias|alignment|report]",
+            category: CommandCategory::AiEngineer,
+
+            detailed_help: Some(
+                "AI safety checks and compliance.\n\n\
+                 Usage:\n  /aisafety check <model>       — Run safety checks on model\n  \
+                 /aisafety pii <data>          — Detect PII in datasets\n  \
+                 /aisafety bias <model>        — Bias detection and analysis\n  \
+                 /aisafety alignment <model>   — Alignment evaluation\n  \
+                 /aisafety report              — Generate safety report\n\n\
+                 Routes to: ai_safety tool.\n\
+                 Includes toxicity, fairness, and robustness checks.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/redteam",
+            aliases: &[],
+            description: "Red teaming: run, report",
+            usage: "/redteam [run|report|strategies|status]",
+            category: CommandCategory::AiEngineer,
+
+            detailed_help: Some(
+                "Adversarial red teaming for LLM and ML models.\n\n\
+                 Usage:\n  /redteam run <model>         — Run red team evaluation\n  \
+                 /redteam report [id]         — View red team report\n  \
+                 /redteam strategies          — List attack strategies\n  \
+                 /redteam status              — Show active red team runs\n\n\
+                 Routes to: red_team tool.\n\
+                 Includes prompt injection, jailbreak, and adversarial input tests.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/lineage",
+            aliases: &[],
+            description: "Data/model lineage: data, model, graph",
+            usage: "/lineage [data|model|graph|trace]",
+            category: CommandCategory::AiEngineer,
+
+            detailed_help: Some(
+                "Track data and model lineage for reproducibility.\n\n\
+                 Usage:\n  /lineage data <dataset>      — Show data provenance\n  \
+                 /lineage model <model>       — Show model lineage\n  \
+                 /lineage graph               — Visualize lineage graph\n  \
+                 /lineage trace <artifact>    — Trace artifact origin\n\n\
+                 Routes to: lineage tool.\n\
+                 State stored in .rustant/ml/lineage/.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/benchmark",
+            aliases: &[],
+            description: "Benchmarks: run, compare, create",
+            usage: "/benchmark [run|compare|create|list]",
+            category: CommandCategory::AiEngineer,
+
+            detailed_help: Some(
+                "Run and manage ML model benchmarks.\n\n\
+                 Usage:\n  /benchmark run <suite> <model>   — Run benchmark suite\n  \
+                 /benchmark compare <a> <b>       — Compare benchmark results\n  \
+                 /benchmark create <name>         — Create custom benchmark\n  \
+                 /benchmark list                  — List available benchmarks\n\n\
+                 Routes to: benchmark tool.\n\
+                 State stored in .rustant/ml/benchmarks/.",
+            ),
+        });
+
+        self.register(CommandInfo {
+            name: "/research",
+            aliases: &[],
+            description: "Research tools: /research review, /research compare, /research repro",
+            usage: "/research [review|compare|repro|search]",
+            category: CommandCategory::AiEngineer,
+
+            detailed_help: Some(
+                "Manage ML research workflows.\n\n\
+                 Usage:\n  /research review <paper>     — Review a paper\n  \
+                 /research compare <a> <b>    — Compare papers side-by-side\n  \
+                 /research repro <paper>      — Reproduce paper results\n  \
+                 /research search <query>     — Search research papers\n\n\
+                 Routes to: research tools.\n\
+                 State stored in .rustant/ml/research/.",
+            ),
+        });
+
+        // ── Security ──
+        self.register(CommandInfo {
+            name: "/scan",
+            aliases: &[],
+            description: "Run security scan (SAST, SCA, secrets)",
+            usage: "/scan [--sast|--sca|--secrets|--all]",
+            category: CommandCategory::Security,
+
+            detailed_help: Some(
+                "Run security scans on the current workspace.\n\n\
+                 Usage:\n  /scan              — Run all scanners (default)\n  \
+                 /scan --sast       — Static application security testing only\n  \
+                 /scan --sca        — Software composition analysis only\n  \
+                 /scan --secrets    — Secret detection only\n  \
+                 /scan --all        — Run all scanners explicitly\n\n\
+                 Invokes the security_scan tool. Results include severity,\n\
+                 file location, and remediation advice.\n\
+                 Findings stored in .rustant/security/findings.json.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/autofix",
+            aliases: &[],
+            description: "Generate and apply code fixes for findings",
+            usage: "/autofix [suggest|apply] [finding_id]",
+            category: CommandCategory::Security,
+
+            detailed_help: Some(
+                "Generate and apply automated code fixes for security findings.\n\n\
+                 Usage:\n  /autofix suggest [id]   — Generate fix suggestions\n  \
+                 /autofix apply [id]     — Apply a suggested fix\n  \
+                 /autofix                — Suggest fixes for all open findings\n\n\
+                 Invokes suggest_fix and apply_fix tools.\n\
+                 Fix application requires approval in safe/cautious modes.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/quality",
+            aliases: &[],
+            description: "Code quality metrics and scoring",
+            usage: "/quality [path]",
+            category: CommandCategory::Security,
+
+            detailed_help: Some(
+                "Analyze code quality metrics for the workspace or a specific path.\n\n\
+                 Usage:\n  /quality           — Score the entire workspace\n  \
+                 /quality <path>    — Score a specific file or directory\n\n\
+                 Invokes the quality_score tool. Reports on:\n\
+                 - Cyclomatic complexity\n\
+                 - Code duplication\n\
+                 - Dead code detection\n\
+                 - Maintainability index",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/debt",
+            aliases: &[],
+            description: "Technical debt report",
+            usage: "/debt [path]",
+            category: CommandCategory::Security,
+
+            detailed_help: Some(
+                "Generate a technical debt report for the codebase.\n\n\
+                 Usage:\n  /debt           — Report for entire workspace\n  \
+                 /debt <path>    — Report for a specific path\n\n\
+                 Invokes the tech_debt_report tool. Identifies:\n\
+                 - TODO/FIXME/HACK annotations\n\
+                 - High-complexity functions\n\
+                 - Duplicated code blocks\n\
+                 - Outdated dependencies\n\
+                 - Missing test coverage areas",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/complexity",
+            aliases: &[],
+            description: "Complexity analysis of codebase",
+            usage: "/complexity [path]",
+            category: CommandCategory::Security,
+
+            detailed_help: Some(
+                "Analyze code complexity across the workspace.\n\n\
+                 Usage:\n  /complexity           — Analyze entire workspace\n  \
+                 /complexity <path>    — Analyze a specific file or directory\n\n\
+                 Invokes the complexity_check tool. Reports:\n\
+                 - Cyclomatic complexity per function\n\
+                 - Nesting depth analysis\n\
+                 - Cognitive complexity scores\n\
+                 - Functions exceeding thresholds",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/findings",
+            aliases: &[],
+            description: "List and filter security findings",
+            usage: "/findings [--severity <level>|--tool <name>|--status <status>]",
+            category: CommandCategory::Security,
+
+            detailed_help: Some(
+                "List, filter, and export security findings.\n\n\
+                 Usage:\n  /findings                       — List all findings\n  \
+                 /findings --severity critical   — Filter by severity\n  \
+                 /findings --tool sast           — Filter by scanner tool\n  \
+                 /findings --status open         — Filter by status (open/resolved/suppressed)\n\n\
+                 Invokes the audit_export tool. Supports SARIF and markdown export.\n\
+                 Findings stored in .rustant/security/findings.json.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/license",
+            aliases: &[],
+            description: "License compliance check",
+            usage: "/license [check|report]",
+            category: CommandCategory::Security,
+
+            detailed_help: Some(
+                "Check license compliance for all dependencies.\n\n\
+                 Usage:\n  /license check    — Run license compliance check\n  \
+                 /license report   — Generate full license report\n  \
+                 /license          — Same as /license check\n\n\
+                 Invokes the license_check tool. Validates against:\n\
+                 - SPDX license identifiers\n\
+                 - Policy gate/warn/inform rules\n\
+                 - Copyleft license detection\n\
+                 - Unknown or missing license warnings",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/sbom",
+            aliases: &[],
+            description: "Generate Software Bill of Materials",
+            usage: "/sbom [cyclonedx|csv|diff]",
+            category: CommandCategory::Security,
+
+            detailed_help: Some(
+                "Generate a Software Bill of Materials for the workspace.\n\n\
+                 Usage:\n  /sbom              — Generate CycloneDX SBOM (default)\n  \
+                 /sbom cyclonedx    — CycloneDX JSON format\n  \
+                 /sbom csv          — CSV format for spreadsheets\n  \
+                 /sbom diff         — Diff against previous SBOM\n\n\
+                 Invokes the sbom_generate tool. Includes:\n\
+                 - Direct and transitive dependencies\n\
+                 - Version information and licenses\n\
+                 - Vulnerability cross-references\n\
+                 Output saved to .rustant/security/sbom/.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/risk",
+            aliases: &[],
+            description: "Calculate risk score for the project",
+            usage: "/risk [path]",
+            category: CommandCategory::Security,
+
+            detailed_help: Some(
+                "Calculate a multi-dimensional risk score for the project.\n\n\
+                 Usage:\n  /risk           — Risk score for entire workspace\n  \
+                 /risk <path>    — Risk score for a specific component\n\n\
+                 Invokes the risk_score tool. Dimensions:\n\
+                 - Vulnerability severity and count\n\
+                 - Dependency freshness and risk\n\
+                 - Code complexity and test coverage\n\
+                 - License compliance status\n\
+                 Overall score: 0.0 (low risk) to 1.0 (critical risk).",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/compliance",
+            aliases: &[],
+            description: "Compliance status and reporting",
+            usage: "/compliance [status|report|check <framework>]",
+            category: CommandCategory::Security,
+
+            detailed_help: Some(
+                "Check compliance status against security frameworks.\n\n\
+                 Usage:\n  /compliance status             — Show compliance overview\n  \
+                 /compliance report             — Generate full compliance report\n  \
+                 /compliance check <framework>  — Check specific framework\n  \
+                 /compliance                    — Same as /compliance status\n\n\
+                 Invokes the compliance_report tool. Supports:\n\
+                 - OWASP Top 10\n\
+                 - CIS benchmarks\n\
+                 - SOC 2 controls\n\
+                 - Custom policy definitions (.rustant/policies.toml)",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/alerts",
+            aliases: &[],
+            description: "List and manage security alerts",
+            usage: "/alerts [list|ack|silence|correlate|rules]",
+            category: CommandCategory::Security,
+
+            detailed_help: Some(
+                "List and manage security alerts.\n\n\
+                 Usage:\n  /alerts                — List active alerts\n  \
+                 /alerts list            — List all alerts with status\n  \
+                 /alerts ack <id>        — Acknowledge an alert\n  \
+                 /alerts silence <id>    — Silence an alert\n  \
+                 /alerts correlate       — Show alert correlations\n  \
+                 /alerts rules           — Show alert rules\n\n\
+                 Invokes the alert_manager tool. Shows status, severity,\n\
+                 and correlations. State: .rustant/alerts/state.json.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/triage",
+            aliases: &[],
+            description: "Alert triage and prioritization",
+            usage: "/triage [list|prioritize|assign|dismiss]",
+            category: CommandCategory::Security,
+
+            detailed_help: Some(
+                "Triage and prioritize security alerts.\n\n\
+                 Usage:\n  /triage list              — List pending alerts\n  \
+                 /triage prioritize        — Auto-prioritize by severity and context\n  \
+                 /triage assign <id> <who> — Assign an alert for remediation\n  \
+                 /triage dismiss <id>      — Dismiss a false positive\n  \
+                 /triage                   — Same as /triage list\n\n\
+                 Invokes the alert_triage tool. Uses severity, blast radius,\n\
+                 and exploitability to rank alerts. State: .rustant/alerts/triage.json.",
+            ),
+        });
     }
 
     /// Look up a command by name or alias.
@@ -1264,7 +1978,7 @@ impl CommandRegistry {
         let topic_with_slash = if topic_lower.starts_with('/') {
             topic_lower.clone()
         } else {
-            format!("/{}", topic_lower)
+            format!("/{topic_lower}")
         };
 
         // Try exact command lookup
@@ -1366,10 +2080,10 @@ mod tests {
     #[test]
     fn test_register_defaults_populates() {
         let registry = CommandRegistry::with_defaults();
-        // We have 53+ commands registered (45 original + 8 new: think/vision/ground/structured/capabilities/hooks/team/batch)
+        // We have 91+ commands registered (53 previous + 16 AI Engineer + 10 Fullstack Dev + 12 Security commands)
         assert!(
-            registry.len() >= 53,
-            "Expected at least 53 commands, got {}",
+            registry.len() >= 91,
+            "Expected at least 91 commands, got {}",
             registry.len()
         );
     }
@@ -1445,23 +2159,19 @@ mod tests {
         let completions = registry.completions("/co");
         assert!(
             completions.contains(&"/compact"),
-            "Missing /compact in completions: {:?}",
-            completions
+            "Missing /compact in completions: {completions:?}"
         );
         assert!(
             completions.contains(&"/config"),
-            "Missing /config in completions: {:?}",
-            completions
+            "Missing /config in completions: {completions:?}"
         );
         assert!(
             completions.contains(&"/cost"),
-            "Missing /cost in completions: {:?}",
-            completions
+            "Missing /cost in completions: {completions:?}"
         );
         assert!(
             completions.contains(&"/context"),
-            "Missing /context in completions: {:?}",
-            completions
+            "Missing /context in completions: {completions:?}"
         );
         assert!(
             !completions.contains(&"/help"),
@@ -1478,8 +2188,7 @@ mod tests {
         assert_eq!(
             completions.len(),
             total_names,
-            "All {} names/aliases should match '/'",
-            total_names
+            "All {total_names} names/aliases should match '/'"
         );
     }
 
@@ -1540,9 +2249,11 @@ mod tests {
         assert_eq!(format!("{}", CommandCategory::Session), "Session");
         assert_eq!(format!("{}", CommandCategory::Agent), "Agent");
         assert_eq!(format!("{}", CommandCategory::Safety), "Safety");
+        assert_eq!(format!("{}", CommandCategory::Security), "Security");
         assert_eq!(format!("{}", CommandCategory::Development), "Development");
         assert_eq!(format!("{}", CommandCategory::System), "System");
         assert_eq!(format!("{}", CommandCategory::Ui), "UI");
+        assert_eq!(format!("{}", CommandCategory::AiEngineer), "AI Engineer");
     }
 
     #[test]
@@ -1559,7 +2270,7 @@ mod tests {
         let registry = CommandRegistry::with_defaults();
         for name in &["/help", "/quit", "/compact", "/status", "/config"] {
             let cmd = registry.lookup(name);
-            assert!(cmd.is_some(), "Missing core command: {}", name);
+            assert!(cmd.is_some(), "Missing core command: {name}");
         }
     }
 

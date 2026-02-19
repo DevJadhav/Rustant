@@ -178,7 +178,7 @@ async fn test_duplicate_load_rejected() {
     assert!(result.is_err());
     match result.unwrap_err() {
         PluginError::AlreadyLoaded(name) => assert_eq!(name, "dup"),
-        e => panic!("Expected AlreadyLoaded, got: {:?}", e),
+        e => panic!("Expected AlreadyLoaded, got: {e:?}"),
     }
     // Original plugin still loaded
     assert_eq!(mgr.len(), 1);
@@ -215,11 +215,10 @@ async fn test_empty_name_plugin_rejected_by_security() {
         PluginError::SecurityViolation(msg) => {
             assert!(
                 msg.contains("empty") || msg.contains("name"),
-                "Error should mention empty name: {}",
-                msg
+                "Error should mention empty name: {msg}"
             );
         }
-        e => panic!("Expected SecurityViolation, got: {:?}", e),
+        e => panic!("Expected SecurityViolation, got: {e:?}"),
     }
 }
 

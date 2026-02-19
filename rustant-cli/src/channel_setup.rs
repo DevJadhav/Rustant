@@ -102,7 +102,7 @@ pub async fn run_channel_setup(workspace: &Path, channel: Option<&str>) -> anyho
         "email" => setup_email(workspace).await,
         "sms" => setup_sms(workspace).await,
         "imessage" => setup_imessage(workspace).await,
-        _ => anyhow::bail!("Unknown channel: {}", channel_name),
+        _ => anyhow::bail!("Unknown channel: {channel_name}"),
     }
 }
 
@@ -161,15 +161,15 @@ async fn setup_slack(workspace: &Path) -> anyhow::Result<()> {
 
         let token = rustant_core::oauth::authorize_browser_flow(&oauth_config, None)
             .await
-            .map_err(|e| anyhow::anyhow!("Slack OAuth failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Slack OAuth failed: {e}"))?;
 
         rustant_core::oauth::store_oauth_token(&cred_store, "slack", &token)
-            .map_err(|e| anyhow::anyhow!("Failed to store OAuth token: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to store OAuth token: {e}"))?;
 
         // Also store the access token under the standard channel key
         cred_store
             .store_key("channel:slack:bot_token", &token.access_token)
-            .map_err(|e| anyhow::anyhow!("Failed to store token: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to store token: {e}"))?;
 
         println!("  OAuth token stored securely in OS credential store.");
         bot_token = token.access_token;
@@ -187,7 +187,7 @@ async fn setup_slack(workspace: &Path) -> anyhow::Result<()> {
         // Store in credential store
         cred_store
             .store_key("channel:slack:bot_token", &bot_token)
-            .map_err(|e| anyhow::anyhow!("Failed to store token: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to store token: {e}"))?;
 
         auth_method = AuthMethod::ApiKey;
     }
@@ -195,7 +195,7 @@ async fn setup_slack(workspace: &Path) -> anyhow::Result<()> {
     // Validate
     println!("\n  Validating Slack credentials...");
     let team_info = validate_slack_token(&bot_token).await?;
-    println!("  {}", team_info);
+    println!("  {team_info}");
 
     // Optional: default channel
     let default_channel: String = Input::new()
@@ -278,10 +278,10 @@ async fn setup_discord(workspace: &Path) -> anyhow::Result<()> {
 
         let token = rustant_core::oauth::authorize_browser_flow(&oauth_config, None)
             .await
-            .map_err(|e| anyhow::anyhow!("Discord OAuth failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Discord OAuth failed: {e}"))?;
 
         rustant_core::oauth::store_oauth_token(&cred_store, "discord", &token)
-            .map_err(|e| anyhow::anyhow!("Failed to store OAuth token: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to store OAuth token: {e}"))?;
 
         println!("  OAuth token stored securely in OS credential store.");
         bot_token = token.access_token;
@@ -293,7 +293,7 @@ async fn setup_discord(workspace: &Path) -> anyhow::Result<()> {
 
         cred_store
             .store_key("discord_bot_token", &bot_token)
-            .map_err(|e| anyhow::anyhow!("Failed to store token: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to store token: {e}"))?;
 
         auth_method = AuthMethod::ApiKey;
     }
@@ -301,7 +301,7 @@ async fn setup_discord(workspace: &Path) -> anyhow::Result<()> {
     // Validate
     println!("\n  Validating Discord credentials...");
     let bot_info = validate_discord_token(&bot_token).await?;
-    println!("  {}", bot_info);
+    println!("  {bot_info}");
 
     // Optional: guild ID
     let guild_id: String = Input::new()
@@ -359,13 +359,13 @@ async fn setup_telegram(workspace: &Path) -> anyhow::Result<()> {
     // Validate
     println!("\n  Validating Telegram credentials...");
     let bot_info = validate_telegram_token(&bot_token).await?;
-    println!("  {}", bot_info);
+    println!("  {bot_info}");
 
     // Store in credential store
     let cred_store = KeyringCredentialStore::new();
     cred_store
         .store_key("telegram_bot_token", &bot_token)
-        .map_err(|e| anyhow::anyhow!("Failed to store token: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to store token: {e}"))?;
 
     // Optional: allowed chat IDs
     let chat_ids_input: String = Input::new()
@@ -458,10 +458,10 @@ async fn setup_email(workspace: &Path) -> anyhow::Result<()> {
 
         let token = rustant_core::oauth::authorize_browser_flow(&oauth_config, None)
             .await
-            .map_err(|e| anyhow::anyhow!("Gmail OAuth failed: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Gmail OAuth failed: {e}"))?;
 
         rustant_core::oauth::store_oauth_token(&cred_store, "gmail", &token)
-            .map_err(|e| anyhow::anyhow!("Failed to store OAuth token: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to store OAuth token: {e}"))?;
 
         println!("  OAuth token stored securely in OS credential store.");
 
@@ -524,7 +524,7 @@ async fn setup_email(workspace: &Path) -> anyhow::Result<()> {
         // Store password in credential store
         cred_store
             .store_key("email_password", &password)
-            .map_err(|e| anyhow::anyhow!("Failed to store password: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to store password: {e}"))?;
 
         let email_config = EmailConfig {
             imap_host,
@@ -583,16 +583,16 @@ async fn setup_sms(workspace: &Path) -> anyhow::Result<()> {
     // Validate
     println!("\n  Validating Twilio credentials...");
     let account_info = validate_twilio_credentials(&account_sid, &auth_token).await?;
-    println!("  {}", account_info);
+    println!("  {account_info}");
 
     // Store secrets in credential store
     let cred_store = KeyringCredentialStore::new();
     cred_store
         .store_key("twilio_account_sid", &account_sid)
-        .map_err(|e| anyhow::anyhow!("Failed to store SID: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to store SID: {e}"))?;
     cred_store
         .store_key("twilio_auth_token", &auth_token)
-        .map_err(|e| anyhow::anyhow!("Failed to store token: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to store token: {e}"))?;
 
     let sms_config = rustant_core::SmsConfig {
         enabled: true,
@@ -652,7 +652,7 @@ async fn setup_imessage(workspace: &Path) -> anyhow::Result<()> {
         // Check access
         println!("\n  Checking iMessage access...");
         let access_info = validate_imessage_access()?;
-        println!("  {}", access_info);
+        println!("  {access_info}");
 
         let imessage_config = rustant_core::IMessageConfig {
             enabled: true,
@@ -678,27 +678,24 @@ async fn validate_slack_token(token: &str) -> anyhow::Result<String> {
     let client = reqwest::Client::new();
     let response = client
         .post("https://slack.com/api/auth.test")
-        .header("Authorization", format!("Bearer {}", token))
+        .header("Authorization", format!("Bearer {token}"))
         .send()
         .await
-        .map_err(|e| anyhow::anyhow!("Network error: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Network error: {e}"))?;
 
     let json: serde_json::Value = response
         .json()
         .await
-        .map_err(|e| anyhow::anyhow!("Invalid response: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Invalid response: {e}"))?;
 
     if json["ok"].as_bool() != Some(true) {
         let error = json["error"].as_str().unwrap_or("unknown error");
-        anyhow::bail!("Slack token invalid: {}", error);
+        anyhow::bail!("Slack token invalid: {error}");
     }
 
     let team = json["team"].as_str().unwrap_or("unknown");
     let user = json["user"].as_str().unwrap_or("unknown");
-    Ok(format!(
-        "Connected as \"{}\" to workspace \"{}\"",
-        user, team
-    ))
+    Ok(format!("Connected as \"{user}\" to workspace \"{team}\""))
 }
 
 /// Validate a Discord bot token by calling the /users/@me API.
@@ -706,50 +703,50 @@ async fn validate_discord_token(token: &str) -> anyhow::Result<String> {
     let client = reqwest::Client::new();
     let response = client
         .get("https://discord.com/api/v10/users/@me")
-        .header("Authorization", format!("Bot {}", token))
+        .header("Authorization", format!("Bot {token}"))
         .send()
         .await
-        .map_err(|e| anyhow::anyhow!("Network error: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Network error: {e}"))?;
 
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Discord token invalid (HTTP {}): {}", status, body);
+        anyhow::bail!("Discord token invalid (HTTP {status}): {body}");
     }
 
     let json: serde_json::Value = response
         .json()
         .await
-        .map_err(|e| anyhow::anyhow!("Invalid response: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Invalid response: {e}"))?;
 
     let username = json["username"].as_str().unwrap_or("unknown");
     let discriminator = json["discriminator"].as_str().unwrap_or("0");
-    Ok(format!("Bot \"{}#{}\" is online", username, discriminator))
+    Ok(format!("Bot \"{username}#{discriminator}\" is online"))
 }
 
 /// Validate a Telegram bot token by calling the getMe API.
 async fn validate_telegram_token(token: &str) -> anyhow::Result<String> {
     let client = reqwest::Client::new();
-    let url = format!("https://api.telegram.org/bot{}/getMe", token);
+    let url = format!("https://api.telegram.org/bot{token}/getMe");
     let response = client
         .get(&url)
         .send()
         .await
-        .map_err(|e| anyhow::anyhow!("Network error: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Network error: {e}"))?;
 
     let json: serde_json::Value = response
         .json()
         .await
-        .map_err(|e| anyhow::anyhow!("Invalid response: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Invalid response: {e}"))?;
 
     if json["ok"].as_bool() != Some(true) {
         let desc = json["description"].as_str().unwrap_or("unknown error");
-        anyhow::bail!("Telegram token invalid: {}", desc);
+        anyhow::bail!("Telegram token invalid: {desc}");
     }
 
     let username = json["result"]["username"].as_str().unwrap_or("unknown");
     let first_name = json["result"]["first_name"].as_str().unwrap_or("Bot");
-    Ok(format!("Bot \"{}\" (@{}) is active", first_name, username))
+    Ok(format!("Bot \"{first_name}\" (@{username}) is active"))
 }
 
 /// Validate Twilio credentials by calling the Accounts API.
@@ -758,30 +755,27 @@ async fn validate_twilio_credentials(
     auth_token: &str,
 ) -> anyhow::Result<String> {
     let client = reqwest::Client::new();
-    let url = format!(
-        "https://api.twilio.com/2010-04-01/Accounts/{}.json",
-        account_sid
-    );
+    let url = format!("https://api.twilio.com/2010-04-01/Accounts/{account_sid}.json");
     let response = client
         .get(&url)
         .basic_auth(account_sid, Some(auth_token))
         .send()
         .await
-        .map_err(|e| anyhow::anyhow!("Network error: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Network error: {e}"))?;
 
     if !response.status().is_success() {
         let status = response.status();
-        anyhow::bail!("Twilio credentials invalid (HTTP {})", status);
+        anyhow::bail!("Twilio credentials invalid (HTTP {status})");
     }
 
     let json: serde_json::Value = response
         .json()
         .await
-        .map_err(|e| anyhow::anyhow!("Invalid response: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Invalid response: {e}"))?;
 
     let friendly_name = json["friendly_name"].as_str().unwrap_or("unknown");
     let status = json["status"].as_str().unwrap_or("unknown");
-    Ok(format!("Account \"{}\" is {} ", friendly_name, status))
+    Ok(format!("Account \"{friendly_name}\" is {status} "))
 }
 
 /// Validate iMessage access on macOS by checking the chat.db file.
@@ -803,8 +797,7 @@ fn validate_imessage_access() -> anyhow::Result<String> {
         Ok(meta) => {
             let size_mb = meta.len() as f64 / 1_048_576.0;
             Ok(format!(
-                "Messages.app database accessible ({:.1} MB)",
-                size_mb
+                "Messages.app database accessible ({size_mb:.1} MB)"
             ))
         }
         Err(e) => {

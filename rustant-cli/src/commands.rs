@@ -1,13 +1,23 @@
 //! CLI subcommand handlers.
 
+use crate::AlertsAction;
+use crate::AuditAction;
 use crate::AuthAction;
 use crate::BrowserAction;
 use crate::CanvasAction;
 use crate::ChannelAction;
 use crate::Commands;
+use crate::ComplianceAction;
 use crate::ConfigAction;
 use crate::CronAction;
+use crate::LicenseAction;
 use crate::PluginAction;
+use crate::PolicyAction;
+use crate::QualityAction;
+use crate::ReviewAction;
+use crate::RiskAction;
+use crate::SbomAction;
+use crate::ScanAction;
 use crate::SkillAction;
 use crate::SlackCommand;
 use crate::UpdateAction;
@@ -34,6 +44,16 @@ pub async fn handle_command(command: Commands, workspace: &Path) -> anyhow::Resu
         Commands::Skill { action } => handle_skill(action).await,
         Commands::Plugin { action } => handle_plugin(action).await,
         Commands::Update { action } => handle_update(action).await,
+        Commands::Scan { action } => handle_scan(action, workspace).await,
+        Commands::Review { action } => handle_review(action, workspace).await,
+        Commands::Quality { action } => handle_quality(action, workspace).await,
+        Commands::License { action } => handle_license(action, workspace).await,
+        Commands::Sbom { action } => handle_sbom(action, workspace).await,
+        Commands::Compliance { action } => handle_compliance(action, workspace).await,
+        Commands::Audit { action } => handle_audit(action, workspace).await,
+        Commands::Risk { action } => handle_risk(action, workspace).await,
+        Commands::Policy { action } => handle_policy(action, workspace).await,
+        Commands::Alerts { action } => handle_alerts(action, workspace).await,
     }
 }
 
@@ -63,9 +83,9 @@ async fn handle_config(action: ConfigAction, workspace: &Path) -> anyhow::Result
         }
         ConfigAction::Show => {
             let config = rustant_core::config::load_config(Some(workspace), None)
-                .map_err(|e| anyhow::anyhow!("Failed to load config: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
             let toml_str = toml::to_string_pretty(&config)?;
-            println!("{}", toml_str);
+            println!("{toml_str}");
             Ok(())
         }
     }
@@ -84,14 +104,14 @@ async fn handle_init(workspace: &Path) -> anyhow::Result<()> {
 
     println!("  Project type: \x1b[36m{}\x1b[0m", info.project_type);
     if let Some(ref fw) = info.framework {
-        println!("  Framework:    \x1b[36m{}\x1b[0m", fw);
+        println!("  Framework:    \x1b[36m{fw}\x1b[0m");
     }
     if let Some(ref pm) = info.package_manager {
-        println!("  Package mgr:  \x1b[36m{}\x1b[0m", pm);
+        println!("  Package mgr:  \x1b[36m{pm}\x1b[0m");
     }
     if info.has_git {
         let status = if info.git_clean { "clean" } else { "dirty" };
-        println!("  Git:          \x1b[36m{}\x1b[0m", status);
+        println!("  Git:          \x1b[36m{status}\x1b[0m");
     }
     if info.has_ci {
         println!("  CI:           \x1b[36mdetected\x1b[0m");
@@ -129,7 +149,7 @@ async fn handle_init(workspace: &Path) -> anyhow::Result<()> {
         );
         // Use the first detected provider
         let (provider_name, display_name) = &detected_keys[0];
-        println!("  Using: \x1b[36m{}\x1b[0m", display_name);
+        println!("  Using: \x1b[36m{display_name}\x1b[0m");
         config.llm.provider = provider_name.clone();
         config.llm.api_key_env = match provider_name.as_str() {
             "openai" => "OPENAI_API_KEY".to_string(),
@@ -162,7 +182,7 @@ async fn handle_init(workspace: &Path) -> anyhow::Result<()> {
         } else {
             println!("  No API keys detected. Starting provider setup...\n");
             if let Err(e) = crate::setup::run_setup(workspace).await {
-                eprintln!("  Setup failed: {}. Generating config with defaults.\n", e);
+                eprintln!("  Setup failed: {e}. Generating config with defaults.\n");
             } else {
                 // Reload config after setup wizard
                 if config_path.exists()
@@ -188,11 +208,7 @@ async fn handle_init(workspace: &Path) -> anyhow::Result<()> {
 
     // Add source dirs to allowed paths
     if !info.source_dirs.is_empty() {
-        config.safety.allowed_paths = info
-            .source_dirs
-            .iter()
-            .map(|d| format!("{}/**", d))
-            .collect();
+        config.safety.allowed_paths = info.source_dirs.iter().map(|d| format!("{d}/**")).collect();
         config
             .safety
             .allowed_paths
@@ -226,10 +242,10 @@ async fn handle_init(workspace: &Path) -> anyhow::Result<()> {
     if !info.build_commands.is_empty() || !info.test_commands.is_empty() {
         println!("  \x1b[33mDetected project commands:\x1b[0m");
         for cmd in &info.build_commands {
-            println!("    Build: {}", cmd);
+            println!("    Build: {cmd}");
         }
         for cmd in &info.test_commands {
-            println!("    Test:  {}", cmd);
+            println!("    Test:  {cmd}");
         }
         println!();
     }
@@ -239,7 +255,7 @@ async fn handle_init(workspace: &Path) -> anyhow::Result<()> {
     if !examples.is_empty() {
         println!("  \x1b[33mTry these tasks:\x1b[0m");
         for task in &examples {
-            println!("    rustant {}", task);
+            println!("    rustant {task}");
         }
         println!();
     }
@@ -258,23 +274,23 @@ async fn handle_init(workspace: &Path) -> anyhow::Result<()> {
 
 async fn handle_resume(session: Option<&str>, workspace: &Path) -> anyhow::Result<()> {
     let mut mgr = rustant_core::SessionManager::new(workspace)
-        .map_err(|e| anyhow::anyhow!("Failed to initialize session manager: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to initialize session manager: {e}"))?;
 
     let (memory, continuation) = if let Some(query) = session {
         mgr.resume_session(query)
     } else {
         mgr.resume_latest()
     }
-    .map_err(|e| anyhow::anyhow!("{}", e))?;
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let goal = memory.working.current_goal.clone().unwrap_or_default();
     let msg_count = memory.short_term.len();
 
     println!("\x1b[1;32mSession resumed!\x1b[0m");
     if !goal.is_empty() {
-        println!("  Last goal: \x1b[36m{}\x1b[0m", goal);
+        println!("  Last goal: \x1b[36m{goal}\x1b[0m");
     }
-    println!("  Messages restored: \x1b[36m{}\x1b[0m", msg_count);
+    println!("  Messages restored: \x1b[36m{msg_count}\x1b[0m");
     println!(
         "  Facts in memory: \x1b[36m{}\x1b[0m",
         memory.long_term.facts.len()
@@ -283,7 +299,7 @@ async fn handle_resume(session: Option<&str>, workspace: &Path) -> anyhow::Resul
 
     // Load config and start interactive session with resumed memory
     let config = rustant_core::config::load_config(Some(workspace), None)
-        .map_err(|e| anyhow::anyhow!("Configuration error: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Configuration error: {e}"))?;
 
     let provider = match rustant_core::create_provider(&config.llm) {
         Ok(p) => p,
@@ -295,6 +311,7 @@ async fn handle_resume(session: Option<&str>, workspace: &Path) -> anyhow::Resul
 
     let callback = std::sync::Arc::new(crate::repl::CliCallback::new(false));
     let mut agent = rustant_core::Agent::new(provider, config, callback);
+    agent.set_output_redactor(rustant_core::create_basic_redactor());
     *agent.memory_mut() = memory;
 
     // Inject the continuation context
@@ -333,7 +350,7 @@ async fn handle_resume(session: Option<&str>, workspace: &Path) -> anyhow::Resul
                 );
             }
             Err(e) => {
-                println!("\x1b[31mError: {}\x1b[0m", e);
+                println!("\x1b[31mError: {e}\x1b[0m");
             }
         }
     }
@@ -343,7 +360,7 @@ async fn handle_resume(session: Option<&str>, workspace: &Path) -> anyhow::Resul
 
 fn handle_sessions(limit: usize, workspace: &Path) -> anyhow::Result<()> {
     let mgr = rustant_core::SessionManager::new(workspace)
-        .map_err(|e| anyhow::anyhow!("Failed to initialize session manager: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to initialize session manager: {e}"))?;
 
     let sessions = mgr.list_sessions(limit);
     if sessions.is_empty() {
@@ -385,7 +402,7 @@ fn handle_sessions(limit: usize, workspace: &Path) -> anyhow::Result<()> {
 
 pub async fn handle_channel(action: ChannelAction, workspace: &Path) -> anyhow::Result<()> {
     let config = rustant_core::config::load_config(Some(workspace), None)
-        .map_err(|e| anyhow::anyhow!("Failed to load config: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
 
     let channels_config = config.channels.unwrap_or_default();
 
@@ -403,9 +420,9 @@ pub async fn handle_channel(action: ChannelAction, workspace: &Path) -> anyhow::
                 for name in &names {
                     let status = mgr
                         .channel_status(name)
-                        .map(|s| format!("{:?}", s))
+                        .map(|s| format!("{s:?}"))
                         .unwrap_or_else(|| "unknown".to_string());
-                    println!("  {} ({})", name, status);
+                    println!("  {name} ({status})");
                 }
             }
             Ok(())
@@ -421,13 +438,11 @@ pub async fn handle_channel(action: ChannelAction, workspace: &Path) -> anyhow::
                     names.join(", ")
                 };
                 anyhow::bail!(
-                    "Channel '{}' not found in configuration. Available: {}",
-                    name,
-                    available
+                    "Channel '{name}' not found in configuration. Available: {available}"
                 );
             }
 
-            println!("Testing channel '{}'...", name);
+            println!("Testing channel '{name}'...");
 
             // Connect all (which includes our target)
             let results = mgr.connect_all().await;
@@ -436,8 +451,8 @@ pub async fn handle_channel(action: ChannelAction, workspace: &Path) -> anyhow::
                     match result {
                         Ok(()) => println!("  Connected successfully!"),
                         Err(e) => {
-                            println!("  Connection failed: {}", e);
-                            anyhow::bail!("Channel test failed for '{}'", name);
+                            println!("  Connection failed: {e}");
+                            anyhow::bail!("Channel test failed for '{name}'");
                         }
                     }
                 }
@@ -445,7 +460,7 @@ pub async fn handle_channel(action: ChannelAction, workspace: &Path) -> anyhow::
 
             // Disconnect
             mgr.disconnect_all().await;
-            println!("  Disconnected. Channel '{}' is working.", name);
+            println!("  Disconnected. Channel '{name}' is working.");
             Ok(())
         }
     }
@@ -473,7 +488,7 @@ pub async fn handle_auth(action: AuthAction, workspace: &Path) -> anyhow::Result
                 let has_oauth = oauth::has_oauth_token(&cred_store, provider);
 
                 if !has_api_key && !has_oauth {
-                    println!("    {}: not configured", provider);
+                    println!("    {provider}: not configured");
                     continue;
                 }
 
@@ -489,7 +504,7 @@ pub async fn handle_auth(action: AuthAction, workspace: &Path) -> anyhow::Result
                             } else if let Some(expires_at) = token.expires_at {
                                 let remaining = expires_at - chrono::Utc::now();
                                 let secs = remaining.num_seconds().max(0);
-                                methods.push(format!("OAuth (expires in {}s)", secs));
+                                methods.push(format!("OAuth (expires in {secs}s)"));
                             } else {
                                 methods.push("OAuth (no expiry)".to_string());
                             }
@@ -516,21 +531,21 @@ pub async fn handle_auth(action: AuthAction, workspace: &Path) -> anyhow::Result
                     match oauth::load_oauth_token(&cred_store, provider) {
                         Ok(token) => {
                             if oauth::is_token_expired(&token) {
-                                println!("    {}: OAuth (expired)", provider);
+                                println!("    {provider}: OAuth (expired)");
                             } else if let Some(expires_at) = token.expires_at {
                                 let remaining = expires_at - chrono::Utc::now();
                                 let secs = remaining.num_seconds().max(0);
-                                println!("    {}: OAuth (expires in {}s)", provider, secs);
+                                println!("    {provider}: OAuth (expires in {secs}s)");
                             } else {
-                                println!("    {}: OAuth (active)", provider);
+                                println!("    {provider}: OAuth (active)");
                             }
                         }
                         Err(_) => {
-                            println!("    {}: OAuth (error reading token)", provider);
+                            println!("    {provider}: OAuth (error reading token)");
                         }
                     }
                 } else {
-                    println!("    {}: not configured", provider);
+                    println!("    {provider}: not configured");
                 }
             }
 
@@ -559,19 +574,17 @@ pub async fn handle_auth(action: AuthAction, workspace: &Path) -> anyhow::Result
                         _ => "the required environment variables",
                     };
                     anyhow::anyhow!(
-                        "OAuth for '{}' requires environment variables: {}\n\
-                         Set these from your app's developer console and try again.",
-                        provider, env_hint
+                        "OAuth for '{provider}' requires environment variables: {env_hint}\n\
+                         Set these from your app's developer console and try again."
                     )
                 } else {
                     anyhow::anyhow!(
-                        "Unknown or unsupported provider '{}'. Supported: openai, gemini, slack, discord, teams, whatsapp, gmail",
-                        provider
+                        "Unknown or unsupported provider '{provider}'. Supported: openai, gemini, slack, discord, teams, whatsapp, gmail"
                     )
                 }
             })?;
 
-            println!("Starting OAuth login for {}...", provider);
+            println!("Starting OAuth login for {provider}...");
             let effective_redirect = match &redirect_uri {
                 Some(uri) => uri.clone(),
                 None => format!(
@@ -579,22 +592,19 @@ pub async fn handle_auth(action: AuthAction, workspace: &Path) -> anyhow::Result
                     rustant_core::oauth::OAUTH_CALLBACK_PORT
                 ),
             };
-            println!("Redirect URI: {}", effective_redirect);
-            println!(
-                "(Make sure this URI is registered in your {} app settings)",
-                provider
-            );
+            println!("Redirect URI: {effective_redirect}");
+            println!("(Make sure this URI is registered in your {provider} app settings)");
             println!();
             println!("Opening your browser for authentication...");
 
             let token = oauth::authorize_browser_flow(&oauth_cfg, redirect_uri.as_deref())
                 .await
-                .map_err(|e| anyhow::anyhow!("OAuth login failed: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("OAuth login failed: {e}"))?;
 
             oauth::store_oauth_token(&cred_store, &provider, &token)
-                .map_err(|e| anyhow::anyhow!("Failed to store OAuth token: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to store OAuth token: {e}"))?;
 
-            println!("Successfully authenticated with {}.", provider);
+            println!("Successfully authenticated with {provider}.");
 
             if let Some(expires_at) = token.expires_at {
                 let remaining = expires_at - chrono::Utc::now();
@@ -603,13 +613,12 @@ pub async fn handle_auth(action: AuthAction, workspace: &Path) -> anyhow::Result
 
             if is_channel {
                 println!(
-                    "Tip: Add {} to your channel config with auth_method = \"oauth\" to use this token.",
-                    provider
+                    "Tip: Add {provider} to your channel config with auth_method = \"oauth\" to use this token."
                 );
             } else {
                 // Update config to use OAuth auth method
                 let config = rustant_core::config::load_config(Some(workspace), None)
-                    .map_err(|e| anyhow::anyhow!("Failed to load config: {}", e))?;
+                    .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
                 if config.llm.provider == provider && config.llm.auth_method != "oauth" {
                     println!(
                         "Tip: Run `rustant setup` or set auth_method = \"oauth\" in your config to use OAuth."
@@ -625,10 +634,10 @@ pub async fn handle_auth(action: AuthAction, workspace: &Path) -> anyhow::Result
 
             if oauth::has_oauth_token(&cred_store, &provider) {
                 oauth::delete_oauth_token(&cred_store, &provider)
-                    .map_err(|e| anyhow::anyhow!("Failed to delete OAuth token: {}", e))?;
-                println!("OAuth token removed for {}.", provider);
+                    .map_err(|e| anyhow::anyhow!("Failed to delete OAuth token: {e}"))?;
+                println!("OAuth token removed for {provider}.");
             } else {
-                println!("No OAuth token found for {}.", provider);
+                println!("No OAuth token found for {provider}.");
             }
 
             Ok(())
@@ -638,30 +647,28 @@ pub async fn handle_auth(action: AuthAction, workspace: &Path) -> anyhow::Result
             let provider = provider.to_lowercase();
 
             let token = oauth::load_oauth_token(&cred_store, &provider)
-                .map_err(|e| anyhow::anyhow!("No OAuth token found for {}: {}", provider, e))?;
+                .map_err(|e| anyhow::anyhow!("No OAuth token found for {provider}: {e}"))?;
 
             let refresh_token_str = token.refresh_token.as_deref().ok_or_else(|| {
                 anyhow::anyhow!(
-                    "No refresh token available for {}. Re-login with `rustant auth login {}`.",
-                    provider,
-                    provider
+                    "No refresh token available for {provider}. Re-login with `rustant auth login {provider}`."
                 )
             })?;
 
             let oauth_cfg = oauth::oauth_config_for_provider(&provider).ok_or_else(|| {
-                anyhow::anyhow!("No OAuth configuration available for '{}'", provider)
+                anyhow::anyhow!("No OAuth configuration available for '{provider}'")
             })?;
 
-            println!("Refreshing token for {}...", provider);
+            println!("Refreshing token for {provider}...");
 
             let new_token = oauth::refresh_token(&oauth_cfg, refresh_token_str)
                 .await
-                .map_err(|e| anyhow::anyhow!("Token refresh failed: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Token refresh failed: {e}"))?;
 
             oauth::store_oauth_token(&cred_store, &provider, &new_token)
-                .map_err(|e| anyhow::anyhow!("Failed to store refreshed token: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to store refreshed token: {e}"))?;
 
-            println!("Token refreshed successfully for {}.", provider);
+            println!("Token refreshed successfully for {provider}.");
 
             if let Some(expires_at) = new_token.expires_at {
                 let remaining = expires_at - chrono::Utc::now();
@@ -718,13 +725,13 @@ pub async fn handle_workflow(action: WorkflowAction, _workspace: &Path) -> anyho
                 Ok(())
             }
             None => {
-                eprintln!("Workflow '{}' not found", name);
+                eprintln!("Workflow '{name}' not found");
                 Ok(())
             }
         },
         WorkflowAction::Run { name, input } => {
             let _wf = rustant_core::get_builtin(&name)
-                .ok_or_else(|| anyhow::anyhow!("Workflow '{}' not found", name))?;
+                .ok_or_else(|| anyhow::anyhow!("Workflow '{name}' not found"))?;
 
             let mut inputs = std::collections::HashMap::new();
             for kv in &input {
@@ -735,15 +742,14 @@ pub async fn handle_workflow(action: WorkflowAction, _workspace: &Path) -> anyho
                     );
                 } else {
                     return Err(anyhow::anyhow!(
-                        "Invalid input format '{}', expected key=value",
-                        kv
+                        "Invalid input format '{kv}', expected key=value"
                     ));
                 }
             }
 
-            println!("Starting workflow '{}'...", name);
+            println!("Starting workflow '{name}'...");
             println!("  (Workflow execution requires an active agent session)");
-            println!("  Inputs: {:?}", inputs);
+            println!("  Inputs: {inputs:?}");
             Ok(())
         }
         WorkflowAction::Runs => {
@@ -751,15 +757,15 @@ pub async fn handle_workflow(action: WorkflowAction, _workspace: &Path) -> anyho
             Ok(())
         }
         WorkflowAction::Resume { run_id } => {
-            println!("Resuming workflow run: {}", run_id);
+            println!("Resuming workflow run: {run_id}");
             Ok(())
         }
         WorkflowAction::Cancel { run_id } => {
-            println!("Cancelling workflow run: {}", run_id);
+            println!("Cancelling workflow run: {run_id}");
             Ok(())
         }
         WorkflowAction::Status { run_id } => {
-            println!("Checking status of workflow run: {}", run_id);
+            println!("Checking status of workflow run: {run_id}");
             Ok(())
         }
     }
@@ -767,7 +773,7 @@ pub async fn handle_workflow(action: WorkflowAction, _workspace: &Path) -> anyho
 
 async fn handle_cron(action: CronAction, workspace: &Path) -> anyhow::Result<()> {
     let config = rustant_core::config::load_config(Some(workspace), None)
-        .map_err(|e| anyhow::anyhow!("Failed to load config: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
     let scheduler_config = config.scheduler.unwrap_or_default();
 
     // State file for persisting cron jobs across CLI invocations
@@ -842,23 +848,23 @@ async fn handle_cron(action: CronAction, workspace: &Path) -> anyhow::Result<()>
                 .map(|t| t.format("%Y-%m-%d %H:%M:%S UTC").to_string())
                 .unwrap_or_else(|| "N/A".to_string());
             save_scheduler(&scheduler)?;
-            println!("Cron job '{}' added.", name);
-            println!("  Schedule: {}", schedule);
-            println!("  Task: {}", task);
-            println!("  Next run: {}", next);
+            println!("Cron job '{name}' added.");
+            println!("  Schedule: {schedule}");
+            println!("  Task: {task}");
+            println!("  Next run: {next}");
             Ok(())
         }
         CronAction::Run { name } => {
             let scheduler = load_scheduler();
             match scheduler.get_job(&name) {
                 Some(job) => {
-                    println!("Manually triggering job '{}'...", name);
+                    println!("Manually triggering job '{name}'...");
                     println!("  Task: {}", job.config.task);
                     println!("  (Task execution requires an active agent session)");
                     Ok(())
                 }
                 None => {
-                    anyhow::bail!("Cron job '{}' not found", name);
+                    anyhow::bail!("Cron job '{name}' not found");
                 }
             }
         }
@@ -866,21 +872,21 @@ async fn handle_cron(action: CronAction, workspace: &Path) -> anyhow::Result<()>
             let mut scheduler = load_scheduler();
             scheduler.disable_job(&name)?;
             save_scheduler(&scheduler)?;
-            println!("Cron job '{}' disabled.", name);
+            println!("Cron job '{name}' disabled.");
             Ok(())
         }
         CronAction::Enable { name } => {
             let mut scheduler = load_scheduler();
             scheduler.enable_job(&name)?;
             save_scheduler(&scheduler)?;
-            println!("Cron job '{}' enabled.", name);
+            println!("Cron job '{name}' enabled.");
             Ok(())
         }
         CronAction::Remove { name } => {
             let mut scheduler = load_scheduler();
             scheduler.remove_job(&name)?;
             save_scheduler(&scheduler)?;
-            println!("Cron job '{}' removed.", name);
+            println!("Cron job '{name}' removed.");
             Ok(())
         }
         CronAction::Jobs => {
@@ -905,10 +911,10 @@ async fn handle_cron(action: CronAction, workspace: &Path) -> anyhow::Result<()>
         CronAction::CancelJob { job_id } => {
             let id: uuid::Uuid = job_id
                 .parse()
-                .map_err(|e| anyhow::anyhow!("Invalid job ID '{}': {}", job_id, e))?;
+                .map_err(|e| anyhow::anyhow!("Invalid job ID '{job_id}': {e}"))?;
             let mut manager = rustant_core::JobManager::new(scheduler_config.max_background_jobs);
             manager.cancel_job(&id)?;
-            println!("Job {} cancelled.", job_id);
+            println!("Job {job_id} cancelled.");
             Ok(())
         }
     }
@@ -921,10 +927,7 @@ fn load_slack_client() -> anyhow::Result<rustant_core::channels::slack::RealSlac
 
     let store = KeyringCredentialStore::new();
     let token = oauth::load_oauth_token(&store, "slack").map_err(|e| {
-        anyhow::anyhow!(
-            "No Slack OAuth token found. Run `rustant auth login slack` first.\n{}",
-            e
-        )
+        anyhow::anyhow!("No Slack OAuth token found. Run `rustant auth login slack` first.\n{e}")
     })?;
     Ok(rustant_core::channels::slack::RealSlackHttp::new(
         token.access_token,
@@ -941,15 +944,15 @@ async fn handle_slack(action: SlackCommand) -> anyhow::Result<()> {
             let ts = http
                 .post_message(&channel, &message)
                 .await
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
-            println!("Message sent (ts: {})", ts);
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("Message sent (ts: {ts})");
         }
 
         SlackCommand::History { channel, limit } => {
             let messages = http
                 .conversations_history(&channel, limit)
                 .await
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
             if messages.is_empty() {
                 println!("No messages found.");
             } else {
@@ -957,7 +960,7 @@ async fn handle_slack(action: SlackCommand) -> anyhow::Result<()> {
                     let thread = msg
                         .thread_ts
                         .as_deref()
-                        .map(|t| format!(" [thread:{}]", t))
+                        .map(|t| format!(" [thread:{t}]"))
                         .unwrap_or_default();
                     println!("[{}] {}: {}{}", &msg.ts, msg.user, msg.text, thread);
                 }
@@ -968,7 +971,7 @@ async fn handle_slack(action: SlackCommand) -> anyhow::Result<()> {
             let channels = http
                 .conversations_list("public_channel,private_channel", 200)
                 .await
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
             if channels.is_empty() {
                 println!("No channels found.");
             } else {
@@ -998,7 +1001,7 @@ async fn handle_slack(action: SlackCommand) -> anyhow::Result<()> {
             let users = http
                 .users_list(200)
                 .await
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
             if users.is_empty() {
                 println!("No users found.");
             } else {
@@ -1030,7 +1033,7 @@ async fn handle_slack(action: SlackCommand) -> anyhow::Result<()> {
             let info = http
                 .conversations_info(&channel)
                 .await
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
             println!("Channel: #{}", info.name);
             println!("ID:      {}", info.id);
             println!("Private: {}", info.is_private);
@@ -1051,15 +1054,15 @@ async fn handle_slack(action: SlackCommand) -> anyhow::Result<()> {
         } => {
             http.reactions_add(&channel, &timestamp, &emoji)
                 .await
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
-            println!("Reaction :{}:  added.", emoji);
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("Reaction :{emoji}:  added.");
         }
 
         SlackCommand::Files { channel } => {
             let files = http
                 .files_list(channel.as_deref(), 100)
                 .await
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
             if files.is_empty() {
                 println!("No files found.");
             } else {
@@ -1091,15 +1094,12 @@ async fn handle_slack(action: SlackCommand) -> anyhow::Result<()> {
         }
 
         SlackCommand::Team => {
-            let team = http
-                .team_info()
-                .await
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            let team = http.team_info().await.map_err(|e| anyhow::anyhow!("{e}"))?;
             println!("Workspace: {}", team.name);
             println!("ID:        {}", team.id);
             println!("Domain:    {}.slack.com", team.domain);
             if let Some(icon) = &team.icon_url {
-                println!("Icon:      {}", icon);
+                println!("Icon:      {icon}");
             }
         }
 
@@ -1107,7 +1107,7 @@ async fn handle_slack(action: SlackCommand) -> anyhow::Result<()> {
             let groups = http
                 .usergroups_list()
                 .await
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
             if groups.is_empty() {
                 println!("No user groups found.");
             } else {
@@ -1136,12 +1136,12 @@ async fn handle_slack(action: SlackCommand) -> anyhow::Result<()> {
             let dm_channel = http
                 .conversations_open(&[user.as_str()])
                 .await
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
             let ts = http
                 .post_message(&dm_channel, &message)
                 .await
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
-            println!("DM sent to {} (channel: {}, ts: {})", user, dm_channel, ts);
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("DM sent to {user} (channel: {dm_channel}, ts: {ts})");
         }
 
         SlackCommand::Thread {
@@ -1152,15 +1152,15 @@ async fn handle_slack(action: SlackCommand) -> anyhow::Result<()> {
             let ts = http
                 .post_thread_reply(&channel, &timestamp, &message)
                 .await
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
-            println!("Thread reply sent (ts: {})", ts);
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("Thread reply sent (ts: {ts})");
         }
 
         SlackCommand::Join { channel } => {
             http.conversations_join(&channel)
                 .await
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
-            println!("Joined channel {}", channel);
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("Joined channel {channel}");
         }
     }
 
@@ -1175,13 +1175,13 @@ pub async fn handle_voice(action: VoiceAction) -> anyhow::Result<()> {
         VoiceAction::Speak { text, voice } => {
             use rustant_core::voice::{OpenAiTtsProvider, SynthesisRequest, TtsProvider};
 
-            println!("Synthesizing: \"{}\" (voice: {})", text, voice);
+            println!("Synthesizing: \"{text}\" (voice: {voice})");
             let tts = OpenAiTtsProvider::new(&api_key);
             let request = SynthesisRequest::new(&text).with_voice(&voice);
             let result = tts
                 .synthesize(&request)
                 .await
-                .map_err(|e| anyhow::anyhow!("TTS synthesis failed: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("TTS synthesis failed: {e}"))?;
 
             println!("  Duration:    {:.2}s", result.duration_secs);
             println!("  Sample rate: {} Hz", result.audio.sample_rate);
@@ -1193,7 +1193,7 @@ pub async fn handle_voice(action: VoiceAction) -> anyhow::Result<()> {
             println!("  Playing audio...");
             rustant_core::voice::audio_io::play_audio(&result.audio)
                 .await
-                .map_err(|e| anyhow::anyhow!("Audio playback failed: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Audio playback failed: {e}"))?;
             println!("  Playback complete.");
 
             Ok(())
@@ -1203,7 +1203,7 @@ pub async fn handle_voice(action: VoiceAction) -> anyhow::Result<()> {
                 OpenAiSttProvider, OpenAiTtsProvider, SttProvider, SynthesisRequest, TtsProvider,
             };
 
-            println!("Original: \"{}\"", text);
+            println!("Original: \"{text}\"");
 
             // TTS: text -> audio
             println!("  [1/2] Synthesizing speech...");
@@ -1212,7 +1212,7 @@ pub async fn handle_voice(action: VoiceAction) -> anyhow::Result<()> {
             let tts_result = tts
                 .synthesize(&request)
                 .await
-                .map_err(|e| anyhow::anyhow!("TTS synthesis failed: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("TTS synthesis failed: {e}"))?;
             println!(
                 "  Audio: {:.2}s, {} samples @ {} Hz",
                 tts_result.duration_secs,
@@ -1226,10 +1226,10 @@ pub async fn handle_voice(action: VoiceAction) -> anyhow::Result<()> {
             let transcription = stt
                 .transcribe(&tts_result.audio)
                 .await
-                .map_err(|e| anyhow::anyhow!("STT transcription failed: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("STT transcription failed: {e}"))?;
             println!("Transcribed: \"{}\"", transcription.text);
             if let Some(lang) = &transcription.language {
-                println!("  Language:   {}", lang);
+                println!("  Language:   {lang}");
             }
             println!("  Duration:   {:.2}s", transcription.duration_secs);
             println!("  Confidence: {:.2}", transcription.confidence);
@@ -1591,13 +1591,13 @@ async fn handle_ui(port: u16) -> anyhow::Result<()> {
     let api_router = rustant_core::gateway::gateway_router(gw_for_server);
 
     // Merge with static file serving if frontend is available
-    let addr = format!("127.0.0.1:{}", port);
+    let addr = format!("127.0.0.1:{port}");
 
     tokio::spawn(async move {
         let listener = match tokio::net::TcpListener::bind(&addr).await {
             Ok(l) => l,
             Err(e) => {
-                eprintln!("Failed to bind to {}: {}", addr, e);
+                eprintln!("Failed to bind to {addr}: {e}");
                 return;
             }
         };
@@ -1609,12 +1609,12 @@ async fn handle_ui(port: u16) -> anyhow::Result<()> {
             let app = api_router.fallback_service(static_service);
 
             if let Err(e) = axum::serve(listener, app).await {
-                eprintln!("Gateway error: {}", e);
+                eprintln!("Gateway error: {e}");
             }
         } else {
             // API-only mode (no frontend)
             if let Err(e) = axum::serve(listener, api_router).await {
-                eprintln!("Gateway error: {}", e);
+                eprintln!("Gateway error: {e}");
             }
         }
     });
@@ -1624,15 +1624,15 @@ async fn handle_ui(port: u16) -> anyhow::Result<()> {
 
     println!();
     println!("Rustant Dashboard running at:");
-    println!("  http://127.0.0.1:{}", port);
+    println!("  http://127.0.0.1:{port}");
     println!();
     println!("API endpoints:");
-    println!("  http://127.0.0.1:{}/api/status", port);
-    println!("  http://127.0.0.1:{}/api/sessions", port);
-    println!("  http://127.0.0.1:{}/api/config", port);
-    println!("  http://127.0.0.1:{}/api/metrics", port);
-    println!("  http://127.0.0.1:{}/health", port);
-    println!("  ws://127.0.0.1:{}/ws", port);
+    println!("  http://127.0.0.1:{port}/api/status");
+    println!("  http://127.0.0.1:{port}/api/sessions");
+    println!("  http://127.0.0.1:{port}/api/config");
+    println!("  http://127.0.0.1:{port}/api/metrics");
+    println!("  http://127.0.0.1:{port}/health");
+    println!("  ws://127.0.0.1:{port}/ws");
     println!();
     println!("Press Ctrl+C to stop.");
 
@@ -1656,8 +1656,7 @@ pub async fn handle_canvas(action: CanvasAction) -> anyhow::Result<()> {
         } => {
             let ct = ContentType::from_str_loose(&content_type).ok_or_else(|| {
                 anyhow::anyhow!(
-                    "Unknown content type '{}'. Valid types: html, markdown, code, chart, table, form, image, diagram",
-                    content_type
+                    "Unknown content type '{content_type}'. Valid types: html, markdown, code, chart, table, form, image, diagram"
                 )
             })?;
 
@@ -1665,37 +1664,37 @@ pub async fn handle_canvas(action: CanvasAction) -> anyhow::Result<()> {
             match ct {
                 ContentType::Chart => {
                     let spec: rustant_core::canvas::ChartSpec = serde_json::from_str(&content)
-                        .map_err(|e| anyhow::anyhow!("Invalid chart JSON: {}", e))?;
+                        .map_err(|e| anyhow::anyhow!("Invalid chart JSON: {e}"))?;
                     let config = rustant_core::canvas::render_chart_config(&spec);
-                    println!("Chart.js config:\n{}", config);
+                    println!("Chart.js config:\n{config}");
                 }
                 ContentType::Table => {
                     let spec: rustant_core::canvas::TableSpec = serde_json::from_str(&content)
-                        .map_err(|e| anyhow::anyhow!("Invalid table JSON: {}", e))?;
+                        .map_err(|e| anyhow::anyhow!("Invalid table JSON: {e}"))?;
                     let html = rustant_core::canvas::render_table_html(&spec);
-                    println!("Table HTML:\n{}", html);
+                    println!("Table HTML:\n{html}");
                 }
                 ContentType::Form => {
                     let spec: rustant_core::canvas::FormSpec = serde_json::from_str(&content)
-                        .map_err(|e| anyhow::anyhow!("Invalid form JSON: {}", e))?;
+                        .map_err(|e| anyhow::anyhow!("Invalid form JSON: {e}"))?;
                     let html = rustant_core::canvas::render_form_html(&spec);
-                    println!("Form HTML:\n{}", html);
+                    println!("Form HTML:\n{html}");
                 }
                 ContentType::Diagram => {
                     let spec: rustant_core::canvas::DiagramSpec = serde_json::from_str(&content)
-                        .map_err(|e| anyhow::anyhow!("Invalid diagram JSON: {}", e))?;
+                        .map_err(|e| anyhow::anyhow!("Invalid diagram JSON: {e}"))?;
                     let mermaid = rustant_core::canvas::render_diagram_mermaid(&spec);
-                    println!("Mermaid:\n{}", mermaid);
+                    println!("Mermaid:\n{mermaid}");
                 }
                 _ => {
-                    println!("Content ({}):\n{}", content_type, content);
+                    println!("Content ({content_type}):\n{content}");
                 }
             }
 
             let id = canvas
                 .push(&target, ct, content)
-                .map_err(|e| anyhow::anyhow!("Canvas push failed: {}", e))?;
-            println!("\nPushed to canvas (id: {})", id);
+                .map_err(|e| anyhow::anyhow!("Canvas push failed: {e}"))?;
+            println!("\nPushed to canvas (id: {id})");
             Ok(())
         }
         CanvasAction::Clear => {
@@ -1742,10 +1741,10 @@ pub async fn handle_skill(action: SkillAction) -> anyhow::Result<()> {
             let results = loader.scan();
 
             if results.is_empty() {
-                println!("No skill files found in: {}", skills_dir);
+                println!("No skill files found in: {skills_dir}");
                 println!("Create SKILL.md files in that directory to define skills.");
             } else {
-                println!("Skills in {}:", skills_dir);
+                println!("Skills in {skills_dir}:");
                 for result in &results {
                     match result {
                         Ok(skill) => {
@@ -1768,15 +1767,15 @@ pub async fn handle_skill(action: SkillAction) -> anyhow::Result<()> {
         }
         SkillAction::Info { path } => {
             let content = std::fs::read_to_string(&path)
-                .map_err(|e| anyhow::anyhow!("Failed to read '{}': {}", path, e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to read '{path}': {e}"))?;
             let skill = parse_skill_md(&content)
-                .map_err(|e| anyhow::anyhow!("Failed to parse '{}': {}", path, e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to parse '{path}': {e}"))?;
 
             println!("Skill: {}", skill.name);
             println!("Version: {}", skill.version);
             println!("Description: {}", skill.description);
             if let Some(author) = &skill.author {
-                println!("Author: {}", author);
+                println!("Author: {author}");
             }
             println!("Risk Level: {:?}", skill.risk_level);
 
@@ -1797,7 +1796,7 @@ pub async fn handle_skill(action: SkillAction) -> anyhow::Result<()> {
                         } else {
                             tool.body.clone()
                         };
-                        println!("    Body: {}", body_preview);
+                        println!("    Body: {body_preview}");
                     }
                 }
             }
@@ -1805,9 +1804,9 @@ pub async fn handle_skill(action: SkillAction) -> anyhow::Result<()> {
         }
         SkillAction::Validate { path } => {
             let content = std::fs::read_to_string(&path)
-                .map_err(|e| anyhow::anyhow!("Failed to read '{}': {}", path, e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to read '{path}': {e}"))?;
             let skill = parse_skill_md(&content)
-                .map_err(|e| anyhow::anyhow!("Failed to parse '{}': {}", path, e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to parse '{path}': {e}"))?;
 
             // Validate with empty available tools/secrets (strict check)
             let result = validate_skill(&skill, &[], &[]);
@@ -1819,14 +1818,14 @@ pub async fn handle_skill(action: SkillAction) -> anyhow::Result<()> {
             if !result.warnings.is_empty() {
                 println!("\n  Warnings:");
                 for warning in &result.warnings {
-                    println!("    - {}", warning);
+                    println!("    - {warning}");
                 }
             }
 
             if !result.errors.is_empty() {
                 println!("\n  Errors:");
                 for error in &result.errors {
-                    println!("    - {}", error);
+                    println!("    - {error}");
                 }
             }
 
@@ -1837,13 +1836,13 @@ pub async fn handle_skill(action: SkillAction) -> anyhow::Result<()> {
         }
         SkillAction::Load { path } => {
             let content = std::fs::read_to_string(&path)
-                .map_err(|e| anyhow::anyhow!("Failed to read '{}': {}", path, e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to read '{path}': {e}"))?;
             let skill = parse_skill_md(&content)
-                .map_err(|e| anyhow::anyhow!("Failed to parse '{}': {}", path, e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to parse '{path}': {e}"))?;
 
             println!("Loaded skill: {}", skill.name);
             let json = serde_json::to_string_pretty(&skill)?;
-            println!("{}", json);
+            println!("{json}");
             Ok(())
         }
     }
@@ -1865,10 +1864,10 @@ pub async fn handle_plugin(action: PluginAction) -> anyhow::Result<()> {
             let found = loader.discover();
 
             if found.is_empty() {
-                println!("No plugins found in: {}", plugins_dir);
+                println!("No plugins found in: {plugins_dir}");
                 println!("Place .so/.dll/.dylib plugin files in that directory.");
             } else {
-                println!("Plugin files in {}:", plugins_dir);
+                println!("Plugin files in {plugins_dir}:");
                 for path in &found {
                     println!("  {}", path.display());
                 }
@@ -1877,7 +1876,7 @@ pub async fn handle_plugin(action: PluginAction) -> anyhow::Result<()> {
             Ok(())
         }
         PluginAction::Info { name } => {
-            println!("Plugin: {}", name);
+            println!("Plugin: {name}");
             println!("  Status: not loaded");
             println!("  (Plugin loading requires an active agent session)");
             Ok(())
@@ -1890,7 +1889,7 @@ pub async fn handle_update(action: UpdateAction) -> anyhow::Result<()> {
 
     match action {
         UpdateAction::Check => {
-            println!("Current version: {}", CURRENT_VERSION);
+            println!("Current version: {CURRENT_VERSION}");
             println!("Checking for updates...");
 
             let config = UpdateConfig::default();
@@ -1905,7 +1904,7 @@ pub async fn handle_update(action: UpdateAction) -> anyhow::Result<()> {
                             result.latest_version.as_deref().unwrap_or("unknown")
                         );
                         if let Some(url) = &result.release_url {
-                            println!("Release: {}", url);
+                            println!("Release: {url}");
                         }
                         if let Some(notes) = &result.release_notes
                             && !notes.is_empty()
@@ -1915,7 +1914,7 @@ pub async fn handle_update(action: UpdateAction) -> anyhow::Result<()> {
                             } else {
                                 notes.clone()
                             };
-                            println!("\nRelease notes:\n{}", preview);
+                            println!("\nRelease notes:\n{preview}");
                         }
                         println!("\nRun `rustant update install` to update.");
                     } else {
@@ -1923,7 +1922,7 @@ pub async fn handle_update(action: UpdateAction) -> anyhow::Result<()> {
                     }
                 }
                 Err(e) => {
-                    println!("Failed to check for updates: {}", e);
+                    println!("Failed to check for updates: {e}");
                     println!("You can check manually at:");
                     println!("  https://github.com/DevJadhav/Rustant/releases");
                 }
@@ -1931,7 +1930,7 @@ pub async fn handle_update(action: UpdateAction) -> anyhow::Result<()> {
             Ok(())
         }
         UpdateAction::Install => {
-            println!("Current version: {}", CURRENT_VERSION);
+            println!("Current version: {CURRENT_VERSION}");
             println!("Downloading and installing latest version...");
 
             match Updater::update() {
@@ -1940,7 +1939,7 @@ pub async fn handle_update(action: UpdateAction) -> anyhow::Result<()> {
                     println!("Restart rustant to use the new version.");
                 }
                 Err(e) => {
-                    println!("Update failed: {}", e);
+                    println!("Update failed: {e}");
                     println!("You can update manually by downloading from:");
                     println!("  https://github.com/DevJadhav/Rustant/releases");
                 }
@@ -2097,10 +2096,12 @@ pub async fn run_voice_mode(
     let provider = rustant_core::create_provider(&config.llm)?;
     let callback = Arc::new(crate::repl::CliCallback::new(false));
     let mut agent = rustant_core::Agent::new(provider, config.clone(), callback);
+    agent.set_output_redactor(rustant_core::create_basic_redactor());
 
     // Register tools
     let mut registry = rustant_tools::registry::ToolRegistry::new();
     rustant_tools::register_builtin_tools(&mut registry, workspace.clone());
+    rustant_ml::register_ml_tools(&mut registry, workspace.clone());
     let registry_arc = Arc::new(registry);
     for def in registry_arc.list_definitions() {
         let name = def.name.clone();
@@ -2146,6 +2147,338 @@ pub async fn run_voice_mode(
                 eprintln!("Voice error: {}", e);
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
+        }
+    }
+}
+
+// --- Security & compliance CLI handlers ---
+
+pub async fn handle_scan(action: ScanAction, workspace: &Path) -> anyhow::Result<()> {
+    let _config = rustant_core::config::load_config(Some(workspace), None)
+        .map_err(|e| anyhow::anyhow!("Config error: {e}"))?;
+
+    let mut registry = rustant_tools::registry::ToolRegistry::new();
+    rustant_tools::register_builtin_tools(&mut registry, workspace.to_path_buf());
+    rustant_security::register_security_tools(&mut registry);
+
+    match action {
+        ScanAction::All { path, format } => {
+            println!("Running all security scanners on: {path}");
+            let args = serde_json::json!({
+                "path": path,
+                "scanners": "all",
+                "format": format,
+            });
+            run_security_tool(&registry, "security_scan", args).await
+        }
+        ScanAction::Sast { path, languages } => {
+            println!("Running SAST scan on: {path}");
+            let mut args = serde_json::json!({ "path": path });
+            if let Some(langs) = languages {
+                args["languages"] = serde_json::Value::String(langs);
+            }
+            run_security_tool(&registry, "sast_scan", args).await
+        }
+        ScanAction::Sca { path } => {
+            println!("Running SCA scan on: {path}");
+            let args = serde_json::json!({ "path": path });
+            run_security_tool(&registry, "sca_scan", args).await
+        }
+        ScanAction::Secrets { path, history } => {
+            println!("Running secrets scan on: {path}");
+            let args = serde_json::json!({ "path": path, "history": history });
+            run_security_tool(&registry, "secrets_scan", args).await
+        }
+        ScanAction::Iac { path } => {
+            println!("Running IaC scan on: {path}");
+            let args = serde_json::json!({ "path": path });
+            run_security_tool(&registry, "iac_scan", args).await
+        }
+        ScanAction::Container { target } => {
+            println!("Scanning container: {target}");
+            let args = serde_json::json!({ "image": target });
+            run_security_tool(&registry, "container_scan", args).await
+        }
+        ScanAction::SupplyChain { path } => {
+            println!("Checking supply chain security: {path}");
+            let args = serde_json::json!({ "path": path });
+            run_security_tool(&registry, "supply_chain_check", args).await
+        }
+    }
+}
+
+pub async fn handle_review(action: ReviewAction, workspace: &Path) -> anyhow::Result<()> {
+    let _config = rustant_core::config::load_config(Some(workspace), None)
+        .map_err(|e| anyhow::anyhow!("Config error: {e}"))?;
+
+    let mut registry = rustant_tools::registry::ToolRegistry::new();
+    rustant_tools::register_builtin_tools(&mut registry, workspace.to_path_buf());
+    rustant_security::register_security_tools(&mut registry);
+
+    match action {
+        ReviewAction::Diff { base } => {
+            println!("Reviewing changes since: {base}");
+            let args = serde_json::json!({ "diff": base });
+            run_security_tool(&registry, "analyze_diff", args).await
+        }
+        ReviewAction::Path { path } => {
+            println!("Reviewing: {path}");
+            let args = serde_json::json!({ "path": path });
+            run_security_tool(&registry, "code_review", args).await
+        }
+        ReviewAction::Fix { auto } => {
+            if auto {
+                println!("Applying high-confidence fixes...");
+                let args = serde_json::json!({ "mode": "auto" });
+                run_security_tool(&registry, "apply_fix", args).await
+            } else {
+                println!("Generating fix suggestions...");
+                let args = serde_json::json!({});
+                run_security_tool(&registry, "suggest_fix", args).await
+            }
+        }
+    }
+}
+
+pub async fn handle_quality(action: QualityAction, workspace: &Path) -> anyhow::Result<()> {
+    let _config = rustant_core::config::load_config(Some(workspace), None)
+        .map_err(|e| anyhow::anyhow!("Config error: {e}"))?;
+
+    let mut registry = rustant_tools::registry::ToolRegistry::new();
+    rustant_tools::register_builtin_tools(&mut registry, workspace.to_path_buf());
+    rustant_security::register_security_tools(&mut registry);
+
+    match action {
+        QualityAction::Score { path } => {
+            println!("Calculating quality score for: {path}");
+            let args = serde_json::json!({ "path": path });
+            run_security_tool(&registry, "quality_score", args).await
+        }
+        QualityAction::Complexity { path } => {
+            println!("Analyzing complexity: {path}");
+            let args = serde_json::json!({ "path": path });
+            run_security_tool(&registry, "complexity_check", args).await
+        }
+        QualityAction::DeadCode { path } => {
+            println!("Detecting dead code: {path}");
+            let args = serde_json::json!({ "path": path });
+            run_security_tool(&registry, "dead_code_detect", args).await
+        }
+        QualityAction::Duplicates { path } => {
+            println!("Finding duplicates: {path}");
+            let args = serde_json::json!({ "path": path });
+            run_security_tool(&registry, "duplicate_detect", args).await
+        }
+        QualityAction::Debt { path } => {
+            println!("Generating debt report: {path}");
+            let args = serde_json::json!({ "path": path });
+            run_security_tool(&registry, "tech_debt_report", args).await
+        }
+    }
+}
+
+pub async fn handle_license(action: LicenseAction, workspace: &Path) -> anyhow::Result<()> {
+    let _config = rustant_core::config::load_config(Some(workspace), None)
+        .map_err(|e| anyhow::anyhow!("Config error: {e}"))?;
+
+    let mut registry = rustant_tools::registry::ToolRegistry::new();
+    rustant_tools::register_builtin_tools(&mut registry, workspace.to_path_buf());
+    rustant_security::register_security_tools(&mut registry);
+
+    match action {
+        LicenseAction::Check { path } => {
+            println!("Checking license compliance: {path}");
+            let args = serde_json::json!({ "path": path });
+            run_security_tool(&registry, "license_check", args).await
+        }
+        LicenseAction::Summary { path } => {
+            println!("License summary: {path}");
+            let args = serde_json::json!({ "path": path, "action": "summary" });
+            run_security_tool(&registry, "license_check", args).await
+        }
+    }
+}
+
+pub async fn handle_sbom(action: SbomAction, workspace: &Path) -> anyhow::Result<()> {
+    let _config = rustant_core::config::load_config(Some(workspace), None)
+        .map_err(|e| anyhow::anyhow!("Config error: {e}"))?;
+
+    let mut registry = rustant_tools::registry::ToolRegistry::new();
+    rustant_tools::register_builtin_tools(&mut registry, workspace.to_path_buf());
+    rustant_security::register_security_tools(&mut registry);
+
+    match action {
+        SbomAction::Generate {
+            path,
+            format,
+            output,
+        } => {
+            println!("Generating SBOM ({format}): {path}");
+            let mut args = serde_json::json!({ "path": path, "format": format });
+            if let Some(out) = output {
+                args["output"] = serde_json::Value::String(out);
+            }
+            run_security_tool(&registry, "sbom_generate", args).await
+        }
+        SbomAction::Diff { old, new } => {
+            println!("Comparing SBOMs: {old} vs {new}");
+            let args = serde_json::json!({ "old": old, "new": new });
+            run_security_tool(&registry, "sbom_diff", args).await
+        }
+    }
+}
+
+pub async fn handle_compliance(action: ComplianceAction, workspace: &Path) -> anyhow::Result<()> {
+    let _config = rustant_core::config::load_config(Some(workspace), None)
+        .map_err(|e| anyhow::anyhow!("Config error: {e}"))?;
+
+    let mut registry = rustant_tools::registry::ToolRegistry::new();
+    rustant_tools::register_builtin_tools(&mut registry, workspace.to_path_buf());
+    rustant_security::register_security_tools(&mut registry);
+
+    match action {
+        ComplianceAction::Report { framework, format } => {
+            println!("Generating {framework} compliance report ({format})");
+            let args = serde_json::json!({
+                "framework": framework,
+                "format": format,
+            });
+            run_security_tool(&registry, "compliance_report", args).await
+        }
+        ComplianceAction::Status => {
+            println!("Compliance status summary:");
+            let args = serde_json::json!({ "action": "status" });
+            run_security_tool(&registry, "compliance_report", args).await
+        }
+    }
+}
+
+pub async fn handle_audit(action: AuditAction, workspace: &Path) -> anyhow::Result<()> {
+    let _config = rustant_core::config::load_config(Some(workspace), None)
+        .map_err(|e| anyhow::anyhow!("Config error: {e}"))?;
+
+    let mut registry = rustant_tools::registry::ToolRegistry::new();
+    rustant_tools::register_builtin_tools(&mut registry, workspace.to_path_buf());
+    rustant_security::register_security_tools(&mut registry);
+
+    match action {
+        AuditAction::Export { start, end, format } => {
+            println!("Exporting audit trail (format: {format})");
+            let mut args = serde_json::json!({ "format": format });
+            if let Some(s) = start {
+                args["start"] = serde_json::Value::String(s);
+            }
+            if let Some(e) = end {
+                args["end"] = serde_json::Value::String(e);
+            }
+            run_security_tool(&registry, "audit_export", args).await
+        }
+        AuditAction::Verify => {
+            println!("Verifying audit trail integrity...");
+            let args = serde_json::json!({ "action": "verify" });
+            run_security_tool(&registry, "audit_export", args).await
+        }
+    }
+}
+
+pub async fn handle_risk(action: RiskAction, workspace: &Path) -> anyhow::Result<()> {
+    let _config = rustant_core::config::load_config(Some(workspace), None)
+        .map_err(|e| anyhow::anyhow!("Config error: {e}"))?;
+
+    let mut registry = rustant_tools::registry::ToolRegistry::new();
+    rustant_tools::register_builtin_tools(&mut registry, workspace.to_path_buf());
+    rustant_security::register_security_tools(&mut registry);
+
+    match action {
+        RiskAction::Score { path } => {
+            println!("Calculating risk score: {path}");
+            let args = serde_json::json!({ "path": path });
+            run_security_tool(&registry, "risk_score", args).await
+        }
+        RiskAction::Trend => {
+            println!("Risk trend analysis:");
+            let args = serde_json::json!({ "action": "trend" });
+            run_security_tool(&registry, "risk_score", args).await
+        }
+    }
+}
+
+pub async fn handle_policy(action: PolicyAction, workspace: &Path) -> anyhow::Result<()> {
+    let _config = rustant_core::config::load_config(Some(workspace), None)
+        .map_err(|e| anyhow::anyhow!("Config error: {e}"))?;
+
+    let mut registry = rustant_tools::registry::ToolRegistry::new();
+    rustant_tools::register_builtin_tools(&mut registry, workspace.to_path_buf());
+    rustant_security::register_security_tools(&mut registry);
+
+    match action {
+        PolicyAction::List => {
+            println!("Active policies:");
+            let args = serde_json::json!({ "action": "list" });
+            run_security_tool(&registry, "policy_check", args).await
+        }
+        PolicyAction::Check { path } => {
+            println!("Checking policies: {path}");
+            let args = serde_json::json!({ "path": path });
+            run_security_tool(&registry, "policy_check", args).await
+        }
+        PolicyAction::Validate { path } => {
+            println!("Validating policy file: {path}");
+            let args = serde_json::json!({ "action": "validate", "path": path });
+            run_security_tool(&registry, "policy_check", args).await
+        }
+    }
+}
+
+pub async fn handle_alerts(action: AlertsAction, workspace: &Path) -> anyhow::Result<()> {
+    let _config = rustant_core::config::load_config(Some(workspace), None)
+        .map_err(|e| anyhow::anyhow!("Config error: {e}"))?;
+
+    let mut registry = rustant_tools::registry::ToolRegistry::new();
+    rustant_tools::register_builtin_tools(&mut registry, workspace.to_path_buf());
+    rustant_security::register_security_tools(&mut registry);
+
+    match action {
+        AlertsAction::List { severity } => {
+            println!("Active alerts:");
+            let mut args = serde_json::json!({ "action": "list" });
+            if let Some(sev) = severity {
+                args["severity"] = serde_json::Value::String(sev);
+            }
+            run_security_tool(&registry, "alert_status", args).await
+        }
+        AlertsAction::Triage => {
+            println!("Running AI-powered alert triage...");
+            let args = serde_json::json!({});
+            run_security_tool(&registry, "alert_triage", args).await
+        }
+        AlertsAction::Acknowledge { id } => {
+            println!("Acknowledging alert: {id}");
+            let args = serde_json::json!({ "action": "acknowledge", "alert_id": id });
+            run_security_tool(&registry, "alert_status", args).await
+        }
+        AlertsAction::Resolve { id } => {
+            println!("Resolving alert: {id}");
+            let args = serde_json::json!({ "action": "resolve", "alert_id": id });
+            run_security_tool(&registry, "alert_status", args).await
+        }
+    }
+}
+
+/// Helper: execute a security tool from the registry and print its output.
+async fn run_security_tool(
+    registry: &rustant_tools::registry::ToolRegistry,
+    tool_name: &str,
+    args: serde_json::Value,
+) -> anyhow::Result<()> {
+    match registry.execute(tool_name, args).await {
+        Ok(output) => {
+            println!("{}", output.content);
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("Tool error: {e}");
+            Err(anyhow::anyhow!("{e}"))
         }
     }
 }

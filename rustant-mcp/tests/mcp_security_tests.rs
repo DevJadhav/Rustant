@@ -128,7 +128,7 @@ async fn test_rate_limit_burst() {
         client.write_message(&req).await.unwrap();
         let resp_str = client.read_message().await.unwrap().unwrap();
         let resp: JsonRpcResponse = serde_json::from_str(&resp_str).unwrap();
-        assert!(resp.result.is_some(), "Call {} should succeed", i);
+        assert!(resp.result.is_some(), "Call {i} should succeed");
     }
 
     // 4th call should be rate-limited

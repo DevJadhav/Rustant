@@ -52,7 +52,7 @@ impl InputHistory {
         if let Some(parent) = self.file_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let content: String = self.entries.iter().map(|e| format!("{}\n", e)).collect();
+        let content: String = self.entries.iter().map(|e| format!("{e}\n")).collect();
         let _ = std::fs::write(&self.file_path, content);
     }
 
@@ -147,7 +147,7 @@ impl ReplInput {
         cmd_registry: &CommandRegistry,
     ) -> io::Result<Option<String>> {
         // Print prompt
-        print!("{}", prompt);
+        print!("{prompt}");
         io::stdout().flush()?;
 
         terminal::enable_raw_mode()?;
@@ -339,14 +339,14 @@ impl ReplInput {
         // Reprint prompt
         write!(stdout, "\x1b[1;34m> \x1b[0m")?;
         // Print buffer
-        write!(stdout, "{}", buffer)?;
+        write!(stdout, "{buffer}")?;
         // Print ghost completion text if available
         if let Some(hint) = completion_hint
             && hint.len() > buffer.len()
             && hint.starts_with(buffer)
         {
             let suffix = &hint[buffer.len()..];
-            write!(stdout, "\x1b[90m{}\x1b[0m", suffix)?;
+            write!(stdout, "\x1b[90m{suffix}\x1b[0m")?;
             // Move cursor back to actual position
             let hint_len = suffix.len();
             if hint_len > 0 {

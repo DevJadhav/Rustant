@@ -23,9 +23,8 @@ impl WasmPluginLoader {
     ) -> Result<Box<dyn Plugin>, PluginError> {
         // Validate the WASM module
         let engine = wasmi::Engine::default();
-        let module = wasmi::Module::new(&engine, wasm_bytes).map_err(|e| {
-            PluginError::LoadFailed(format!("Invalid WASM module '{}': {}", name, e))
-        })?;
+        let module = wasmi::Module::new(&engine, wasm_bytes)
+            .map_err(|e| PluginError::LoadFailed(format!("Invalid WASM module '{name}': {e}")))?;
 
         Ok(Box::new(WasmPlugin {
             name: name.into(),

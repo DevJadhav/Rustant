@@ -52,7 +52,7 @@ impl ResourceManager {
         let path_str = uri
             .strip_prefix("file://")
             .ok_or_else(|| McpError::InvalidParams {
-                message: format!("URI must start with file://, got: {}", uri),
+                message: format!("URI must start with file://, got: {uri}"),
             })?;
 
         let path = PathBuf::from(path_str);
@@ -60,7 +60,7 @@ impl ResourceManager {
         // Validate the path is within the workspace
         if !is_within_workspace(&self.workspace, &path) {
             return Err(McpError::InvalidParams {
-                message: format!("Path is outside the workspace: {}", uri),
+                message: format!("Path is outside the workspace: {uri}"),
             });
         }
 
@@ -73,7 +73,7 @@ impl ResourceManager {
 
         // Read as UTF-8 text
         let text = fs::read_to_string(&path).map_err(|e| McpError::InternalError {
-            message: format!("Failed to read resource as UTF-8: {}", e),
+            message: format!("Failed to read resource as UTF-8: {e}"),
         })?;
 
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -99,7 +99,7 @@ impl ResourceManager {
 
         for entry in entries {
             let entry = entry.map_err(|e| McpError::InternalError {
-                message: format!("Failed to read directory entry: {}", e),
+                message: format!("Failed to read directory entry: {e}"),
             })?;
 
             let path = entry.path();
@@ -329,8 +329,7 @@ mod tests {
         let msg = err.to_string();
         assert!(
             msg.contains("outside the workspace") || msg.contains("Path"),
-            "Expected path traversal error, got: {}",
-            msg
+            "Expected path traversal error, got: {msg}"
         );
     }
 
@@ -380,7 +379,7 @@ mod tests {
 
         // Create more files than the limit
         for i in 0..1050 {
-            File::create(dir.path().join(format!("file_{:04}.txt", i))).unwrap();
+            File::create(dir.path().join(format!("file_{i:04}.txt"))).unwrap();
         }
 
         let manager = ResourceManager::new(dir.path().to_path_buf());

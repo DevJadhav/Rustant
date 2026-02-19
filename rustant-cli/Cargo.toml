@@ -20,6 +20,8 @@ rustant-core = { workspace = true }
 rustant-tools = { workspace = true }
 rustant-mcp = { workspace = true }
 rustant-plugins = { workspace = true }
+rustant-security = { workspace = true }
+rustant-ml = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 futures = { workspace = true }

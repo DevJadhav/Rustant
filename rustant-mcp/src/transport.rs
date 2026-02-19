@@ -131,7 +131,7 @@ impl ProcessTransport {
             .stderr(std::process::Stdio::piped());
 
         let mut child = cmd.spawn().map_err(|e| McpError::TransportError {
-            message: format!("Failed to spawn {}: {}", command, e),
+            message: format!("Failed to spawn {command}: {e}"),
         })?;
 
         let stdin = child.stdin.take().ok_or_else(|| McpError::TransportError {

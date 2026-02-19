@@ -133,6 +133,287 @@ pub enum Commands {
         #[command(subcommand)]
         action: UpdateAction,
     },
+    /// Security scanning (SAST, SCA, secrets, IaC, container, supply chain)
+    Scan {
+        #[command(subcommand)]
+        action: ScanAction,
+    },
+    /// AI-powered code review
+    Review {
+        #[command(subcommand)]
+        action: ReviewAction,
+    },
+    /// Code quality analysis
+    Quality {
+        #[command(subcommand)]
+        action: QualityAction,
+    },
+    /// License compliance checking
+    License {
+        #[command(subcommand)]
+        action: LicenseAction,
+    },
+    /// Software Bill of Materials (SBOM) generation
+    Sbom {
+        #[command(subcommand)]
+        action: SbomAction,
+    },
+    /// Compliance reporting and auditing
+    Compliance {
+        #[command(subcommand)]
+        action: ComplianceAction,
+    },
+    /// Audit trail export and verification
+    Audit {
+        #[command(subcommand)]
+        action: AuditAction,
+    },
+    /// Risk scoring and assessment
+    Risk {
+        #[command(subcommand)]
+        action: RiskAction,
+    },
+    /// Security policy management
+    Policy {
+        #[command(subcommand)]
+        action: PolicyAction,
+    },
+    /// Alert management and triage
+    Alerts {
+        #[command(subcommand)]
+        action: AlertsAction,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum ScanAction {
+    /// Run all enabled scanners
+    All {
+        /// Path to scan (default: current directory)
+        #[arg(short, long, default_value = ".")]
+        path: String,
+        /// Output format (sarif, markdown, json)
+        #[arg(short, long, default_value = "markdown")]
+        format: String,
+    },
+    /// Run SAST (Static Application Security Testing) only
+    Sast {
+        /// Path to scan
+        #[arg(short, long, default_value = ".")]
+        path: String,
+        /// Languages to scan (comma-separated)
+        #[arg(short, long)]
+        languages: Option<String>,
+    },
+    /// Run SCA (Software Composition Analysis) only
+    Sca {
+        /// Path to scan
+        #[arg(short, long, default_value = ".")]
+        path: String,
+    },
+    /// Scan for hardcoded secrets
+    Secrets {
+        /// Path to scan
+        #[arg(short, long, default_value = ".")]
+        path: String,
+        /// Scan git history
+        #[arg(long)]
+        history: bool,
+    },
+    /// Scan infrastructure-as-code files
+    Iac {
+        /// Path to scan
+        #[arg(short, long, default_value = ".")]
+        path: String,
+    },
+    /// Scan container images or Dockerfiles
+    Container {
+        /// Image name or Dockerfile path
+        target: String,
+    },
+    /// Check supply chain security
+    SupplyChain {
+        /// Path to scan
+        #[arg(short, long, default_value = ".")]
+        path: String,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum ReviewAction {
+    /// Review code changes (diff-based)
+    Diff {
+        /// Git diff base (e.g., HEAD~1, main)
+        #[arg(default_value = "HEAD~1")]
+        base: String,
+    },
+    /// Review a specific file or directory
+    Path {
+        /// Path to review
+        path: String,
+    },
+    /// Generate fix suggestions for findings
+    Fix {
+        /// Auto-apply high-confidence fixes
+        #[arg(long)]
+        auto: bool,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum QualityAction {
+    /// Calculate code quality score (A-F)
+    Score {
+        /// Path to analyze
+        #[arg(default_value = ".")]
+        path: String,
+    },
+    /// Analyze cyclomatic complexity
+    Complexity {
+        /// Path to analyze
+        #[arg(default_value = ".")]
+        path: String,
+    },
+    /// Detect dead/unreachable code
+    DeadCode {
+        /// Path to analyze
+        #[arg(default_value = ".")]
+        path: String,
+    },
+    /// Find code duplication
+    Duplicates {
+        /// Path to analyze
+        #[arg(default_value = ".")]
+        path: String,
+    },
+    /// Generate technical debt report
+    Debt {
+        /// Path to analyze
+        #[arg(default_value = ".")]
+        path: String,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum LicenseAction {
+    /// Check license compliance against policy
+    Check {
+        /// Path to scan
+        #[arg(short, long, default_value = ".")]
+        path: String,
+    },
+    /// Show license summary for all dependencies
+    Summary {
+        /// Path to scan
+        #[arg(short, long, default_value = ".")]
+        path: String,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum SbomAction {
+    /// Generate SBOM (Software Bill of Materials)
+    Generate {
+        /// Path to scan
+        #[arg(short, long, default_value = ".")]
+        path: String,
+        /// Output format (cyclonedx, spdx, csv)
+        #[arg(short, long, default_value = "cyclonedx")]
+        format: String,
+        /// Output file path
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+    /// Compare two SBOM versions
+    Diff {
+        /// First SBOM file
+        old: String,
+        /// Second SBOM file
+        new: String,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum ComplianceAction {
+    /// Generate compliance report for a framework
+    Report {
+        /// Compliance framework (soc2, iso27001, nist, pci-dss, owasp)
+        framework: String,
+        /// Output format (markdown, html, pdf, json)
+        #[arg(short, long, default_value = "markdown")]
+        format: String,
+    },
+    /// Show compliance status summary
+    Status,
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum AuditAction {
+    /// Export audit trail
+    Export {
+        /// Start date (ISO 8601)
+        #[arg(short, long)]
+        start: Option<String>,
+        /// End date (ISO 8601)
+        #[arg(short, long)]
+        end: Option<String>,
+        /// Output format (sarif, ocsf, json, csv)
+        #[arg(short, long, default_value = "json")]
+        format: String,
+    },
+    /// Verify audit trail integrity (Merkle chain)
+    Verify,
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum RiskAction {
+    /// Calculate risk score
+    Score {
+        /// Path to analyze
+        #[arg(default_value = ".")]
+        path: String,
+    },
+    /// Show risk trend over time
+    Trend,
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum PolicyAction {
+    /// List active policies
+    List,
+    /// Check policies against current project
+    Check {
+        /// Path to check
+        #[arg(short, long, default_value = ".")]
+        path: String,
+    },
+    /// Validate a policy file
+    Validate {
+        /// Path to policy file
+        path: String,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum AlertsAction {
+    /// List active alerts
+    List {
+        /// Filter by severity (critical, high, medium, low)
+        #[arg(short, long)]
+        severity: Option<String>,
+    },
+    /// Run AI-powered alert triage
+    Triage,
+    /// Acknowledge an alert
+    Acknowledge {
+        /// Alert ID
+        id: String,
+    },
+    /// Resolve an alert
+    Resolve {
+        /// Alert ID
+        id: String,
+    },
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -496,7 +777,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Load configuration
     let mut config = rustant_core::config::load_config(Some(&workspace), None)
-        .map_err(|e| anyhow::anyhow!("Configuration error: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Configuration error: {e}"))?;
 
     // First-run detection: if no config file exists, prompt setup wizard
     if !rustant_core::config_exists(Some(&workspace)) {
@@ -513,11 +794,11 @@ async fn main() -> anyhow::Result<()> {
         }
         println!("\n  No configuration found. Starting setup wizard...\n");
         if let Err(e) = setup::run_setup(&workspace).await {
-            eprintln!("  Setup failed: {}. Using defaults.\n", e);
+            eprintln!("  Setup failed: {e}. Using defaults.\n");
         } else {
             // Reload configuration after setup
             config = rustant_core::config::load_config(Some(&workspace), None)
-                .map_err(|e| anyhow::anyhow!("Configuration error: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Configuration error: {e}"))?;
         }
     }
 
@@ -542,7 +823,7 @@ async fn main() -> anyhow::Result<()> {
             "paranoid" => rustant_core::ApprovalMode::Paranoid,
             "yolo" => rustant_core::ApprovalMode::Yolo,
             _ => {
-                eprintln!("Unknown approval mode: '{}'. Using 'safe'.", approval);
+                eprintln!("Unknown approval mode: '{approval}'. Using 'safe'.");
                 rustant_core::ApprovalMode::Safe
             }
         };
