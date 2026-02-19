@@ -95,21 +95,21 @@ impl SkillTrackerTool {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ToolError::ExecutionFailed {
                 name: "skill_tracker".to_string(),
-                message: format!("Failed to create state dir: {}", e),
+                message: format!("Failed to create state dir: {e}"),
             })?;
         }
         let json = serde_json::to_string_pretty(state).map_err(|e| ToolError::ExecutionFailed {
             name: "skill_tracker".to_string(),
-            message: format!("Failed to serialize state: {}", e),
+            message: format!("Failed to serialize state: {e}"),
         })?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, &json).map_err(|e| ToolError::ExecutionFailed {
             name: "skill_tracker".to_string(),
-            message: format!("Failed to write state: {}", e),
+            message: format!("Failed to write state: {e}"),
         })?;
         std::fs::rename(&tmp, &path).map_err(|e| ToolError::ExecutionFailed {
             name: "skill_tracker".to_string(),
-            message: format!("Failed to rename state file: {}", e),
+            message: format!("Failed to rename state file: {e}"),
         })?;
         Ok(())
     }
@@ -234,8 +234,7 @@ impl Tool for SkillTrackerTool {
                 });
                 self.save_state(&state)?;
                 Ok(ToolOutput::text(format!(
-                    "Added skill #{}: '{}' [{}] with target level {}.",
-                    id, name, category, target_level
+                    "Added skill #{id}: '{name}' [{category}] with target level {target_level}."
                 )))
             }
 
@@ -278,11 +277,10 @@ impl Tool for SkillTrackerTool {
                     let current = skill.proficiency_level;
                     self.save_state(&state)?;
                     Ok(ToolOutput::text(format!(
-                        "Logged {} min practice for '{}'. Proficiency: {} -> {}.",
-                        duration_mins, skill_name, proficiency_before, current
+                        "Logged {duration_mins} min practice for '{skill_name}'. Proficiency: {proficiency_before} -> {current}."
                     )))
                 } else {
-                    Ok(ToolOutput::text(format!("Skill #{} not found.", skill_id)))
+                    Ok(ToolOutput::text(format!("Skill #{skill_id} not found.")))
                 }
             }
 
@@ -317,8 +315,7 @@ impl Tool for SkillTrackerTool {
                             skill.practice_log.iter().map(|e| e.duration_mins).sum();
                         let sessions = skill.practice_log.len();
                         prompt.push_str(&format!(
-                            "\nPractice History: {} sessions, {} total minutes\n",
-                            sessions, total_mins
+                            "\nPractice History: {sessions} sessions, {total_mins} total minutes\n"
                         ));
                         prompt.push_str("Recent entries:\n");
                         for entry in skill.practice_log.iter().rev().take(5) {
@@ -345,7 +342,7 @@ impl Tool for SkillTrackerTool {
                     );
                     Ok(ToolOutput::text(prompt))
                 } else {
-                    Ok(ToolOutput::text(format!("Skill #{} not found.", skill_id)))
+                    Ok(ToolOutput::text(format!("Skill #{skill_id} not found.")))
                 }
             }
 
@@ -362,7 +359,7 @@ impl Tool for SkillTrackerTool {
                     .collect();
                 if filtered.is_empty() {
                     return Ok(ToolOutput::text(if let Some(cat) = category_filter {
-                        format!("No skills found in category '{}'.", cat)
+                        format!("No skills found in category '{cat}'.")
                     } else {
                         "No skills tracked yet.".to_string()
                     }));
@@ -463,7 +460,7 @@ impl Tool for SkillTrackerTool {
                         // Validate skill IDs exist
                         for &sid in &skill_ids {
                             if !state.skills.iter().any(|s| s.id == sid) {
-                                return Ok(ToolOutput::text(format!("Skill #{} not found.", sid)));
+                                return Ok(ToolOutput::text(format!("Skill #{sid} not found.")));
                             }
                         }
                         let milestones: Vec<Milestone> = args
@@ -503,8 +500,7 @@ impl Tool for SkillTrackerTool {
                         });
                         self.save_state(&state)?;
                         Ok(ToolOutput::text(format!(
-                            "Created learning path #{}: '{}'.",
-                            id, name
+                            "Created learning path #{id}: '{name}'."
                         )))
                     }
                     "show" => {
@@ -523,7 +519,7 @@ impl Tool for SkillTrackerTool {
                                         skill.target_level
                                     ));
                                 } else {
-                                    output.push_str(&format!("  #{} (not found)\n", sid));
+                                    output.push_str(&format!("  #{sid} (not found)\n"));
                                 }
                             }
                             if !path.milestones.is_empty() {
@@ -545,8 +541,7 @@ impl Tool for SkillTrackerTool {
                             Ok(ToolOutput::text(output))
                         } else {
                             Ok(ToolOutput::text(format!(
-                                "Learning path #{} not found.",
-                                path_id
+                                "Learning path #{path_id} not found."
                             )))
                         }
                     }
@@ -594,19 +589,16 @@ impl Tool for SkillTrackerTool {
                             let path_name = path.name.clone();
                             self.save_state(&state)?;
                             Ok(ToolOutput::text(format!(
-                                "Updated learning path #{}: '{}'.",
-                                path_id, path_name
+                                "Updated learning path #{path_id}: '{path_name}'."
                             )))
                         } else {
                             Ok(ToolOutput::text(format!(
-                                "Learning path #{} not found.",
-                                path_id
+                                "Learning path #{path_id} not found."
                             )))
                         }
                     }
                     _ => Ok(ToolOutput::text(format!(
-                        "Unknown sub_action: '{}'. Use: create, show, update.",
-                        sub_action
+                        "Unknown sub_action: '{sub_action}'. Use: create, show, update."
                     ))),
                 }
             }
@@ -773,8 +765,7 @@ impl Tool for SkillTrackerTool {
             }
 
             _ => Ok(ToolOutput::text(format!(
-                "Unknown action: '{}'. Use: add_skill, log_practice, assess, list_skills, knowledge_gaps, learning_path, progress_report, daily_practice.",
-                action
+                "Unknown action: '{action}'. Use: add_skill, log_practice, assess, list_skills, knowledge_gaps, learning_path, progress_report, daily_practice."
             ))),
         }
     }

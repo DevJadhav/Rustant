@@ -123,7 +123,7 @@ impl SemanticScholarClient {
             .connect_timeout(Duration::from_secs(10))
             .user_agent("Rustant/1.0")
             .build()
-            .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+            .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
         Ok(Self {
             client,
             api_key,
@@ -156,7 +156,7 @@ impl SemanticScholarClient {
 
     /// Fetch paper metadata by arXiv ID.
     pub async fn fetch_by_arxiv_id(&self, arxiv_id: &str) -> Result<ExternalMetadata, String> {
-        let cache_key = format!("s2:arxiv:{}", arxiv_id);
+        let cache_key = format!("s2:arxiv:{arxiv_id}");
         if let Some(cached) = self.cache.get(&cache_key) {
             return parse_semantic_scholar_response(&cached);
         }
@@ -164,8 +164,7 @@ impl SemanticScholarClient {
         self.rate_limit().await;
 
         let url = format!(
-            "{}/paper/ArXiv:{}?fields={}",
-            SEMANTIC_SCHOLAR_API, arxiv_id, SEMANTIC_SCHOLAR_FIELDS
+            "{SEMANTIC_SCHOLAR_API}/paper/ArXiv:{arxiv_id}?fields={SEMANTIC_SCHOLAR_FIELDS}"
         );
 
         let mut request = self.client.get(&url);
@@ -176,7 +175,7 @@ impl SemanticScholarClient {
         let response = request
             .send()
             .await
-            .map_err(|e| format!("Semantic Scholar request failed: {}", e))?;
+            .map_err(|e| format!("Semantic Scholar request failed: {e}"))?;
 
         if !response.status().is_success() {
             return Err(format!(
@@ -188,7 +187,7 @@ impl SemanticScholarClient {
         let body: serde_json::Value = response
             .json()
             .await
-            .map_err(|e| format!("Failed to parse Semantic Scholar response: {}", e))?;
+            .map_err(|e| format!("Failed to parse Semantic Scholar response: {e}"))?;
 
         self.cache.insert(cache_key, body.clone());
         parse_semantic_scholar_response(&body)
@@ -200,7 +199,7 @@ impl SemanticScholarClient {
         arxiv_id: &str,
         limit: usize,
     ) -> Result<Vec<(String, String)>, String> {
-        let cache_key = format!("s2:citations:{}", arxiv_id);
+        let cache_key = format!("s2:citations:{arxiv_id}");
         if let Some(cached) = self.cache.get(&cache_key) {
             return parse_citation_list(&cached);
         }
@@ -208,8 +207,7 @@ impl SemanticScholarClient {
         self.rate_limit().await;
 
         let url = format!(
-            "{}/paper/ArXiv:{}/citations?fields=paperId,title,externalIds&limit={}",
-            SEMANTIC_SCHOLAR_API, arxiv_id, limit
+            "{SEMANTIC_SCHOLAR_API}/paper/ArXiv:{arxiv_id}/citations?fields=paperId,title,externalIds&limit={limit}"
         );
 
         let mut request = self.client.get(&url);
@@ -220,7 +218,7 @@ impl SemanticScholarClient {
         let response = request
             .send()
             .await
-            .map_err(|e| format!("Semantic Scholar citations request failed: {}", e))?;
+            .map_err(|e| format!("Semantic Scholar citations request failed: {e}"))?;
 
         if !response.status().is_success() {
             return Err(format!(
@@ -232,7 +230,7 @@ impl SemanticScholarClient {
         let body: serde_json::Value = response
             .json()
             .await
-            .map_err(|e| format!("Failed to parse citations response: {}", e))?;
+            .map_err(|e| format!("Failed to parse citations response: {e}"))?;
 
         self.cache.insert(cache_key, body.clone());
         parse_citation_list(&body)
@@ -244,7 +242,7 @@ impl SemanticScholarClient {
         arxiv_id: &str,
         limit: usize,
     ) -> Result<Vec<(String, String)>, String> {
-        let cache_key = format!("s2:references:{}", arxiv_id);
+        let cache_key = format!("s2:references:{arxiv_id}");
         if let Some(cached) = self.cache.get(&cache_key) {
             return parse_citation_list(&cached);
         }
@@ -252,8 +250,7 @@ impl SemanticScholarClient {
         self.rate_limit().await;
 
         let url = format!(
-            "{}/paper/ArXiv:{}/references?fields=paperId,title,externalIds&limit={}",
-            SEMANTIC_SCHOLAR_API, arxiv_id, limit
+            "{SEMANTIC_SCHOLAR_API}/paper/ArXiv:{arxiv_id}/references?fields=paperId,title,externalIds&limit={limit}"
         );
 
         let mut request = self.client.get(&url);
@@ -264,7 +261,7 @@ impl SemanticScholarClient {
         let response = request
             .send()
             .await
-            .map_err(|e| format!("Semantic Scholar references request failed: {}", e))?;
+            .map_err(|e| format!("Semantic Scholar references request failed: {e}"))?;
 
         if !response.status().is_success() {
             return Err(format!(
@@ -276,7 +273,7 @@ impl SemanticScholarClient {
         let body: serde_json::Value = response
             .json()
             .await
-            .map_err(|e| format!("Failed to parse references response: {}", e))?;
+            .map_err(|e| format!("Failed to parse references response: {e}"))?;
 
         self.cache.insert(cache_key, body.clone());
         parse_citation_list(&body)
@@ -390,7 +387,7 @@ impl OpenAlexClient {
             .connect_timeout(Duration::from_secs(10))
             .user_agent("Rustant/1.0")
             .build()
-            .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+            .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
         Ok(Self {
             client,
             email,
@@ -424,7 +421,7 @@ impl OpenAlexClient {
 
     /// Fetch paper metadata by arXiv ID.
     pub async fn fetch_by_arxiv_id(&self, arxiv_id: &str) -> Result<ExternalMetadata, String> {
-        let cache_key = format!("oa:arxiv:{}", arxiv_id);
+        let cache_key = format!("oa:arxiv:{arxiv_id}");
         if let Some(cached) = self.cache.get(&cache_key) {
             return parse_openalex_response(&cached);
         }
@@ -432,17 +429,11 @@ impl OpenAlexClient {
         self.rate_limit().await;
 
         let mut url = format!(
-            "{}/works?filter=ids.openalex:https://openalex.org/W*&filter=doi:https://doi.org/10.48550/arXiv.{}",
-            OPENALEX_API, arxiv_id
-        );
-        // Try direct filter approach
-        url = format!(
-            "{}/works?filter=ids.openalex_id:*&per_page=1&search=arXiv:{}",
-            OPENALEX_API, arxiv_id
+            "{OPENALEX_API}/works?filter=ids.openalex_id:*&per_page=1&search=arXiv:{arxiv_id}"
         );
 
         if let Some(ref email) = self.email {
-            url.push_str(&format!("&mailto={}", email));
+            url.push_str(&format!("&mailto={email}"));
         }
 
         let response = self
@@ -450,7 +441,7 @@ impl OpenAlexClient {
             .get(&url)
             .send()
             .await
-            .map_err(|e| format!("OpenAlex request failed: {}", e))?;
+            .map_err(|e| format!("OpenAlex request failed: {e}"))?;
 
         if !response.status().is_success() {
             return Err(format!("OpenAlex returned status {}", response.status()));
@@ -459,7 +450,7 @@ impl OpenAlexClient {
         let body: serde_json::Value = response
             .json()
             .await
-            .map_err(|e| format!("Failed to parse OpenAlex response: {}", e))?;
+            .map_err(|e| format!("Failed to parse OpenAlex response: {e}"))?;
 
         self.cache.insert(cache_key, body.clone());
         parse_openalex_response(&body)

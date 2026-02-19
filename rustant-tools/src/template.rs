@@ -65,7 +65,7 @@ impl Tool for TemplateTool {
                         let path = self.workspace.join(template_str);
                         std::fs::read_to_string(&path).map_err(|e| ToolError::ExecutionFailed {
                             name: "template".into(),
-                            message: format!("Failed to read template file: {}", e),
+                            message: format!("Failed to read template file: {e}"),
                         })?
                     } else {
                         template_str.to_string()
@@ -79,7 +79,7 @@ impl Tool for TemplateTool {
                     .render_template(&template_content, &variables)
                     .map_err(|e| ToolError::ExecutionFailed {
                         name: "template".into(),
-                        message: format!("Template render error: {}", e),
+                        message: format!("Template render error: {e}"),
                     })?;
 
                 // Optionally write to file
@@ -90,11 +90,10 @@ impl Tool for TemplateTool {
                     }
                     std::fs::write(&path, &rendered).map_err(|e| ToolError::ExecutionFailed {
                         name: "template".into(),
-                        message: format!("Failed to write output: {}", e),
+                        message: format!("Failed to write output: {e}"),
                     })?;
                     return Ok(ToolOutput::text(format!(
-                        "Rendered template written to {}.",
-                        output_path
+                        "Rendered template written to {output_path}."
                     )));
                 }
 
@@ -126,15 +125,14 @@ impl Tool for TemplateTool {
                         templates.len(),
                         templates
                             .iter()
-                            .map(|t| format!("  {}", t))
+                            .map(|t| format!("  {t}"))
                             .collect::<Vec<_>>()
                             .join("\n")
                     )))
                 }
             }
             _ => Ok(ToolOutput::text(format!(
-                "Unknown action: {}. Use: render, list_templates",
-                action
+                "Unknown action: {action}. Use: render, list_templates"
             ))),
         }
     }

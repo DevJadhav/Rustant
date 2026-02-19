@@ -214,21 +214,21 @@ impl SystemMonitorTool {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ToolError::ExecutionFailed {
                 name: "system_monitor".to_string(),
-                message: format!("Failed to create state dir: {}", e),
+                message: format!("Failed to create state dir: {e}"),
             })?;
         }
         let json = serde_json::to_string_pretty(state).map_err(|e| ToolError::ExecutionFailed {
             name: "system_monitor".to_string(),
-            message: format!("Failed to serialize state: {}", e),
+            message: format!("Failed to serialize state: {e}"),
         })?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, &json).map_err(|e| ToolError::ExecutionFailed {
             name: "system_monitor".to_string(),
-            message: format!("Failed to write state: {}", e),
+            message: format!("Failed to write state: {e}"),
         })?;
         std::fs::rename(&tmp, &path).map_err(|e| ToolError::ExecutionFailed {
             name: "system_monitor".to_string(),
-            message: format!("Failed to rename state file: {}", e),
+            message: format!("Failed to rename state file: {e}"),
         })?;
         Ok(())
     }
@@ -260,8 +260,7 @@ impl SystemMonitorTool {
             Some(t) => t,
             None => {
                 return Ok(ToolOutput::text(format!(
-                    "Invalid service_type: '{}'. Use: api, database, cache, queue, frontend, worker, gateway",
-                    type_str
+                    "Invalid service_type: '{type_str}'. Use: api, database, cache, queue, frontend, worker, gateway"
                 )));
             }
         };
@@ -299,8 +298,7 @@ impl SystemMonitorTool {
 
         self.save_state(&state)?;
         Ok(ToolOutput::text(format!(
-            "Added service '{}' (#{}) [{}] at {}",
-            name, id, type_str, url
+            "Added service '{name}' (#{id}) [{type_str}] at {url}"
         )))
     }
 
@@ -327,7 +325,7 @@ impl SystemMonitorTool {
                         output
                             .push_str(&format!("  -> [{}] {} #{}\n", dep_marker, dep.name, dep.id));
                     } else {
-                        output.push_str(&format!("  -> [?] unknown #{}\n", dep_id));
+                        output.push_str(&format!("  -> [?] unknown #{dep_id}\n"));
                     }
                 }
             }
@@ -352,14 +350,14 @@ impl SystemMonitorTool {
             .build()
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "system_monitor".to_string(),
-                message: format!("Failed to create HTTP client: {}", e),
+                message: format!("Failed to create HTTP client: {e}"),
             })?;
 
         let indices: Vec<usize> = if let Some(sid) = target_id {
             match state.services.iter().position(|s| s.id == sid) {
                 Some(idx) => vec![idx],
                 None => {
-                    return Ok(ToolOutput::text(format!("Service #{} not found.", sid)));
+                    return Ok(ToolOutput::text(format!("Service #{sid} not found.")));
                 }
             }
         } else {
@@ -383,12 +381,12 @@ impl SystemMonitorTool {
                     if (200..300).contains(&status_code) {
                         (
                             ServiceStatus::Healthy,
-                            format!("HTTP {} ({}ms)", status_code, elapsed_ms),
+                            format!("HTTP {status_code} ({elapsed_ms}ms)"),
                         )
                     } else {
                         (
                             ServiceStatus::Degraded,
-                            format!("HTTP {} ({}ms)", status_code, elapsed_ms),
+                            format!("HTTP {status_code} ({elapsed_ms}ms)"),
                         )
                     }
                 }
@@ -398,7 +396,7 @@ impl SystemMonitorTool {
                     } else if e.is_connect() {
                         "connection refused".to_string()
                     } else {
-                        format!("{}", e)
+                        format!("{e}")
                     };
                     (ServiceStatus::Down, msg)
                 }
@@ -444,8 +442,7 @@ impl SystemMonitorTool {
             Some(s) => s,
             None => {
                 return Ok(ToolOutput::text(format!(
-                    "Invalid severity: '{}'. Use: low, medium, high, critical",
-                    severity_str
+                    "Invalid severity: '{severity_str}'. Use: low, medium, high, critical"
                 )));
             }
         };
@@ -488,8 +485,7 @@ impl SystemMonitorTool {
 
         self.save_state(&state)?;
         Ok(ToolOutput::text(format!(
-            "Incident #{} logged: '{}' [{}] - Status: Investigating",
-            id, title, severity_str
+            "Incident #{id} logged: '{title}' [{severity_str}] - Status: Investigating"
         )))
     }
 
@@ -518,7 +514,7 @@ impl SystemMonitorTool {
         if !severity_count.is_empty() {
             output.push_str("Severity breakdown:\n");
             for (sev, count) in &severity_count {
-                output.push_str(&format!("  {}: {}\n", sev, count));
+                output.push_str(&format!("  {sev}: {count}\n"));
             }
             output.push('\n');
         }
@@ -534,7 +530,7 @@ impl SystemMonitorTool {
                     .find(|s| s.id == *sid)
                     .map(|s| s.name.as_str())
                     .unwrap_or("unknown");
-                output.push_str(&format!("  {} (#{}) - {} incidents\n", name, sid, count));
+                output.push_str(&format!("  {name} (#{sid}) - {count} incidents\n"));
             }
             output.push('\n');
         }
@@ -561,8 +557,7 @@ impl SystemMonitorTool {
             Some(s) => s,
             None => {
                 return Ok(ToolOutput::text(format!(
-                    "Service #{} not found.",
-                    service_id
+                    "Service #{service_id} not found."
                 )));
             }
         };
@@ -591,7 +586,7 @@ impl SystemMonitorTool {
         output.push_str(&format!("URL: {}\n", service.url));
         output.push_str(&format!("Status: {}\n", service.status));
         if let Some(ref ep) = service.health_endpoint {
-            output.push_str(&format!("Health endpoint: {}\n", ep));
+            output.push_str(&format!("Health endpoint: {ep}\n"));
         }
 
         if !dep_names.is_empty() {
@@ -633,8 +628,7 @@ impl SystemMonitorTool {
 
         if !state.services.iter().any(|s| s.id == service_id) {
             return Ok(ToolOutput::text(format!(
-                "Service #{} not found.",
-                service_id
+                "Service #{service_id} not found."
             )));
         }
 
@@ -666,8 +660,7 @@ impl SystemMonitorTool {
 
         let mut output = String::from("Impact Analysis\n===============\n\n");
         output.push_str(&format!(
-            "If '{}' (#{}) goes down:\n\n",
-            source_name, service_id
+            "If '{source_name}' (#{service_id}) goes down:\n\n"
         ));
 
         if impacted.is_empty() {
@@ -733,7 +726,7 @@ impl SystemMonitorTool {
                 .unwrap_or_default();
             let rt = svc
                 .response_time_ms
-                .map(|ms| format!(" [{}ms]", ms))
+                .map(|ms| format!(" [{ms}ms]"))
                 .unwrap_or_default();
             output.push_str(&format!(
                 "  #{} {} [{}] ({}) - {}{}{}\n",
@@ -828,8 +821,7 @@ impl Tool for SystemMonitorTool {
             "impact_analysis" => self.action_impact_analysis(&args),
             "list_services" => self.action_list_services(&args),
             _ => Ok(ToolOutput::text(format!(
-                "Unknown action: '{}'. Use: add_service, topology, health_check, log_incident, correlate, generate_runbook, impact_analysis, list_services",
-                action
+                "Unknown action: '{action}'. Use: add_service, topology, health_check, log_incident, correlate, generate_runbook, impact_analysis, list_services"
             ))),
         }
     }

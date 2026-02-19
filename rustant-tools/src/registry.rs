@@ -176,7 +176,7 @@ mod tests {
                     name: "echo".to_string(),
                     reason: "missing 'text' parameter".to_string(),
                 })?;
-            Ok(ToolOutput::text(format!("Echo: {}", text)))
+            Ok(ToolOutput::text(format!("Echo: {text}")))
         }
 
         fn risk_level(&self) -> RiskLevel {
@@ -326,7 +326,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             ToolError::Timeout { name, .. } => assert_eq!(name, "slow"),
-            e => panic!("Expected Timeout error, got: {:?}", e),
+            e => panic!("Expected Timeout error, got: {e:?}"),
         }
     }
 

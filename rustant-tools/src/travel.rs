@@ -151,8 +151,7 @@ impl Tool for TravelTool {
                 });
                 self.save_state(&state)?;
                 Ok(ToolOutput::text(format!(
-                    "Created itinerary #{}: '{}' to {}",
-                    id, name, dest
+                    "Created itinerary #{id}: '{name}' to {dest}"
                 )))
             }
             "add_segment" => {
@@ -176,11 +175,10 @@ impl Tool for TravelTool {
                     let itin_name = itin.name.clone();
                     self.save_state(&state)?;
                     Ok(ToolOutput::text(format!(
-                        "Added segment to '{}': {} -> {}",
-                        itin_name, from, to
+                        "Added segment to '{itin_name}': {from} -> {to}"
                     )))
                 } else {
-                    Ok(ToolOutput::text(format!("Itinerary #{} not found.", id)))
+                    Ok(ToolOutput::text(format!("Itinerary #{id} not found.")))
                 }
             }
             "list" => {
@@ -217,18 +215,18 @@ impl Tool for TravelTool {
                     .parse()
                     .map_err(|_| ToolError::ExecutionFailed {
                         name: "travel".to_string(),
-                        message: format!("Invalid timezone: {}", from_tz_str),
+                        message: format!("Invalid timezone: {from_tz_str}"),
                     })?;
                 let to_tz: Tz = to_tz_str.parse().map_err(|_| ToolError::ExecutionFailed {
                     name: "travel".to_string(),
-                    message: format!("Invalid timezone: {}", to_tz_str),
+                    message: format!("Invalid timezone: {to_tz_str}"),
                 })?;
 
                 let naive = NaiveDateTime::parse_from_str(time_str, "%Y-%m-%d %H:%M")
                     .or_else(|_| NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M"))
                     .map_err(|_| ToolError::ExecutionFailed {
                         name: "travel".to_string(),
-                        message: format!("Invalid time format: {}. Use YYYY-MM-DD HH:MM", time_str),
+                        message: format!("Invalid time format: {time_str}. Use YYYY-MM-DD HH:MM"),
                     })?;
 
                 let from_dt = naive.and_local_timezone(from_tz).single().ok_or_else(|| {
@@ -283,10 +281,10 @@ impl Tool for TravelTool {
                         itin_name
                     )))
                 } else {
-                    Ok(ToolOutput::text(format!("Itinerary #{} not found.", id)))
+                    Ok(ToolOutput::text(format!("Itinerary #{id} not found.")))
                 }
             }
-            _ => Ok(ToolOutput::text(format!("Unknown action: {}.", action))),
+            _ => Ok(ToolOutput::text(format!("Unknown action: {action}."))),
         }
     }
 }

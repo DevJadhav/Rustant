@@ -38,7 +38,7 @@ fn browser_err(name: &str, e: impl std::fmt::Display) -> ToolError {
 fn missing_arg(tool: &str, param: &str) -> ToolError {
     ToolError::InvalidArguments {
         name: tool.to_string(),
-        reason: format!("missing required '{}' parameter", param),
+        reason: format!("missing required '{param}' parameter"),
     }
 }
 
@@ -85,7 +85,7 @@ impl Tool for BrowserNavigateTool {
             .navigate(url)
             .await
             .map_err(|e| browser_err("browser_navigate", e))?;
-        Ok(ToolOutput::text(format!("Navigated to {}", url)))
+        Ok(ToolOutput::text(format!("Navigated to {url}")))
     }
     fn risk_level(&self) -> RiskLevel {
         RiskLevel::Write
@@ -237,7 +237,7 @@ impl Tool for BrowserClickTool {
             .click(selector)
             .await
             .map_err(|e| browser_err("browser_click", e))?;
-        Ok(ToolOutput::text(format!("Clicked '{}'", selector)))
+        Ok(ToolOutput::text(format!("Clicked '{selector}'")))
     }
     fn risk_level(&self) -> RiskLevel {
         RiskLevel::Write
@@ -286,8 +286,7 @@ impl Tool for BrowserTypeTool {
             .await
             .map_err(|e| browser_err("browser_type", e))?;
         Ok(ToolOutput::text(format!(
-            "Typed '{}' into '{}'",
-            text, selector
+            "Typed '{text}' into '{selector}'"
         )))
     }
     fn risk_level(&self) -> RiskLevel {
@@ -337,8 +336,7 @@ impl Tool for BrowserFillTool {
             .await
             .map_err(|e| browser_err("browser_fill", e))?;
         Ok(ToolOutput::text(format!(
-            "Filled '{}' with '{}'",
-            selector, value
+            "Filled '{selector}' with '{value}'"
         )))
     }
     fn risk_level(&self) -> RiskLevel {
@@ -388,8 +386,7 @@ impl Tool for BrowserSelectTool {
             .await
             .map_err(|e| browser_err("browser_select", e))?;
         Ok(ToolOutput::text(format!(
-            "Selected '{}' in '{}'",
-            value, selector
+            "Selected '{value}' in '{selector}'"
         )))
     }
     fn risk_level(&self) -> RiskLevel {
@@ -433,7 +430,7 @@ impl Tool for BrowserScrollTool {
             .scroll(x, y)
             .await
             .map_err(|e| browser_err("browser_scroll", e))?;
-        Ok(ToolOutput::text(format!("Scrolled by ({}, {})", x, y)))
+        Ok(ToolOutput::text(format!("Scrolled by ({x}, {y})")))
     }
     fn risk_level(&self) -> RiskLevel {
         RiskLevel::Write
@@ -477,7 +474,7 @@ impl Tool for BrowserHoverTool {
             .hover(selector)
             .await
             .map_err(|e| browser_err("browser_hover", e))?;
-        Ok(ToolOutput::text(format!("Hovered over '{}'", selector)))
+        Ok(ToolOutput::text(format!("Hovered over '{selector}'")))
     }
     fn risk_level(&self) -> RiskLevel {
         RiskLevel::Write
@@ -521,7 +518,7 @@ impl Tool for BrowserPressKeyTool {
             .press_key(key)
             .await
             .map_err(|e| browser_err("browser_press_key", e))?;
-        Ok(ToolOutput::text(format!("Pressed key '{}'", key)))
+        Ok(ToolOutput::text(format!("Pressed key '{key}'")))
     }
     fn risk_level(&self) -> RiskLevel {
         RiskLevel::Write
@@ -799,7 +796,7 @@ impl Tool for BrowserWaitTool {
             .wait_for_selector(selector, timeout_ms)
             .await
             .map_err(|e| browser_err("browser_wait", e))?;
-        Ok(ToolOutput::text(format!("Element '{}' found", selector)))
+        Ok(ToolOutput::text(format!("Element '{selector}' found")))
     }
     fn risk_level(&self) -> RiskLevel {
         RiskLevel::ReadOnly
@@ -851,8 +848,7 @@ impl Tool for BrowserFileUploadTool {
             .await
             .map_err(|e| browser_err("browser_file_upload", e))?;
         Ok(ToolOutput::text(format!(
-            "Uploaded '{}' to '{}'",
-            path, selector
+            "Uploaded '{path}' to '{selector}'"
         )))
     }
     fn risk_level(&self) -> RiskLevel {
@@ -898,8 +894,7 @@ impl Tool for BrowserDownloadTool {
             .await
             .map_err(|e| browser_err("browser_download", e))?;
         Ok(ToolOutput::text(format!(
-            "Download triggered via '{}'",
-            selector
+            "Download triggered via '{selector}'"
         )))
     }
     fn risk_level(&self) -> RiskLevel {
@@ -984,8 +979,7 @@ impl Tool for BrowserNewTabTool {
             .await
             .map_err(|e| browser_err("browser_new_tab", e))?;
         Ok(ToolOutput::text(format!(
-            "Opened new tab (id: {}) at {}",
-            tab_id, url
+            "Opened new tab (id: {tab_id}) at {url}"
         )))
     }
     fn risk_level(&self) -> RiskLevel {
@@ -1074,7 +1068,7 @@ impl Tool for BrowserSwitchTabTool {
             .switch_tab(tab_id)
             .await
             .map_err(|e| browser_err("browser_switch_tab", e))?;
-        Ok(ToolOutput::text(format!("Switched to tab {}", tab_id)))
+        Ok(ToolOutput::text(format!("Switched to tab {tab_id}")))
     }
     fn risk_level(&self) -> RiskLevel {
         RiskLevel::ReadOnly
@@ -1118,7 +1112,7 @@ impl Tool for BrowserCloseTabTool {
             .close_tab(tab_id)
             .await
             .map_err(|e| browser_err("browser_close_tab", e))?;
-        Ok(ToolOutput::text(format!("Closed tab {}", tab_id)))
+        Ok(ToolOutput::text(format!("Closed tab {tab_id}")))
     }
     fn risk_level(&self) -> RiskLevel {
         RiskLevel::Write

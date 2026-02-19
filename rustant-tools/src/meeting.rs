@@ -150,7 +150,7 @@ pub async fn stop_recording(pid: u32) -> Result<(), String> {
 /// Transcribe a WAV file, chunking if necessary for the Whisper API size limit.
 pub async fn transcribe_audio_file(audio_path: &str, api_key: &str) -> Result<String, String> {
     let wav_data = std::fs::read(audio_path)
-        .map_err(|e| format!("Failed to read audio file '{}': {e}", audio_path))?;
+        .map_err(|e| format!("Failed to read audio file '{audio_path}': {e}"))?;
 
     let chunk =
         audio_convert::decode_wav(&wav_data).map_err(|e| format!("Failed to decode WAV: {e}"))?;
@@ -843,8 +843,7 @@ impl Tool for MacosMeetingRecorderTool {
             other => Err(ToolError::InvalidArguments {
                 name: "macos_meeting_recorder".to_string(),
                 reason: format!(
-                    "unknown action '{}'. Valid: detect_meeting, record, record_and_transcribe, stop, transcribe, summarize_to_notes, status",
-                    other
+                    "unknown action '{other}'. Valid: detect_meeting, record, record_and_transcribe, stop, transcribe, summarize_to_notes, status"
                 ),
             }),
         }

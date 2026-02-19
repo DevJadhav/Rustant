@@ -35,6 +35,8 @@ zip = { workspace = true }
 handlebars = { workspace = true }
 genpdf = { workspace = true }
 chrono-tz = { workspace = true }
+rusqlite = { workspace = true }
+libc = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

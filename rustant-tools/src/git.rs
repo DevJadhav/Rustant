@@ -25,7 +25,7 @@ impl GitStatusTool {
             .await
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "git".into(),
-                message: format!("Failed to run git: {}", e),
+                message: format!("Failed to run git: {e}"),
             })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -100,7 +100,7 @@ impl GitDiffTool {
             .await
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "git_diff".into(),
-                message: format!("Failed to run git: {}", e),
+                message: format!("Failed to run git: {e}"),
             })?;
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -152,7 +152,7 @@ impl Tool for GitDiffTool {
 
         let output = if diff.trim().is_empty() {
             let scope = if staged { "staged" } else { "unstaged" };
-            format!("No {} changes", scope)
+            format!("No {scope} changes")
         } else {
             diff
         };
@@ -183,7 +183,7 @@ impl GitCommitTool {
             .await
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "git_commit".into(),
-                message: format!("Failed to run git: {}", e),
+                message: format!("Failed to run git: {e}"),
             })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -388,7 +388,7 @@ mod tests {
                 assert_eq!(name, "git_commit");
                 assert!(reason.contains("message"));
             }
-            e => panic!("Expected InvalidArguments, got: {:?}", e),
+            e => panic!("Expected InvalidArguments, got: {e:?}"),
         }
     }
 

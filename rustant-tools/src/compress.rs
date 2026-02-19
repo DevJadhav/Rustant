@@ -75,7 +75,7 @@ impl Tool for CompressTool {
                 let file = std::fs::File::create(&archive_path).map_err(|e| {
                     ToolError::ExecutionFailed {
                         name: "compress".into(),
-                        message: format!("Failed to create archive: {}", e),
+                        message: format!("Failed to create archive: {e}"),
                     }
                 })?;
                 let mut zip = zip::ZipWriter::new(file);
@@ -105,19 +105,17 @@ impl Tool for CompressTool {
                 }
                 zip.finish().map_err(|e| ToolError::ExecutionFailed {
                     name: "compress".into(),
-                    message: format!("Failed to finalize archive: {}", e),
+                    message: format!("Failed to finalize archive: {e}"),
                 })?;
 
                 Ok(ToolOutput::text(format!(
-                    "Created {} with {} files.",
-                    archive_str, added
+                    "Created {archive_str} with {added} files."
                 )))
             }
             "extract_zip" => {
                 if !archive_path.exists() {
                     return Ok(ToolOutput::text(format!(
-                        "Archive not found: {}",
-                        archive_str
+                        "Archive not found: {archive_str}"
                     )));
                 }
                 let output_dir = args
@@ -129,12 +127,12 @@ impl Tool for CompressTool {
                 let file =
                     std::fs::File::open(&archive_path).map_err(|e| ToolError::ExecutionFailed {
                         name: "compress".into(),
-                        message: format!("Failed to open archive: {}", e),
+                        message: format!("Failed to open archive: {e}"),
                     })?;
                 let mut archive =
                     zip::ZipArchive::new(file).map_err(|e| ToolError::ExecutionFailed {
                         name: "compress".into(),
-                        message: format!("Invalid zip archive: {}", e),
+                        message: format!("Invalid zip archive: {e}"),
                     })?;
 
                 let mut extracted = 0;
@@ -162,26 +160,24 @@ impl Tool for CompressTool {
                     }
                 }
                 Ok(ToolOutput::text(format!(
-                    "Extracted {} files from {}.",
-                    extracted, archive_str
+                    "Extracted {extracted} files from {archive_str}."
                 )))
             }
             "list_zip" => {
                 if !archive_path.exists() {
                     return Ok(ToolOutput::text(format!(
-                        "Archive not found: {}",
-                        archive_str
+                        "Archive not found: {archive_str}"
                     )));
                 }
                 let file =
                     std::fs::File::open(&archive_path).map_err(|e| ToolError::ExecutionFailed {
                         name: "compress".into(),
-                        message: format!("Failed to open archive: {}", e),
+                        message: format!("Failed to open archive: {e}"),
                     })?;
                 let mut archive =
                     zip::ZipArchive::new(file).map_err(|e| ToolError::ExecutionFailed {
                         name: "compress".into(),
-                        message: format!("Invalid zip archive: {}", e),
+                        message: format!("Invalid zip archive: {e}"),
                     })?;
 
                 let mut output = format!("Archive: {} ({} entries)\n", archive_str, archive.len());
@@ -193,8 +189,7 @@ impl Tool for CompressTool {
                 Ok(ToolOutput::text(output))
             }
             _ => Ok(ToolOutput::text(format!(
-                "Unknown action: {}. Use: create_zip, extract_zip, list_zip",
-                action
+                "Unknown action: {action}. Use: create_zip, extract_zip, list_zip"
             ))),
         }
     }

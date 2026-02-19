@@ -69,7 +69,7 @@ impl Tool for HttpApiTool {
             .build()
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "http_api".into(),
-                message: format!("Failed to create HTTP client: {}", e),
+                message: format!("Failed to create HTTP client: {e}"),
             })?;
 
         let mut builder = match action {
@@ -77,7 +77,7 @@ impl Tool for HttpApiTool {
             "post" => client.post(url),
             "put" => client.put(url),
             "delete" => client.delete(url),
-            _ => return Ok(ToolOutput::text(format!("Unknown method: {}", action))),
+            _ => return Ok(ToolOutput::text(format!("Unknown method: {action}"))),
         };
 
         // Add custom headers
@@ -101,7 +101,7 @@ impl Tool for HttpApiTool {
             .await
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "http_api".into(),
-                message: format!("HTTP request failed: {}", e),
+                message: format!("HTTP request failed: {e}"),
             })?;
 
         let status = response.status();

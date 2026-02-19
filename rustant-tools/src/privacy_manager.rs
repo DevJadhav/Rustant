@@ -109,21 +109,21 @@ impl PrivacyManagerTool {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ToolError::ExecutionFailed {
                 name: "privacy_manager".to_string(),
-                message: format!("Failed to create dir: {}", e),
+                message: format!("Failed to create dir: {e}"),
             })?;
         }
         let json = serde_json::to_string_pretty(state).map_err(|e| ToolError::ExecutionFailed {
             name: "privacy_manager".to_string(),
-            message: format!("Serialize error: {}", e),
+            message: format!("Serialize error: {e}"),
         })?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, &json).map_err(|e| ToolError::ExecutionFailed {
             name: "privacy_manager".to_string(),
-            message: format!("Write error: {}", e),
+            message: format!("Write error: {e}"),
         })?;
         std::fs::rename(&tmp, &path).map_err(|e| ToolError::ExecutionFailed {
             name: "privacy_manager".to_string(),
-            message: format!("Rename error: {}", e),
+            message: format!("Rename error: {e}"),
         })?;
         Ok(())
     }
@@ -133,14 +133,14 @@ impl PrivacyManagerTool {
     }
 
     /// Recursively compute size and file count for a directory.
-    fn dir_stats(&self, path: &std::path::Path) -> (u64, usize) {
+    fn dir_stats(path: &std::path::Path) -> (u64, usize) {
         let mut total_size: u64 = 0;
         let mut file_count: usize = 0;
         if let Ok(entries) = std::fs::read_dir(path) {
             for entry in entries.flatten() {
                 let entry_path = entry.path();
                 if entry_path.is_dir() {
-                    let (s, c) = self.dir_stats(&entry_path);
+                    let (s, c) = Self::dir_stats(&entry_path);
                     total_size += s;
                     file_count += c;
                 } else if entry_path.is_file()
@@ -193,7 +193,26 @@ impl PrivacyManagerTool {
                     out.push(rel_str);
                 }
                 if entry_path.is_dir() {
-                    self.collect_paths_recursive(base, &entry_path, out);
+                    Self::collect_paths_recursive_inner(base, &entry_path, out);
+                }
+            }
+        }
+    }
+
+    fn collect_paths_recursive_inner(
+        base: &std::path::Path,
+        current: &std::path::Path,
+        out: &mut Vec<String>,
+    ) {
+        if let Ok(entries) = std::fs::read_dir(current) {
+            for entry in entries.flatten() {
+                let entry_path = entry.path();
+                if let Ok(rel) = entry_path.strip_prefix(base) {
+                    let rel_str = rel.to_string_lossy().to_string();
+                    out.push(rel_str);
+                }
+                if entry_path.is_dir() {
+                    Self::collect_paths_recursive_inner(base, &entry_path, out);
                 }
             }
         }
@@ -217,7 +236,7 @@ impl PrivacyManagerTool {
 
     fn format_size(bytes: u64) -> String {
         if bytes < 1024 {
-            format!("{} B", bytes)
+            format!("{bytes} B")
         } else if bytes < 1024 * 1024 {
             format!("{:.1} KB", bytes as f64 / 1024.0)
         } else {
@@ -273,8 +292,7 @@ impl PrivacyManagerTool {
             Some(bt) => bt,
             None => {
                 return Ok(ToolOutput::text(format!(
-                    "Error: invalid boundary_type '{}'. Use: local_only, encrypted, shareable",
-                    boundary_type_str
+                    "Error: invalid boundary_type '{boundary_type_str}'. Use: local_only, encrypted, shareable"
                 )));
             }
         };
@@ -341,7 +359,7 @@ impl PrivacyManagerTool {
                 b.boundary_type.as_str()
             ));
             for p in &b.paths {
-                lines.push(format!("       path: {}", p));
+                lines.push(format!("       path: {p}"));
             }
             if !b.description.is_empty() {
                 lines.push(format!("       desc: {}", b.description));
@@ -387,7 +405,7 @@ impl PrivacyManagerTool {
         lines.push(format!("Access log ({} entries shown):", filtered.len()));
         for entry in &filtered {
             let boundary_note = if let Some(bid) = entry.boundary_id {
-                format!(" [boundary #{}]", bid)
+                format!(" [boundary #{bid}]")
             } else {
                 String::new()
             };
@@ -443,16 +461,16 @@ impl PrivacyManagerTool {
 
         let mut lines = Vec::new();
         lines.push("Compliance Check Report".to_string());
-        lines.push(format!("  Total directories: {}", total));
-        lines.push(format!("  Covered by boundaries: {}", covered_count));
-        lines.push(format!("  Coverage: {:.0}%", coverage_pct));
+        lines.push(format!("  Total directories: {total}"));
+        lines.push(format!("  Covered by boundaries: {covered_count}"));
+        lines.push(format!("  Coverage: {coverage_pct:.0}%"));
         lines.push(format!("  Total paths scanned: {}", all_paths.len()));
 
         if !uncovered_dirs.is_empty() {
             lines.push(String::new());
             lines.push("  Uncovered directories:".to_string());
             for d in &uncovered_dirs {
-                lines.push(format!("    - {}", d));
+                lines.push(format!("    - {d}"));
             }
             lines.push(String::new());
             lines
@@ -516,7 +534,7 @@ impl PrivacyManagerTool {
         let export_json =
             serde_json::to_string_pretty(&export).map_err(|e| ToolError::ExecutionFailed {
                 name: "privacy_manager".to_string(),
-                message: format!("Failed to serialize export: {}", e),
+                message: format!("Failed to serialize export: {e}"),
             })?;
 
         // If small enough, return inline; otherwise write to file
@@ -531,7 +549,7 @@ impl PrivacyManagerTool {
             let output_path = self.workspace.join(output_name);
             std::fs::write(&output_path, &export_json).map_err(|e| ToolError::ExecutionFailed {
                 name: "privacy_manager".to_string(),
-                message: format!("Failed to write export file: {}", e),
+                message: format!("Failed to write export file: {e}"),
             })?;
             Ok(ToolOutput::text(format!(
                 "Exported {} domain(s) to {}. Size: {}",
@@ -575,7 +593,7 @@ impl PrivacyManagerTool {
                         std::fs::remove_dir_all(&entry_path).map_err(|e| {
                             ToolError::ExecutionFailed {
                                 name: "privacy_manager".to_string(),
-                                message: format!("Failed to remove dir {}: {}", dir_name, e),
+                                message: format!("Failed to remove dir {dir_name}: {e}"),
                             }
                         })?;
                         deleted_total += count + 1; // +1 for the dir itself
@@ -586,7 +604,7 @@ impl PrivacyManagerTool {
                         std::fs::remove_file(&entry_path).map_err(|e| {
                             ToolError::ExecutionFailed {
                                 name: "privacy_manager".to_string(),
-                                message: format!("Failed to remove file {}: {}", fname, e),
+                                message: format!("Failed to remove file {fname}: {e}"),
                             }
                         })?;
                         deleted_total += 1;
@@ -606,18 +624,16 @@ impl PrivacyManagerTool {
             let domain_dir = rustant_dir.join(domain);
             if !domain_dir.exists() || !domain_dir.is_dir() {
                 return Ok(ToolOutput::text(format!(
-                    "Domain '{}' not found in .rustant/.",
-                    domain
+                    "Domain '{domain}' not found in .rustant/."
                 )));
             }
             let count = self.delete_dir_contents(&domain_dir)?;
             std::fs::remove_dir_all(&domain_dir).map_err(|e| ToolError::ExecutionFailed {
                 name: "privacy_manager".to_string(),
-                message: format!("Failed to remove domain dir: {}", e),
+                message: format!("Failed to remove domain dir: {e}"),
             })?;
             Ok(ToolOutput::text(format!(
-                "Deleted domain '{}': removed {} item(s).",
-                domain, count
+                "Deleted domain '{domain}': removed {count} item(s)."
             )))
         }
     }
@@ -651,7 +667,7 @@ impl PrivacyManagerTool {
 
         let content = std::fs::read(&file_path).map_err(|e| ToolError::ExecutionFailed {
             name: "privacy_manager".to_string(),
-            message: format!("Failed to read file: {}", e),
+            message: format!("Failed to read file: {e}"),
         })?;
 
         let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &content);
@@ -678,7 +694,7 @@ impl PrivacyManagerTool {
         std::fs::write(&encrypted_path, output_content.as_bytes()).map_err(|e| {
             ToolError::ExecutionFailed {
                 name: "privacy_manager".to_string(),
-                message: format!("Failed to write encrypted file: {}", e),
+                message: format!("Failed to write encrypted file: {e}"),
             }
         })?;
 
@@ -699,7 +715,7 @@ impl PrivacyManagerTool {
             ));
         }
 
-        let (total_size, total_files) = self.dir_stats(&rustant_dir);
+        let (total_size, total_files) = Self::dir_stats(&rustant_dir);
         let domains = self.list_domains();
 
         let mut lines = Vec::new();
@@ -719,7 +735,7 @@ impl PrivacyManagerTool {
             lines.push("Domain breakdown:".to_string());
             for domain in &domains {
                 let domain_dir = rustant_dir.join(domain);
-                let (size, count) = self.dir_stats(&domain_dir);
+                let (size, count) = Self::dir_stats(&domain_dir);
                 let covered = self
                     .path_covered_by_boundary(domain, &state.boundaries)
                     .is_some();
@@ -752,7 +768,7 @@ impl PrivacyManagerTool {
             (covered_count as f64 / domains.len() as f64) * 100.0
         };
         lines.push(String::new());
-        lines.push(format!("Boundary coverage: {:.0}%", coverage_pct));
+        lines.push(format!("Boundary coverage: {coverage_pct:.0}%"));
         lines.push(format!("Boundaries defined: {}", state.boundaries.len()));
 
         // Access log stats
@@ -779,8 +795,7 @@ impl PrivacyManagerTool {
             lines.push("Recommendations:".to_string());
             for d in &uncovered {
                 lines.push(format!(
-                    "  - Create a boundary for '{}' to control data access",
-                    d
+                    "  - Create a boundary for '{d}' to control data access"
                 ));
             }
         }
@@ -880,9 +895,8 @@ impl Tool for PrivacyManagerTool {
             "encrypt_store" => self.action_encrypt_store(&args),
             "privacy_report" => self.action_privacy_report(),
             _ => Ok(ToolOutput::text(format!(
-                "Unknown action: '{}'. Use: set_boundary, list_boundaries, audit_access, \
-                 compliance_check, export_data, delete_data, encrypt_store, privacy_report",
-                action
+                "Unknown action: '{action}'. Use: set_boundary, list_boundaries, audit_access, \
+                 compliance_check, export_data, delete_data, encrypt_store, privacy_report"
             ))),
         }
     }
@@ -1134,8 +1148,8 @@ mod tests {
         for i in 0..7 {
             state.access_log.push(AccessLogEntry {
                 timestamp: Utc::now(),
-                tool_name: format!("tool_{}", i),
-                data_accessed: format!("path_{}", i),
+                tool_name: format!("tool_{i}"),
+                data_accessed: format!("path_{i}"),
                 purpose: "test".to_string(),
                 boundary_id: None,
             });

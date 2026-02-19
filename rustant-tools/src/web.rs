@@ -87,7 +87,7 @@ impl Tool for WebSearchTool {
             .build()
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "web_search".into(),
-                message: format!("Failed to create HTTP client: {}", e),
+                message: format!("Failed to create HTTP client: {e}"),
             })?;
 
         // Use DuckDuckGo instant answer API
@@ -102,7 +102,7 @@ impl Tool for WebSearchTool {
             .await
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "web_search".into(),
-                message: format!("Search request failed: {}", e),
+                message: format!("Search request failed: {e}"),
             })?;
 
         let body: serde_json::Value =
@@ -111,7 +111,7 @@ impl Tool for WebSearchTool {
                 .await
                 .map_err(|e| ToolError::ExecutionFailed {
                     name: "web_search".into(),
-                    message: format!("Failed to parse search response: {}", e),
+                    message: format!("Failed to parse search response: {e}"),
                 })?;
 
         let mut results = Vec::new();
@@ -128,7 +128,7 @@ impl Tool for WebSearchTool {
                 .get("AbstractURL")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            results.push(format!("[{}] {}\n  URL: {}", source, abstract_text, url));
+            results.push(format!("[{source}] {abstract_text}\n  URL: {url}"));
         }
 
         // Extract related topics
@@ -139,7 +139,7 @@ impl Tool for WebSearchTool {
             {
                 if let Some(text) = topic.get("Text").and_then(|v| v.as_str()) {
                     let url = topic.get("FirstURL").and_then(|v| v.as_str()).unwrap_or("");
-                    results.push(format!("- {}\n  URL: {}", text, url));
+                    results.push(format!("- {text}\n  URL: {url}"));
                 }
             }
         }
@@ -155,15 +155,14 @@ impl Tool for WebSearchTool {
                         .get("FirstURL")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
-                    results.push(format!("- {}\n  URL: {}", text, url));
+                    results.push(format!("- {text}\n  URL: {url}"));
                 }
             }
         }
 
         let content = if results.is_empty() {
             format!(
-                "No instant answers found for \"{}\". Try refining your query or use web_fetch with a specific URL.",
-                query
+                "No instant answers found for \"{query}\". Try refining your query or use web_fetch with a specific URL."
             )
         } else {
             format!(
@@ -260,7 +259,7 @@ impl Tool for WebFetchTool {
             .build()
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "web_fetch".into(),
-                message: format!("Failed to create HTTP client: {}", e),
+                message: format!("Failed to create HTTP client: {e}"),
             })?;
 
         let response = client
@@ -269,15 +268,12 @@ impl Tool for WebFetchTool {
             .await
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "web_fetch".into(),
-                message: format!("Fetch failed: {}", e),
+                message: format!("Fetch failed: {e}"),
             })?;
 
         let status = response.status();
         if !status.is_success() {
-            return Ok(ToolOutput::text(format!(
-                "HTTP {} for URL: {}",
-                status, url
-            )));
+            return Ok(ToolOutput::text(format!("HTTP {status} for URL: {url}")));
         }
 
         let content_type = response
@@ -292,7 +288,7 @@ impl Tool for WebFetchTool {
             .await
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "web_fetch".into(),
-                message: format!("Failed to read response body: {}", e),
+                message: format!("Failed to read response body: {e}"),
             })?;
 
         // Extract text from HTML
@@ -315,7 +311,7 @@ impl Tool for WebFetchTool {
             text
         };
 
-        let content = format!("Content from {}:\n\n{}", url, text);
+        let content = format!("Content from {url}:\n\n{text}");
 
         Ok(ToolOutput::text(content))
     }
@@ -440,7 +436,7 @@ impl DocumentReadTool {
             .canonicalize()
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "document_read".into(),
-                message: format!("Path resolution failed: {}", e),
+                message: format!("Path resolution failed: {e}"),
             })?;
 
         // Allow reading outside workspace for documents (e.g., ~/Downloads/*.pdf)
@@ -448,7 +444,7 @@ impl DocumentReadTool {
         if !canonical.exists() {
             return Err(ToolError::ExecutionFailed {
                 name: "document_read".into(),
-                message: format!("File not found: {}", path),
+                message: format!("File not found: {path}"),
             });
         }
 
@@ -553,7 +549,7 @@ impl Tool for DocumentReadTool {
         // Read file
         let content = std::fs::read_to_string(&path).map_err(|e| ToolError::ExecutionFailed {
             name: "document_read".into(),
-            message: format!("Failed to read file: {}", e),
+            message: format!("Failed to read file: {e}"),
         })?;
 
         // For HTML files, extract text
@@ -769,11 +765,10 @@ mod tests {
             ToolError::InvalidArguments { reason, .. } => {
                 assert!(
                     reason.contains("http://") || reason.contains("https://"),
-                    "Error should mention valid protocols, got: {}",
-                    reason
+                    "Error should mention valid protocols, got: {reason}"
                 );
             }
-            e => panic!("Expected InvalidArguments, got: {:?}", e),
+            e => panic!("Expected InvalidArguments, got: {e:?}"),
         }
     }
 
@@ -814,7 +809,7 @@ mod tests {
                 assert_eq!(name, "web_fetch");
                 assert!(reason.contains("url"));
             }
-            e => panic!("Expected InvalidArguments, got: {:?}", e),
+            e => panic!("Expected InvalidArguments, got: {e:?}"),
         }
     }
 

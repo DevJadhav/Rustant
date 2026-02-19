@@ -126,8 +126,7 @@ impl Tool for FileOrganizerTool {
                         }
                     }
                     output.push_str(&format!(
-                        "\nMoved {} files into extension-based folders.",
-                        moved
+                        "\nMoved {moved} files into extension-based folders."
                     ));
                 }
                 Ok(ToolOutput::text(output))
@@ -153,8 +152,7 @@ impl Tool for FileOrganizerTool {
                 let dups: Vec<_> = hashes.values().filter(|v| v.len() > 1).collect();
                 if dups.is_empty() {
                     return Ok(ToolOutput::text(format!(
-                        "No duplicates found among {} files.",
-                        file_count
+                        "No duplicates found among {file_count} files."
                     )));
                 }
                 let mut output = format!(
@@ -199,10 +197,7 @@ impl Tool for FileOrganizerTool {
                     }
                 }
                 if matches.is_empty() {
-                    return Ok(ToolOutput::text(format!(
-                        "No files matching '{}'.",
-                        pattern
-                    )));
+                    return Ok(ToolOutput::text(format!("No files matching '{pattern}'.")));
                 }
                 let mut output = format!("Found {} files matching '{}':\n", matches.len(), pattern);
                 for path in &matches {
@@ -218,7 +213,7 @@ impl Tool for FileOrganizerTool {
                             deleted += 1;
                         }
                     }
-                    output.push_str(&format!("\nDeleted {} files.", deleted));
+                    output.push_str(&format!("\nDeleted {deleted} files."));
                 }
                 Ok(ToolOutput::text(output))
             }
@@ -264,8 +259,7 @@ impl Tool for FileOrganizerTool {
                 Ok(ToolOutput::text(output))
             }
             _ => Ok(ToolOutput::text(format!(
-                "Unknown action: {}. Use: organize, dedup, cleanup, preview",
-                action
+                "Unknown action: {action}. Use: organize, dedup, cleanup, preview"
             ))),
         }
     }

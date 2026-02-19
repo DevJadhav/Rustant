@@ -213,21 +213,21 @@ impl CareerIntelTool {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ToolError::ExecutionFailed {
                 name: "career_intel".to_string(),
-                message: format!("Failed to create state dir: {}", e),
+                message: format!("Failed to create state dir: {e}"),
             })?;
         }
         let json = serde_json::to_string_pretty(state).map_err(|e| ToolError::ExecutionFailed {
             name: "career_intel".to_string(),
-            message: format!("Failed to serialize state: {}", e),
+            message: format!("Failed to serialize state: {e}"),
         })?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, &json).map_err(|e| ToolError::ExecutionFailed {
             name: "career_intel".to_string(),
-            message: format!("Failed to write state: {}", e),
+            message: format!("Failed to write state: {e}"),
         })?;
         std::fs::rename(&tmp, &path).map_err(|e| ToolError::ExecutionFailed {
             name: "career_intel".to_string(),
-            message: format!("Failed to rename state file: {}", e),
+            message: format!("Failed to rename state file: {e}"),
         })?;
         Ok(())
     }
@@ -326,8 +326,7 @@ impl CareerIntelTool {
             Some(c) => c,
             None => {
                 return Ok(ToolOutput::text(format!(
-                    "Invalid category: '{}'. Use: technical, leadership, publication, talk, certification.",
-                    category_str
+                    "Invalid category: '{category_str}'. Use: technical, leadership, publication, talk, certification."
                 )));
             }
         };
@@ -372,8 +371,7 @@ impl CareerIntelTool {
 
         self.save_state(&state)?;
         Ok(ToolOutput::text(format!(
-            "Achievement #{} logged: '{}'.",
-            id, title
+            "Achievement #{id} logged: '{title}'."
         )))
     }
 
@@ -387,8 +385,7 @@ impl CareerIntelTool {
             Some(t) => t,
             None => {
                 return Ok(ToolOutput::text(format!(
-                    "Invalid item_type: '{}'. Use: project, paper, talk, blog, certification, open_source.",
-                    type_str
+                    "Invalid item_type: '{type_str}'. Use: project, paper, talk, blog, certification, open_source."
                 )));
             }
         };
@@ -433,8 +430,7 @@ impl CareerIntelTool {
 
         self.save_state(&state)?;
         Ok(ToolOutput::text(format!(
-            "Portfolio item #{} added: '{}'.",
-            id, title
+            "Portfolio item #{id} added: '{title}'."
         )))
     }
 
@@ -482,8 +478,7 @@ impl CareerIntelTool {
 
         self.save_state(&state)?;
         Ok(ToolOutput::text(format!(
-            "Network note #{} recorded for '{}'.",
-            id, person_name
+            "Network note #{id} recorded for '{person_name}'."
         )))
     }
 
@@ -508,7 +503,7 @@ impl CareerIntelTool {
                     g.progress_pct, g.title, g.description
                 ));
                 if let Some(ref td) = g.target_date {
-                    prompt.push_str(&format!("  Target: {}\n", td));
+                    prompt.push_str(&format!("  Target: {td}\n"));
                 }
                 for m in &g.milestones {
                     let check = if m.completed { "x" } else { " " };
@@ -582,8 +577,8 @@ impl CareerIntelTool {
         let state = self.load_state();
 
         let mut prompt = String::from("=== Market Scan Context ===\n\n");
-        prompt.push_str(&format!("Target Role: {}\n", role));
-        prompt.push_str(&format!("Industry: {}\n\n", industry));
+        prompt.push_str(&format!("Target Role: {role}\n"));
+        prompt.push_str(&format!("Industry: {industry}\n\n"));
 
         // Include current skills from portfolio and achievements for context
         let mut skills: Vec<String> = Vec::new();
@@ -607,14 +602,13 @@ impl CareerIntelTool {
 
         prompt.push_str("## Instructions\n");
         prompt.push_str(&format!(
-            "Using web_search, research the current market for '{}' roles in the '{}' industry:\n\
+            "Using web_search, research the current market for '{role}' roles in the '{industry}' industry:\n\
              1. In-demand skills and technologies\n\
              2. Salary ranges and compensation trends\n\
              3. Emerging roles and specializations\n\
              4. Key companies hiring\n\
              5. How the user's current skills align with market demand\n\
-             6. Recommended skills to develop\n",
-            role, industry
+             6. Recommended skills to develop\n"
         ));
 
         Ok(ToolOutput::text(prompt))
@@ -635,7 +629,7 @@ impl CareerIntelTool {
                     goal.id, goal.title, goal.status, goal.progress_pct, goal.description
                 );
                 if let Some(ref td) = goal.target_date {
-                    report.push_str(&format!("  Target date: {}\n", td));
+                    report.push_str(&format!("  Target date: {td}\n"));
                 }
                 if !goal.milestones.is_empty() {
                     report.push_str("  Milestones:\n");
@@ -646,7 +640,7 @@ impl CareerIntelTool {
                 }
                 Ok(ToolOutput::text(report))
             } else {
-                Ok(ToolOutput::text(format!("Goal #{} not found.", gid)))
+                Ok(ToolOutput::text(format!("Goal #{gid} not found.")))
             }
         } else {
             // Full progress report
@@ -667,7 +661,7 @@ impl CareerIntelTool {
 
             // Achievement stats
             let achievement_count = state.achievements.len();
-            report.push_str(&format!("\n## Achievements: {} total\n", achievement_count));
+            report.push_str(&format!("\n## Achievements: {achievement_count} total\n"));
             if !state.achievements.is_empty() {
                 // Count by category
                 let mut by_cat: std::collections::HashMap<String, usize> =
@@ -676,13 +670,13 @@ impl CareerIntelTool {
                     *by_cat.entry(a.category.to_string()).or_insert(0) += 1;
                 }
                 for (cat, count) in &by_cat {
-                    report.push_str(&format!("  {}: {}\n", cat, count));
+                    report.push_str(&format!("  {cat}: {count}\n"));
                 }
             }
 
             // Portfolio stats
             let portfolio_count = state.portfolio.len();
-            report.push_str(&format!("\n## Portfolio: {} items\n", portfolio_count));
+            report.push_str(&format!("\n## Portfolio: {portfolio_count} items\n"));
             if !state.portfolio.is_empty() {
                 let mut by_type: std::collections::HashMap<String, usize> =
                     std::collections::HashMap::new();
@@ -690,7 +684,7 @@ impl CareerIntelTool {
                     *by_type.entry(p.item_type.to_string()).or_insert(0) += 1;
                 }
                 for (ptype, count) in &by_type {
-                    report.push_str(&format!("  {}: {}\n", ptype, count));
+                    report.push_str(&format!("  {ptype}: {count}\n"));
                 }
             }
 
@@ -720,7 +714,7 @@ impl CareerIntelTool {
                     g.id, g.status, g.title, g.progress_pct, g.description
                 ));
                 if let Some(ref td) = g.target_date {
-                    prompt.push_str(&format!("  Target: {}\n", td));
+                    prompt.push_str(&format!("  Target: {td}\n"));
                 }
                 for m in &g.milestones {
                     let check = if m.completed { "x" } else { " " };
@@ -778,7 +772,7 @@ impl CareerIntelTool {
                     n.date, n.person_name, n.context, n.notes
                 ));
                 if let Some(ref fu) = n.follow_up {
-                    prompt.push_str(&format!("  Follow-up: {}\n", fu));
+                    prompt.push_str(&format!("  Follow-up: {fu}\n"));
                 }
             }
         }
@@ -900,8 +894,7 @@ impl Tool for CareerIntelTool {
             "progress_report" => self.progress_report(&args),
             "strategy_review" => self.strategy_review(),
             _ => Ok(ToolOutput::text(format!(
-                "Unknown action: '{}'. Use: set_goal, log_achievement, add_portfolio, gap_analysis, market_scan, network_note, progress_report, strategy_review.",
-                action
+                "Unknown action: '{action}'. Use: set_goal, log_achievement, add_portfolio, gap_analysis, market_scan, network_note, progress_report, strategy_review."
             ))),
         }
     }

@@ -122,21 +122,21 @@ impl CodeIntelligenceTool {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ToolError::ExecutionFailed {
                 name: "code_intelligence".to_string(),
-                message: format!("Failed to create cache dir: {}", e),
+                message: format!("Failed to create cache dir: {e}"),
             })?;
         }
         let json = serde_json::to_string_pretty(cache).map_err(|e| ToolError::ExecutionFailed {
             name: "code_intelligence".to_string(),
-            message: format!("Failed to serialize cache: {}", e),
+            message: format!("Failed to serialize cache: {e}"),
         })?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, &json).map_err(|e| ToolError::ExecutionFailed {
             name: "code_intelligence".to_string(),
-            message: format!("Failed to write cache: {}", e),
+            message: format!("Failed to write cache: {e}"),
         })?;
         std::fs::rename(&tmp, &path).map_err(|e| ToolError::ExecutionFailed {
             name: "code_intelligence".to_string(),
-            message: format!("Failed to rename cache file: {}", e),
+            message: format!("Failed to rename cache file: {e}"),
         })?;
         Ok(())
     }
@@ -330,8 +330,7 @@ impl CodeIntelligenceTool {
             if let Some(snapshot) = &cache.last_snapshot {
                 let out = serde_json::to_string_pretty(snapshot).unwrap_or_default();
                 return Ok(ToolOutput::text(format!(
-                    "Architecture snapshot (cached):\n{}",
-                    out
+                    "Architecture snapshot (cached):\n{out}"
                 )));
             }
         }
@@ -491,7 +490,7 @@ impl CodeIntelligenceTool {
         self.save_cache(&cache)?;
 
         let out = serde_json::to_string_pretty(&snapshot).unwrap_or_default();
-        Ok(ToolOutput::text(format!("Architecture snapshot:\n{}", out)))
+        Ok(ToolOutput::text(format!("Architecture snapshot:\n{out}")))
     }
 
     fn detect_patterns(&self, args: &Value) -> Result<ToolOutput, ToolError> {
@@ -1077,8 +1076,7 @@ impl CodeIntelligenceTool {
                                 line_number: start + 1,
                                 category: "long_function".to_string(),
                                 description: format!(
-                                    "Function '{}' is {} lines long (>100)",
-                                    fn_name, length
+                                    "Function '{fn_name}' is {length} lines long (>100)"
                                 ),
                                 severity: "high".to_string(),
                             };
@@ -1115,8 +1113,7 @@ impl CodeIntelligenceTool {
                                     line_number: start + 1,
                                     category: "long_function".to_string(),
                                     description: format!(
-                                        "Function '{}' is {} lines long (>100)",
-                                        fn_name, length
+                                        "Function '{fn_name}' is {length} lines long (>100)"
                                     ),
                                     severity: "high".to_string(),
                                 };
@@ -1140,7 +1137,7 @@ impl CodeIntelligenceTool {
 
         let summary = by_category
             .iter()
-            .map(|(k, v)| format!("  {}: {}", k, v))
+            .map(|(k, v)| format!("  {k}: {v}"))
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -1911,8 +1908,7 @@ impl Tool for CodeIntelligenceTool {
             other => Err(ToolError::InvalidArguments {
                 name: "code_intelligence".to_string(),
                 reason: format!(
-                    "Unknown action '{}'. Valid actions: analyze_architecture, detect_patterns, translate_snippet, compare_implementations, tech_debt_report, api_surface, dependency_map",
-                    other
+                    "Unknown action '{other}'. Valid actions: analyze_architecture, detect_patterns, translate_snippet, compare_implementations, tech_debt_report, api_surface, dependency_map"
                 ),
             }),
         }
@@ -2279,7 +2275,7 @@ mod tests {
                 assert!(reason.contains("Unknown action"));
                 assert!(reason.contains("nonexistent_action"));
             }
-            other => panic!("Expected InvalidArguments, got {:?}", other),
+            other => panic!("Expected InvalidArguments, got {other:?}"),
         }
     }
 }

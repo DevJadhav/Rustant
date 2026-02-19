@@ -86,7 +86,7 @@ impl Tool for CanvasPushTool {
         let ct = ContentType::from_str_loose(content_type_str).ok_or_else(|| {
             ToolError::InvalidArguments {
                 name: "canvas".into(),
-                reason: format!("Unknown content_type: {}", content_type_str),
+                reason: format!("Unknown content_type: {content_type_str}"),
             }
         })?;
 
@@ -99,8 +99,7 @@ impl Tool for CanvasPushTool {
         })?;
 
         Ok(ToolOutput::text(format!(
-            "Content pushed to canvas (id: {})",
-            id
+            "Content pushed to canvas (id: {id})"
         )))
     }
 
@@ -233,7 +232,7 @@ impl Tool for CanvasUpdateTool {
         let ct = ContentType::from_str_loose(content_type_str).ok_or_else(|| {
             ToolError::InvalidArguments {
                 name: "canvas".into(),
-                reason: format!("Unknown content_type: {}", content_type_str),
+                reason: format!("Unknown content_type: {content_type_str}"),
             }
         })?;
 
@@ -245,7 +244,7 @@ impl Tool for CanvasUpdateTool {
             }
         })?;
 
-        Ok(ToolOutput::text(format!("Canvas updated (id: {})", id)))
+        Ok(ToolOutput::text(format!("Canvas updated (id: {id})")))
     }
 
     fn risk_level(&self) -> RiskLevel {
@@ -394,8 +393,7 @@ impl Tool for CanvasInteractTool {
         };
 
         Ok(ToolOutput::text(format!(
-            "Interaction sent: {} on {}",
-            action, selector
+            "Interaction sent: {action} on {selector}"
         )))
     }
 

@@ -20,6 +20,11 @@ enum NodeType {
     Dataset,
     Person,
     Organization,
+    Experiment,
+    Methodology,
+    Result,
+    Hypothesis,
+    Benchmark,
 }
 
 impl NodeType {
@@ -31,6 +36,11 @@ impl NodeType {
             "dataset" => Some(Self::Dataset),
             "person" => Some(Self::Person),
             "organization" => Some(Self::Organization),
+            "experiment" => Some(Self::Experiment),
+            "methodology" => Some(Self::Methodology),
+            "result" => Some(Self::Result),
+            "hypothesis" => Some(Self::Hypothesis),
+            "benchmark" => Some(Self::Benchmark),
             _ => None,
         }
     }
@@ -43,6 +53,11 @@ impl NodeType {
             Self::Dataset => "Dataset",
             Self::Person => "Person",
             Self::Organization => "Organization",
+            Self::Experiment => "Experiment",
+            Self::Methodology => "Methodology",
+            Self::Result => "Result",
+            Self::Hypothesis => "Hypothesis",
+            Self::Benchmark => "Benchmark",
         }
     }
 }
@@ -57,6 +72,11 @@ enum RelationshipType {
     AuthoredBy,
     UsesDataset,
     RelatedTo,
+    Reproduces,
+    Refines,
+    Validates,
+    SupportsHypothesis,
+    RefutesHypothesis,
 }
 
 impl RelationshipType {
@@ -70,6 +90,11 @@ impl RelationshipType {
             "authored_by" => Some(Self::AuthoredBy),
             "uses_dataset" => Some(Self::UsesDataset),
             "related_to" => Some(Self::RelatedTo),
+            "reproduces" => Some(Self::Reproduces),
+            "refines" => Some(Self::Refines),
+            "validates" => Some(Self::Validates),
+            "supports_hypothesis" => Some(Self::SupportsHypothesis),
+            "refutes_hypothesis" => Some(Self::RefutesHypothesis),
             _ => None,
         }
     }
@@ -84,6 +109,11 @@ impl RelationshipType {
             Self::AuthoredBy => "AuthoredBy",
             Self::UsesDataset => "UsesDataset",
             Self::RelatedTo => "RelatedTo",
+            Self::Reproduces => "Reproduces",
+            Self::Refines => "Refines",
+            Self::Validates => "Validates",
+            Self::SupportsHypothesis => "SupportsHypothesis",
+            Self::RefutesHypothesis => "RefutesHypothesis",
         }
     }
 }
@@ -173,21 +203,21 @@ impl KnowledgeGraphTool {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ToolError::ExecutionFailed {
                 name: "knowledge_graph".to_string(),
-                message: format!("Failed to create state dir: {}", e),
+                message: format!("Failed to create state dir: {e}"),
             })?;
         }
         let json = serde_json::to_string_pretty(state).map_err(|e| ToolError::ExecutionFailed {
             name: "knowledge_graph".to_string(),
-            message: format!("Failed to serialize state: {}", e),
+            message: format!("Failed to serialize state: {e}"),
         })?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, &json).map_err(|e| ToolError::ExecutionFailed {
             name: "knowledge_graph".to_string(),
-            message: format!("Failed to write state: {}", e),
+            message: format!("Failed to write state: {e}"),
         })?;
         std::fs::rename(&tmp, &path).map_err(|e| ToolError::ExecutionFailed {
             name: "knowledge_graph".to_string(),
-            message: format!("Failed to rename state file: {}", e),
+            message: format!("Failed to rename state file: {e}"),
         })?;
         Ok(())
     }
@@ -231,7 +261,7 @@ impl Tool for KnowledgeGraphTool {
                 "name": { "type": "string", "description": "Node name" },
                 "node_type": {
                     "type": "string",
-                    "enum": ["paper", "concept", "method", "dataset", "person", "organization"],
+                    "enum": ["paper", "concept", "method", "dataset", "person", "organization", "experiment", "methodology", "result", "hypothesis", "benchmark"],
                     "description": "Type of node"
                 },
                 "description": { "type": "string", "description": "Node description" },
@@ -249,7 +279,7 @@ impl Tool for KnowledgeGraphTool {
                 "target_id": { "type": "string", "description": "Target node ID for edge" },
                 "relationship_type": {
                     "type": "string",
-                    "enum": ["cites", "implements", "extends", "contradicts", "builds_on", "authored_by", "uses_dataset", "related_to"],
+                    "enum": ["cites", "implements", "extends", "contradicts", "builds_on", "authored_by", "uses_dataset", "related_to", "reproduces", "refines", "validates", "supports_hypothesis", "refutes_hypothesis"],
                     "description": "Type of relationship"
                 },
                 "strength": {
@@ -268,7 +298,7 @@ impl Tool for KnowledgeGraphTool {
                 "arxiv_id": { "type": "string", "description": "ArXiv paper ID for import" },
                 "filter_type": {
                     "type": "string",
-                    "enum": ["paper", "concept", "method", "dataset", "person", "organization"],
+                    "enum": ["paper", "concept", "method", "dataset", "person", "organization", "experiment", "methodology", "result", "hypothesis", "benchmark"],
                     "description": "Filter by node type"
                 }
             },
@@ -304,8 +334,7 @@ impl Tool for KnowledgeGraphTool {
                     Some(nt) => nt,
                     None => {
                         return Ok(ToolOutput::text(format!(
-                            "Invalid node_type '{}'. Use: paper, concept, method, dataset, person, organization.",
-                            node_type_str
+                            "Invalid node_type '{node_type_str}'. Use: paper, concept, method, dataset, person, organization, experiment, methodology, result, hypothesis, benchmark."
                         )));
                     }
                 };
@@ -319,8 +348,7 @@ impl Tool for KnowledgeGraphTool {
                 // Check for duplicate id
                 if state.nodes.iter().any(|n| n.id == id) {
                     return Ok(ToolOutput::text(format!(
-                        "Node with id '{}' already exists.",
-                        id
+                        "Node with id '{id}' already exists."
                     )));
                 }
 
@@ -364,10 +392,7 @@ impl Tool for KnowledgeGraphTool {
                 state.next_auto_id += 1;
                 self.save_state(&state)?;
 
-                Ok(ToolOutput::text(format!(
-                    "Added node '{}' (id: {}).",
-                    name, id
-                )))
+                Ok(ToolOutput::text(format!("Added node '{name}' (id: {id}).")))
             }
 
             "get_node" => {
@@ -379,7 +404,7 @@ impl Tool for KnowledgeGraphTool {
                 let node = match state.nodes.iter().find(|n| n.id == id) {
                     Some(n) => n,
                     None => {
-                        return Ok(ToolOutput::text(format!("Node '{}' not found.", id)));
+                        return Ok(ToolOutput::text(format!("Node '{id}' not found.")));
                     }
                 };
 
@@ -412,7 +437,7 @@ impl Tool for KnowledgeGraphTool {
                 if !node.metadata.is_empty() {
                     output.push_str("\n  Metadata:");
                     for (k, v) in &node.metadata {
-                        output.push_str(&format!("\n    {}: {}", k, v));
+                        output.push_str(&format!("\n    {k}: {v}"));
                     }
                 }
 
@@ -451,7 +476,7 @@ impl Tool for KnowledgeGraphTool {
                 let node = match state.nodes.iter_mut().find(|n| n.id == id) {
                     Some(n) => n,
                     None => {
-                        return Ok(ToolOutput::text(format!("Node '{}' not found.", id)));
+                        return Ok(ToolOutput::text(format!("Node '{id}' not found.")));
                     }
                 };
 
@@ -470,7 +495,7 @@ impl Tool for KnowledgeGraphTool {
                 node.updated_at = Utc::now();
                 self.save_state(&state)?;
 
-                Ok(ToolOutput::text(format!("Updated node '{}'.", id)))
+                Ok(ToolOutput::text(format!("Updated node '{id}'.")))
             }
 
             "remove_node" => {
@@ -482,7 +507,7 @@ impl Tool for KnowledgeGraphTool {
                 let before_nodes = state.nodes.len();
                 state.nodes.retain(|n| n.id != id);
                 if state.nodes.len() == before_nodes {
-                    return Ok(ToolOutput::text(format!("Node '{}' not found.", id)));
+                    return Ok(ToolOutput::text(format!("Node '{id}' not found.")));
                 }
 
                 // Cascade-delete edges referencing this node
@@ -495,8 +520,7 @@ impl Tool for KnowledgeGraphTool {
                 self.save_state(&state)?;
 
                 Ok(ToolOutput::text(format!(
-                    "Removed node '{}' and {} connected edge(s).",
-                    id, edges_removed
+                    "Removed node '{id}' and {edges_removed} connected edge(s)."
                 )))
             }
 
@@ -517,14 +541,12 @@ impl Tool for KnowledgeGraphTool {
                 // Validate nodes exist
                 if !state.nodes.iter().any(|n| n.id == source_id) {
                     return Ok(ToolOutput::text(format!(
-                        "Source node '{}' not found.",
-                        source_id
+                        "Source node '{source_id}' not found."
                     )));
                 }
                 if !state.nodes.iter().any(|n| n.id == target_id) {
                     return Ok(ToolOutput::text(format!(
-                        "Target node '{}' not found.",
-                        target_id
+                        "Target node '{target_id}' not found."
                     )));
                 }
 
@@ -532,8 +554,7 @@ impl Tool for KnowledgeGraphTool {
                     Some(rt) => rt,
                     None => {
                         return Ok(ToolOutput::text(format!(
-                            "Invalid relationship_type '{}'. Use: cites, implements, extends, contradicts, builds_on, authored_by, uses_dataset, related_to.",
-                            rel_str
+                            "Invalid relationship_type '{rel_str}'. Use: cites, implements, extends, contradicts, builds_on, authored_by, uses_dataset, related_to, reproduces, refines, validates, supports_hypothesis, refutes_hypothesis."
                         )));
                     }
                 };
@@ -562,8 +583,7 @@ impl Tool for KnowledgeGraphTool {
                 self.save_state(&state)?;
 
                 Ok(ToolOutput::text(format!(
-                    "Added edge {} --[{}]--> {} (strength: {:.2}).",
-                    source_id, rel_str, target_id, strength
+                    "Added edge {source_id} --[{rel_str}]--> {target_id} (strength: {strength:.2})."
                 )))
             }
 
@@ -601,8 +621,7 @@ impl Tool for KnowledgeGraphTool {
                 self.save_state(&state)?;
 
                 Ok(ToolOutput::text(format!(
-                    "Removed {} edge(s) from '{}' to '{}'.",
-                    removed, source_id, target_id
+                    "Removed {removed} edge(s) from '{source_id}' to '{target_id}'."
                 )))
             }
 
@@ -613,7 +632,7 @@ impl Tool for KnowledgeGraphTool {
                 }
 
                 if !state.nodes.iter().any(|n| n.id == id) {
-                    return Ok(ToolOutput::text(format!("Node '{}' not found.", id)));
+                    return Ok(ToolOutput::text(format!("Node '{id}' not found.")));
                 }
 
                 let max_depth = args
@@ -664,12 +683,11 @@ impl Tool for KnowledgeGraphTool {
 
                 if found_nodes.is_empty() {
                     return Ok(ToolOutput::text(format!(
-                        "No neighbors found for '{}' within depth {}.",
-                        id, max_depth
+                        "No neighbors found for '{id}' within depth {max_depth}."
                     )));
                 }
 
-                let mut output = format!("Neighbors of '{}' (depth {}):\n", id, max_depth);
+                let mut output = format!("Neighbors of '{id}' (depth {max_depth}):\n");
                 for (nid, depth) in &found_nodes {
                     if let Some(node) = state.nodes.iter().find(|n| n.id == *nid) {
                         output.push_str(&format!(
@@ -716,7 +734,7 @@ impl Tool for KnowledgeGraphTool {
                     .collect();
 
                 if matches.is_empty() {
-                    return Ok(ToolOutput::text(format!("No nodes matching '{}'.", query)));
+                    return Ok(ToolOutput::text(format!("No nodes matching '{query}'.")));
                 }
 
                 let mut output = format!("Found {} node(s):\n", matches.len());
@@ -786,10 +804,10 @@ impl Tool for KnowledgeGraphTool {
                 }
 
                 if !state.nodes.iter().any(|n| n.id == from_id) {
-                    return Ok(ToolOutput::text(format!("Node '{}' not found.", from_id)));
+                    return Ok(ToolOutput::text(format!("Node '{from_id}' not found.")));
                 }
                 if !state.nodes.iter().any(|n| n.id == to_id) {
-                    return Ok(ToolOutput::text(format!("Node '{}' not found.", to_id)));
+                    return Ok(ToolOutput::text(format!("Node '{to_id}' not found.")));
                 }
 
                 // BFS shortest path (bidirectional edges)
@@ -826,8 +844,7 @@ impl Tool for KnowledgeGraphTool {
 
                 if !found {
                     return Ok(ToolOutput::text(format!(
-                        "No path found from '{}' to '{}'.",
-                        from_id, to_id
+                        "No path found from '{from_id}' to '{to_id}'."
                     )));
                 }
 
@@ -859,7 +876,7 @@ impl Tool for KnowledgeGraphTool {
                     } else {
                         output.push_str("  ");
                     }
-                    output.push_str(&format!("{} ({})\n", pid, node_name));
+                    output.push_str(&format!("{pid} ({node_name})\n"));
                 }
 
                 Ok(ToolOutput::text(output.trim_end().to_string()))
@@ -900,13 +917,12 @@ impl Tool for KnowledgeGraphTool {
                 top_connected.truncate(5);
 
                 let mut output = format!(
-                    "Knowledge Graph Stats:\n  Nodes: {}\n  Edges: {}\n\n  Nodes by type:\n",
-                    total_nodes, total_edges
+                    "Knowledge Graph Stats:\n  Nodes: {total_nodes}\n  Edges: {total_edges}\n\n  Nodes by type:\n"
                 );
                 let mut sorted_types: Vec<_> = type_counts.iter().collect();
                 sorted_types.sort_by_key(|(k, _)| *k);
                 for (t, c) in &sorted_types {
-                    output.push_str(&format!("    {}: {}\n", t, c));
+                    output.push_str(&format!("    {t}: {c}\n"));
                 }
 
                 if !edge_type_counts.is_empty() {
@@ -914,7 +930,7 @@ impl Tool for KnowledgeGraphTool {
                     let mut sorted_etypes: Vec<_> = edge_type_counts.iter().collect();
                     sorted_etypes.sort_by_key(|(k, _)| *k);
                     for (t, c) in &sorted_etypes {
-                        output.push_str(&format!("    {}: {}\n", t, c));
+                        output.push_str(&format!("    {t}: {c}\n"));
                     }
                 }
 
@@ -927,10 +943,8 @@ impl Tool for KnowledgeGraphTool {
                             .find(|n| n.id == ***nid)
                             .map(|n| n.name.as_str())
                             .unwrap_or("?");
-                        output.push_str(&format!(
-                            "    {} ({}) — {} connections\n",
-                            nid, node_name, count
-                        ));
+                        output
+                            .push_str(&format!("    {nid} ({node_name}) — {count} connections\n"));
                     }
                 }
 
@@ -953,21 +967,20 @@ impl Tool for KnowledgeGraphTool {
                 let lib_json =
                     std::fs::read_to_string(&lib_path).map_err(|e| ToolError::ExecutionFailed {
                         name: "knowledge_graph".to_string(),
-                        message: format!("Failed to read arxiv library: {}", e),
+                        message: format!("Failed to read arxiv library: {e}"),
                     })?;
 
                 let library: ArxivLibraryFile =
                     serde_json::from_str(&lib_json).map_err(|e| ToolError::ExecutionFailed {
                         name: "knowledge_graph".to_string(),
-                        message: format!("Failed to parse arxiv library: {}", e),
+                        message: format!("Failed to parse arxiv library: {e}"),
                     })?;
 
                 let entry = match library.entries.iter().find(|e| e.paper.id == arxiv_id) {
                     Some(e) => e,
                     None => {
                         return Ok(ToolOutput::text(format!(
-                            "Paper '{}' not found in arxiv library.",
-                            arxiv_id
+                            "Paper '{arxiv_id}' not found in arxiv library."
                         )));
                     }
                 };
@@ -1093,8 +1106,7 @@ impl Tool for KnowledgeGraphTool {
             }
 
             _ => Ok(ToolOutput::text(format!(
-                "Unknown action: '{}'. Use: add_node, get_node, update_node, remove_node, add_edge, remove_edge, neighbors, search, list, path, stats, import_arxiv, export_dot.",
-                action
+                "Unknown action: '{action}'. Use: add_node, get_node, update_node, remove_node, add_edge, remove_edge, neighbors, search, list, path, stats, import_arxiv, export_dot."
             ))),
         }
     }

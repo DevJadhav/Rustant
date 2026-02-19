@@ -169,7 +169,7 @@ impl LspManager {
             types::HoverContents::Scalar(marked) => match marked {
                 types::MarkedString::String(s) => s.clone(),
                 types::MarkedString::LanguageString { language, value } => {
-                    format!("```{}\n{}\n```", language, value)
+                    format!("```{language}\n{value}\n```")
                 }
             },
             types::HoverContents::Markup(markup) => markup.value.clone(),
@@ -178,7 +178,7 @@ impl LspManager {
                 .map(|m| match m {
                     types::MarkedString::String(s) => s.clone(),
                     types::MarkedString::LanguageString { language, value } => {
-                        format!("```{}\n{}\n```", language, value)
+                        format!("```{language}\n{value}\n```")
                     }
                 })
                 .collect::<Vec<_>>()

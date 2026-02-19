@@ -312,7 +312,7 @@ mod tests {
                 assert_eq!(name, "macos_safari");
                 assert!(reason.contains("action"));
             }
-            other => panic!("Expected InvalidArguments, got: {:?}", other),
+            other => panic!("Expected InvalidArguments, got: {other:?}"),
         }
     }
 
@@ -326,7 +326,7 @@ mod tests {
                 assert_eq!(name, "macos_safari");
                 assert!(reason.contains("bad"));
             }
-            other => panic!("Expected InvalidArguments, got: {:?}", other),
+            other => panic!("Expected InvalidArguments, got: {other:?}"),
         }
     }
 }

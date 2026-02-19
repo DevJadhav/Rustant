@@ -63,8 +63,7 @@ impl Tool for IMessageContactsTool {
 
         if contacts.is_empty() {
             return Ok(ToolOutput::text(format!(
-                "No contacts found matching '{}'.",
-                query
+                "No contacts found matching '{query}'."
             )));
         }
 
@@ -76,10 +75,10 @@ impl Tool for IMessageContactsTool {
         for (i, contact) in contacts.iter().enumerate() {
             output.push_str(&format!("{}. {}\n", i + 1, contact.name));
             if let Some(ref phone) = contact.phone {
-                output.push_str(&format!("   Phone: {}\n", phone));
+                output.push_str(&format!("   Phone: {phone}\n"));
             }
             if let Some(ref email) = contact.email {
-                output.push_str(&format!("   Email: {}\n", email));
+                output.push_str(&format!("   Email: {email}\n"));
             }
             output.push('\n');
         }
@@ -156,8 +155,7 @@ impl Tool for IMessageSendTool {
             })?;
 
         Ok(ToolOutput::text(format!(
-            "iMessage sent successfully to {}.",
-            recipient
+            "iMessage sent successfully to {recipient}."
         )))
     }
 
@@ -219,8 +217,7 @@ impl Tool for IMessageReadTool {
 
         if messages.is_empty() {
             return Ok(ToolOutput::text(format!(
-                "No incoming messages in the last {} minute(s).",
-                minutes
+                "No incoming messages in the last {minutes} minute(s)."
             )));
         }
 
@@ -268,7 +265,7 @@ async fn search_contacts_applescript(query: &str) -> Result<Vec<ContactResult>, 
     let escaped = query.replace('"', "\\\"");
     let script = format!(
         r#"tell application "Contacts"
-    set matchingPeople to every person whose name contains "{query}"
+    set matchingPeople to every person whose name contains "{escaped}"
     set output to ""
     repeat with p in matchingPeople
         set pName to name of p
@@ -283,8 +280,7 @@ async fn search_contacts_applescript(query: &str) -> Result<Vec<ContactResult>, 
         set output to output & pName & "||" & pPhone & "||" & pEmail & "%%"
     end repeat
     return output
-end tell"#,
-        query = escaped
+end tell"#
     );
 
     let output = tokio::process::Command::new("osascript")
@@ -295,7 +291,7 @@ end tell"#,
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Contacts lookup failed: {}", stderr));
+        return Err(format!("Contacts lookup failed: {stderr}"));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -342,10 +338,9 @@ async fn send_imessage_applescript(recipient: &str, text: &str) -> Result<(), St
     let script = format!(
         "tell application \"Messages\"\n\
          \tset targetService to 1st service whose service type = iMessage\n\
-         \tset targetBuddy to buddy \"{}\" of targetService\n\
-         \tsend \"{}\" to targetBuddy\n\
+         \tset targetBuddy to buddy \"{escaped_recipient}\" of targetService\n\
+         \tsend \"{escaped_text}\" to targetBuddy\n\
          end tell",
-        escaped_recipient, escaped_text,
     );
 
     let output = tokio::process::Command::new("osascript")
@@ -356,7 +351,7 @@ async fn send_imessage_applescript(recipient: &str, text: &str) -> Result<(), St
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Failed to send iMessage: {}", stderr));
+        return Err(format!("Failed to send iMessage: {stderr}"));
     }
 
     Ok(())
@@ -365,7 +360,7 @@ async fn send_imessage_applescript(recipient: &str, text: &str) -> Result<(), St
 /// Read recent incoming iMessages using sqlite3 on the Messages database.
 async fn read_recent_imessages(minutes: u64, limit: u64) -> Result<Vec<IncomingMessage>, String> {
     let home = std::env::var("HOME").map_err(|_| "HOME not set".to_string())?;
-    let db_path = format!("{}/Library/Messages/chat.db", home);
+    let db_path = format!("{home}/Library/Messages/chat.db");
 
     // macOS Messages uses Apple's Core Data epoch (2001-01-01) in nanoseconds.
     // We compute seconds-ago × 1e9 for the date comparison.
@@ -379,8 +374,6 @@ async fn read_recent_imessages(minutes: u64, limit: u64) -> Result<Vec<IncomingM
          AND m.date > (strftime('%s', 'now') - 978307200 - {seconds}) * 1000000000 \
          ORDER BY m.date DESC \
          LIMIT {limit};",
-        seconds = seconds,
-        limit = limit,
     );
 
     let output = tokio::process::Command::new("sqlite3")
@@ -393,9 +386,8 @@ async fn read_recent_imessages(minutes: u64, limit: u64) -> Result<Vec<IncomingM
         let stderr = String::from_utf8_lossy(&output.stderr);
         // Full Disk Access may be needed
         return Err(format!(
-            "Cannot read Messages database: {}. \
-             Ensure your terminal has Full Disk Access in System Settings.",
-            stderr
+            "Cannot read Messages database: {stderr}. \
+             Ensure your terminal has Full Disk Access in System Settings."
         ));
     }
 

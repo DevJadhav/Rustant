@@ -20,8 +20,7 @@ mod macos_integration {
             text.contains("macOS")
                 || text.contains("ProductName")
                 || text.contains("ProductVersion"),
-            "Output should contain macOS version info, got: {}",
-            text
+            "Output should contain macOS version info, got: {text}"
         );
     }
 
@@ -34,8 +33,7 @@ mod macos_integration {
         // Should contain some CPU info (Apple or Intel)
         assert!(
             text.contains("Apple") || text.contains("Intel") || text.contains("CPU"),
-            "CPU info should mention processor brand, got: {}",
-            text
+            "CPU info should mention processor brand, got: {text}"
         );
     }
 
@@ -66,8 +64,7 @@ mod macos_integration {
         let text = read_result.unwrap().content;
         assert!(
             text.contains(&test_content),
-            "Clipboard should contain written text, got: {}",
-            text
+            "Clipboard should contain written text, got: {text}"
         );
     }
 
@@ -85,8 +82,7 @@ mod macos_integration {
         // Should find at least something (Safari is always installed)
         assert!(
             text.contains("Safari") || text.contains("result"),
-            "Should find Safari or return results, got: {}",
-            text
+            "Should find Safari or return results, got: {text}"
         );
     }
 
@@ -99,8 +95,7 @@ mod macos_integration {
         // Finder is always running on macOS
         assert!(
             text.contains("Finder"),
-            "Running apps should include Finder, got: {}",
-            text
+            "Running apps should include Finder, got: {text}"
         );
     }
 
@@ -198,8 +193,7 @@ mod macos_integration {
         let text = result.unwrap().content;
         assert!(
             text.contains("App:"),
-            "Should contain 'App:' label, got: {}",
-            text
+            "Should contain 'App:' label, got: {text}"
         );
     }
 
@@ -233,13 +227,12 @@ mod macos_integration {
                 assert!(!output.content.is_empty(), "OCR output should not be empty");
             }
             Err(e) => {
-                let err_str = format!("{:?}", e);
+                let err_str = format!("{e:?}");
                 assert!(
                     err_str.contains("Python")
                         || err_str.contains("pyobjc")
                         || err_str.contains("Shortcut"),
-                    "Should fail with Python/PyObjC/Shortcut error, got: {}",
-                    err_str
+                    "Should fail with Python/PyObjC/Shortcut error, got: {err_str}"
                 );
             }
         }

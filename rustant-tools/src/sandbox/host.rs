@@ -1,6 +1,7 @@
 //! Host state and function registration for WASM sandbox guests.
 
 use super::config::Capability;
+use std::path::PathBuf;
 use tracing::debug;
 
 // ---------------------------------------------------------------------------
@@ -63,6 +64,12 @@ impl HostState {
                 requested.iter().all(|req| allowed.contains(req))
             }
             (Capability::EnvironmentRead(allowed), Capability::EnvironmentRead(requested)) => {
+                requested.iter().all(|req| allowed.contains(req))
+            }
+            (Capability::HttpClient(allowed), Capability::HttpClient(requested)) => requested
+                .iter()
+                .all(|req| allowed.iter().any(|a| req.starts_with(a.as_str()))),
+            (Capability::ProcessSpawn(allowed), Capability::ProcessSpawn(requested)) => {
                 requested.iter().all(|req| allowed.contains(req))
             }
             _ => false,
@@ -280,6 +287,177 @@ pub fn register_host_functions(linker: &mut wasmi::Linker<HostState>) -> Result<
         "env",
         "host_get_input_len",
         |caller: wasmi::Caller<'_, HostState>| -> i32 { caller.data().input.len() as i32 },
+    )?;
+
+    // -- host_http_get(url_ptr, url_len) -> i32 -------------------------------
+    linker.func_wrap(
+        "env",
+        "host_http_get",
+        |mut caller: wasmi::Caller<'_, HostState>, url_ptr: i32, url_len: i32| -> i32 {
+            let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) else {
+                return -1;
+            };
+            let mem_size = memory.data(&caller).len();
+
+            let url = match read_wasm_string(&memory, &caller, url_ptr, url_len) {
+                Some(s) => s,
+                None => return -1,
+            };
+
+            // Capability check: HttpClient allowlist.
+            let has_cap = caller
+                .data()
+                .has_capability(&Capability::HttpClient(vec![url.clone()]));
+            if !has_cap {
+                debug!(target: "sandbox::host", "http_get denied for URL: {}", url);
+                return -2;
+            }
+
+            // In the sandbox we cannot perform real async I/O, so we store the
+            // request URL in the output buffer as a placeholder that the host
+            // executor can fulfil after execution completes.
+            let placeholder = format!("HTTP_GET:{url}");
+            let host = caller.data_mut();
+            host.track_memory(mem_size);
+            host.output.extend_from_slice(placeholder.as_bytes());
+            0
+        },
+    )?;
+
+    // -- host_file_read(path_ptr, path_len) -> i32 ----------------------------
+    linker.func_wrap(
+        "env",
+        "host_file_read",
+        |mut caller: wasmi::Caller<'_, HostState>, path_ptr: i32, path_len: i32| -> i32 {
+            let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) else {
+                return -1;
+            };
+            let mem_size = memory.data(&caller).len();
+
+            let path = match read_wasm_string(&memory, &caller, path_ptr, path_len) {
+                Some(s) => s,
+                None => return -1,
+            };
+
+            // Capability check: FileRead allowlist.
+            let has_cap = caller
+                .data()
+                .has_capability(&Capability::FileRead(vec![PathBuf::from(&path)]));
+            if !has_cap {
+                debug!(target: "sandbox::host", "file_read denied for path: {}", path);
+                return -2;
+            }
+
+            // Read the file contents and store in the output buffer.
+            match std::fs::read(&path) {
+                Ok(contents) => {
+                    let host = caller.data_mut();
+                    host.track_memory(mem_size);
+                    host.output.extend_from_slice(&contents);
+                    contents.len() as i32
+                }
+                Err(e) => {
+                    debug!(target: "sandbox::host", "file_read error for {}: {}", path, e);
+                    let host = caller.data_mut();
+                    host.track_memory(mem_size);
+                    -1
+                }
+            }
+        },
+    )?;
+
+    // -- host_file_write(path_ptr, path_len, data_ptr, data_len) -> i32 -------
+    linker.func_wrap(
+        "env",
+        "host_file_write",
+        |mut caller: wasmi::Caller<'_, HostState>,
+         path_ptr: i32,
+         path_len: i32,
+         data_ptr: i32,
+         data_len: i32|
+         -> i32 {
+            let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) else {
+                return -1;
+            };
+            let mem_size = memory.data(&caller).len();
+
+            let path = match read_wasm_string(&memory, &caller, path_ptr, path_len) {
+                Some(s) => s,
+                None => return -1,
+            };
+
+            let data = match read_wasm_bytes(&memory, &caller, data_ptr, data_len) {
+                Some(b) => b,
+                None => return -1,
+            };
+
+            // Capability check: FileWrite allowlist.
+            let has_cap = caller
+                .data()
+                .has_capability(&Capability::FileWrite(vec![PathBuf::from(&path)]));
+            if !has_cap {
+                debug!(target: "sandbox::host", "file_write denied for path: {}", path);
+                return -2;
+            }
+
+            // Write the data to the file.
+            match std::fs::write(&path, &data) {
+                Ok(()) => {
+                    let host = caller.data_mut();
+                    host.track_memory(mem_size);
+                    data.len() as i32
+                }
+                Err(e) => {
+                    debug!(target: "sandbox::host", "file_write error for {}: {}", path, e);
+                    let host = caller.data_mut();
+                    host.track_memory(mem_size);
+                    -1
+                }
+            }
+        },
+    )?;
+
+    // -- host_env_get(key_ptr, key_len) -> i32 --------------------------------
+    linker.func_wrap(
+        "env",
+        "host_env_get",
+        |mut caller: wasmi::Caller<'_, HostState>, key_ptr: i32, key_len: i32| -> i32 {
+            let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) else {
+                return -1;
+            };
+            let mem_size = memory.data(&caller).len();
+
+            let key = match read_wasm_string(&memory, &caller, key_ptr, key_len) {
+                Some(s) => s,
+                None => return -1,
+            };
+
+            // Capability check: EnvironmentRead allowlist.
+            let has_cap = caller
+                .data()
+                .has_capability(&Capability::EnvironmentRead(vec![key.clone()]));
+            if !has_cap {
+                debug!(target: "sandbox::host", "env_get denied for key: {}", key);
+                return -2;
+            }
+
+            // Read the environment variable and store in the output buffer.
+            match std::env::var(&key) {
+                Ok(value) => {
+                    let bytes = value.into_bytes();
+                    let len = bytes.len() as i32;
+                    let host = caller.data_mut();
+                    host.track_memory(mem_size);
+                    host.output.extend_from_slice(&bytes);
+                    len
+                }
+                Err(_) => {
+                    let host = caller.data_mut();
+                    host.track_memory(mem_size);
+                    -1
+                }
+            }
+        },
     )?;
 
     Ok(())

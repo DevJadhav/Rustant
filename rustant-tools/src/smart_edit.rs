@@ -148,8 +148,7 @@ fn find_by_line_range(
 
     if start_line == 0 || start_line > total {
         return Err(format!(
-            "Line {} is out of range (file has {} lines)",
-            start_line, total
+            "Line {start_line} is out of range (file has {total} lines)"
         ));
     }
 
@@ -449,11 +448,11 @@ fn generate_diff(path: &str, old: &str, new: &str) -> String {
     let diff = TextDiff::from_lines(old, new);
     let mut output = String::new();
 
-    output.push_str(&format!("--- a/{}\n", path));
-    output.push_str(&format!("+++ b/{}\n", path));
+    output.push_str(&format!("--- a/{path}\n"));
+    output.push_str(&format!("+++ b/{path}\n"));
 
     for hunk in diff.unified_diff().context_radius(3).iter_hunks() {
-        output.push_str(&format!("{}", hunk));
+        output.push_str(&format!("{hunk}"));
     }
 
     output
@@ -529,13 +528,13 @@ fn validate_workspace_path(workspace: &Path, path_str: &str) -> Result<PathBuf, 
             .canonicalize()
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "smart_edit".into(),
-                message: format!("Path resolution failed: {}", e),
+                message: format!("Path resolution failed: {e}"),
             })?;
 
         if !canonical.starts_with(&workspace_canonical) {
             return Err(ToolError::PermissionDenied {
                 name: "smart_edit".into(),
-                reason: format!("Path '{}' is outside the workspace", path_str),
+                reason: format!("Path '{path_str}' is outside the workspace"),
             });
         }
         return Ok(canonical);
@@ -549,7 +548,7 @@ fn validate_workspace_path(workspace: &Path, path_str: &str) -> Result<PathBuf, 
                 if normalized.pop().is_none() {
                     return Err(ToolError::PermissionDenied {
                         name: "smart_edit".into(),
-                        reason: format!("Path '{}' escapes the workspace", path_str),
+                        reason: format!("Path '{path_str}' escapes the workspace"),
                     });
                 }
             }
@@ -562,7 +561,7 @@ fn validate_workspace_path(workspace: &Path, path_str: &str) -> Result<PathBuf, 
     if !normalized_path.starts_with(&workspace_canonical) {
         return Err(ToolError::PermissionDenied {
             name: "smart_edit".into(),
-            reason: format!("Path '{}' is outside the workspace", path_str),
+            reason: format!("Path '{path_str}' is outside the workspace"),
         });
     }
 
@@ -639,8 +638,7 @@ impl Tool for SmartEditTool {
             ToolError::InvalidArguments {
                 name: "smart_edit".into(),
                 reason: format!(
-                    "Invalid edit_type '{}'. Must be one of: replace, insert_after, insert_before, delete",
-                    edit_type_str
+                    "Invalid edit_type '{edit_type_str}'. Must be one of: replace, insert_after, insert_before, delete"
                 ),
             }
         })?;
@@ -664,7 +662,7 @@ impl Tool for SmartEditTool {
                 .await
                 .map_err(|e| ToolError::ExecutionFailed {
                     name: "smart_edit".into(),
-                    message: format!("Failed to read '{}': {}", path_str, e),
+                    message: format!("Failed to read '{path_str}': {e}"),
                 })?;
 
         // Find the location
@@ -689,7 +687,7 @@ impl Tool for SmartEditTool {
         // Create checkpoint before writing
         let checkpoint_result = {
             let mut mgr = self.checkpoint_mgr.lock().await;
-            mgr.create_checkpoint(&format!("before smart_edit on {}", path_str))
+            mgr.create_checkpoint(&format!("before smart_edit on {path_str}"))
         };
 
         if let Err(e) = &checkpoint_result {
@@ -701,7 +699,7 @@ impl Tool for SmartEditTool {
             .await
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "smart_edit".into(),
-                message: format!("Failed to write '{}': {}", path_str, e),
+                message: format!("Failed to write '{path_str}': {e}"),
             })?;
 
         // Build output

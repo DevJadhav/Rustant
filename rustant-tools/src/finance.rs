@@ -72,12 +72,12 @@ impl FinanceTool {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ToolError::ExecutionFailed {
                 name: "finance".to_string(),
-                message: format!("Create dir failed: {}", e),
+                message: format!("Create dir failed: {e}"),
             })?;
         }
         let json = serde_json::to_string_pretty(state).map_err(|e| ToolError::ExecutionFailed {
             name: "finance".to_string(),
-            message: format!("Serialize failed: {}", e),
+            message: format!("Serialize failed: {e}"),
         })?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, &json).map_err(|e| ToolError::ExecutionFailed {
@@ -159,8 +159,7 @@ impl Tool for FinanceTool {
                 self.save_state(&state)?;
                 let kind = if is_income { "income" } else { "expense" };
                 Ok(ToolOutput::text(format!(
-                    "Added {} #{}: ${:.2} ({})",
-                    kind, id, amount, category
+                    "Added {kind} #{id}: ${amount:.2} ({category})"
                 )))
             }
             "list" => {
@@ -207,7 +206,7 @@ impl Tool for FinanceTool {
                 cats.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
                 let cat_lines: Vec<String> = cats
                     .iter()
-                    .map(|(c, a)| format!("  {}: ${:.2}", c, a))
+                    .map(|(c, a)| format!("  {c}: ${a:.2}"))
                     .collect();
                 Ok(ToolOutput::text(format!(
                     "Finance summary:\n  Income:   ${:.2}\n  Expenses: ${:.2}\n  Balance:  ${:.2}\n\nBy category:\n{}",
@@ -279,8 +278,7 @@ impl Tool for FinanceTool {
                 }
                 self.save_state(&state)?;
                 Ok(ToolOutput::text(format!(
-                    "Budget set: {} ${:.2}/{}",
-                    category, limit, period
+                    "Budget set: {category} ${limit:.2}/{period}"
                 )))
             }
             "export_csv" => {
@@ -313,8 +311,7 @@ impl Tool for FinanceTool {
                 )))
             }
             _ => Ok(ToolOutput::text(format!(
-                "Unknown action: {}. Use: add_transaction, list, summary, budget_check, set_budget, export_csv",
-                action
+                "Unknown action: {action}. Use: add_transaction, list, summary, budget_check, set_budget, export_csv"
             ))),
         }
     }

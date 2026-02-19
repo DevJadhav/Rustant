@@ -27,6 +27,10 @@ pub enum Capability {
     Stdout,
     /// Permission to write to stderr.
     Stderr,
+    /// Permission for HTTP requests to specific URLs.
+    HttpClient(Vec<String>),
+    /// Permission to spawn specific commands.
+    ProcessSpawn(Vec<String>),
 }
 
 // ---------------------------------------------------------------------------

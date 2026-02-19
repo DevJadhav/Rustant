@@ -33,7 +33,7 @@ impl CodebaseSearchTool {
             .lock()
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "codebase_search".into(),
-                message: format!("Lock error: {}", e),
+                message: format!("Lock error: {e}"),
             })?;
 
         if guard.is_none() {
@@ -47,7 +47,7 @@ impl CodebaseSearchTool {
                 ProjectIndexer::new(self.workspace.clone(), search_config).map_err(|e| {
                     ToolError::ExecutionFailed {
                         name: "codebase_search".into(),
-                        message: format!("Failed to initialize indexer: {}", e),
+                        message: format!("Failed to initialize indexer: {e}"),
                     }
                 })?;
 
@@ -119,7 +119,7 @@ impl Tool for CodebaseSearchTool {
             .lock()
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "codebase_search".into(),
-                message: format!("Lock error: {}", e),
+                message: format!("Lock error: {e}"),
             })?;
 
         let indexer = guard.as_ref().ok_or_else(|| ToolError::ExecutionFailed {
@@ -131,7 +131,7 @@ impl Tool for CodebaseSearchTool {
             .search(query)
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "codebase_search".into(),
-                message: format!("Search failed: {}", e),
+                message: format!("Search failed: {e}"),
             })?;
 
         // Apply post-search filters
@@ -144,7 +144,7 @@ impl Tool for CodebaseSearchTool {
                     if !extensions.is_empty() {
                         let has_ext = extensions
                             .iter()
-                            .any(|ext| r.fact_id.contains(&format!(".{}", ext)));
+                            .any(|ext| r.fact_id.contains(&format!(".{ext}")));
                         if !has_ext {
                             return false;
                         }
@@ -161,23 +161,23 @@ impl Tool for CodebaseSearchTool {
             .collect();
 
         if filtered.is_empty() {
-            let mut msg = format!("No results found for query: '{}'", query);
+            let mut msg = format!("No results found for query: '{query}'");
             if let Some(ref f) = filter {
-                msg.push_str(&format!(" (filter: {})", f));
+                msg.push_str(&format!(" (filter: {f})"));
             }
             if let Some(ref l) = language {
-                msg.push_str(&format!(" (language: {})", l));
+                msg.push_str(&format!(" (language: {l})"));
             }
             return Ok(ToolOutput::text(msg));
         }
 
         let shown = filtered.len().min(max_results);
-        let mut output = format!("Found {} results for '{}'", shown, query);
+        let mut output = format!("Found {shown} results for '{query}'");
         if let Some(ref f) = filter {
-            output.push_str(&format!(" [filter: {}]", f));
+            output.push_str(&format!(" [filter: {f}]"));
         }
         if let Some(ref l) = language {
-            output.push_str(&format!(" [lang: {}]", l));
+            output.push_str(&format!(" [lang: {l}]"));
         }
         output.push_str(":\n\n");
 
@@ -194,7 +194,7 @@ impl Tool for CodebaseSearchTool {
                 let extra_lines: Vec<&str> = result.content.lines().skip(1).take(3).collect();
                 if !extra_lines.is_empty() {
                     for line in extra_lines {
-                        output.push_str(&format!("   {}\n", line));
+                        output.push_str(&format!("   {line}\n"));
                     }
                 }
             }

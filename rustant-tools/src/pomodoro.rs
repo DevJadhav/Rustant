@@ -60,21 +60,21 @@ impl PomodoroTool {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ToolError::ExecutionFailed {
                 name: "pomodoro".to_string(),
-                message: format!("Failed to create state dir: {}", e),
+                message: format!("Failed to create state dir: {e}"),
             })?;
         }
         let json = serde_json::to_string_pretty(state).map_err(|e| ToolError::ExecutionFailed {
             name: "pomodoro".to_string(),
-            message: format!("Failed to serialize state: {}", e),
+            message: format!("Failed to serialize state: {e}"),
         })?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, &json).map_err(|e| ToolError::ExecutionFailed {
             name: "pomodoro".to_string(),
-            message: format!("Failed to write state: {}", e),
+            message: format!("Failed to write state: {e}"),
         })?;
         std::fs::rename(&tmp, &path).map_err(|e| ToolError::ExecutionFailed {
             name: "pomodoro".to_string(),
-            message: format!("Failed to rename state file: {}", e),
+            message: format!("Failed to rename state file: {e}"),
         })?;
         Ok(())
     }
@@ -166,8 +166,7 @@ impl Tool for PomodoroTool {
                 Self::toggle_dnd(true);
 
                 Ok(ToolOutput::text(format!(
-                    "Pomodoro started: '{}' ({} minutes). DND enabled.",
-                    task, duration
+                    "Pomodoro started: '{task}' ({duration} minutes). DND enabled."
                 )))
             }
             "stop" => {
@@ -225,8 +224,7 @@ impl Tool for PomodoroTool {
                 )))
             }
             _ => Ok(ToolOutput::text(format!(
-                "Unknown action: {}. Use: start, stop, status, history",
-                action
+                "Unknown action: {action}. Use: start, stop, status, history"
             ))),
         }
     }

@@ -55,8 +55,7 @@ impl Tool for PdfGenerateTool {
             .unwrap_or("generate");
         if action != "generate" {
             return Ok(ToolOutput::text(format!(
-                "Unknown action: {}. Use: generate",
-                action
+                "Unknown action: {action}. Use: generate"
             )));
         }
 
@@ -119,15 +118,14 @@ impl Tool for PdfGenerateTool {
         doc.render_to_file(&output_path)
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "pdf_generate".into(),
-                message: format!("Failed to render PDF: {}", e),
+                message: format!("Failed to render PDF: {e}"),
             })?;
 
         let size = std::fs::metadata(&output_path)
             .map(|m| m.len())
             .unwrap_or(0);
         Ok(ToolOutput::text(format!(
-            "Generated PDF: {} ({} bytes)",
-            output_str, size
+            "Generated PDF: {output_str} ({size} bytes)"
         )))
     }
 }

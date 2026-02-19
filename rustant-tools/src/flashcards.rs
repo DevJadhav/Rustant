@@ -173,8 +173,7 @@ impl Tool for FlashcardsTool {
                 state.cards.push(Flashcard::new(id, deck, front, back));
                 self.save_state(&state)?;
                 Ok(ToolOutput::text(format!(
-                    "Added card #{} to deck '{}'.",
-                    id, deck
+                    "Added card #{id} to deck '{deck}'."
                 )))
             }
             "study" => {
@@ -211,11 +210,10 @@ impl Tool for FlashcardsTool {
                         _ => "Perfect! Long interval set.",
                     };
                     Ok(ToolOutput::text(format!(
-                        "A: {}\n\n{}\nNext review: {}",
-                        answer, feedback, next
+                        "A: {answer}\n\n{feedback}\nNext review: {next}"
                     )))
                 } else {
-                    Ok(ToolOutput::text(format!("Card #{} not found.", card_id)))
+                    Ok(ToolOutput::text(format!("Card #{card_id} not found.")))
                 }
             }
             "list_decks" => {
@@ -234,7 +232,7 @@ impl Tool for FlashcardsTool {
                 }
                 let lines: Vec<String> = decks
                     .iter()
-                    .map(|(d, (total, due))| format!("  {} — {} cards ({} due)", d, total, due))
+                    .map(|(d, (total, due))| format!("  {d} — {total} cards ({due} due)"))
                     .collect();
                 Ok(ToolOutput::text(format!("Decks:\n{}", lines.join("\n"))))
             }
@@ -248,11 +246,10 @@ impl Tool for FlashcardsTool {
                     0.0
                 };
                 Ok(ToolOutput::text(format!(
-                    "Flashcard stats:\n  Total cards: {}\n  Due now: {}\n  Average EF: {:.2}",
-                    total, due, avg_ef
+                    "Flashcard stats:\n  Total cards: {total}\n  Due now: {due}\n  Average EF: {avg_ef:.2}"
                 )))
             }
-            _ => Ok(ToolOutput::text(format!("Unknown action: {}.", action))),
+            _ => Ok(ToolOutput::text(format!("Unknown action: {action}."))),
         }
     }
 }

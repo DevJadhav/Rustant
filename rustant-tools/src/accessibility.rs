@@ -278,8 +278,7 @@ on findInTree(elem, searchQuery, depth, maxD, roleCheck)
 
     return matches
 end findInTree
-"#,
-        role_check = role_check
+"#
     );
 
     let result = run_osascript(&script).await.map_err(accessibility_err)?;
@@ -389,7 +388,7 @@ mod tests {
                 assert_eq!(name, "macos_accessibility");
                 assert!(reason.contains("action"));
             }
-            other => panic!("Expected InvalidArguments, got: {:?}", other),
+            other => panic!("Expected InvalidArguments, got: {other:?}"),
         }
     }
 
@@ -403,7 +402,7 @@ mod tests {
                 assert_eq!(name, "macos_accessibility");
                 assert!(reason.contains("bad"));
             }
-            other => panic!("Expected InvalidArguments, got: {:?}", other),
+            other => panic!("Expected InvalidArguments, got: {other:?}"),
         }
     }
 

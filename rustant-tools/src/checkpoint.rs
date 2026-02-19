@@ -90,7 +90,7 @@ impl CheckpointManager {
 
         // Create the checkpoint commit
         let sig = Signature::now("rustant", "rustant@local")?;
-        let message = format!("[checkpoint] {}", label);
+        let message = format!("[checkpoint] {label}");
         let oid = repo.commit(
             None, // don't update any ref yet
             &sig,
@@ -102,7 +102,7 @@ impl CheckpointManager {
 
         // Store as a named reference
         let ref_name = format!("{}/{}", self.ref_prefix, self.checkpoints.len());
-        repo.reference(&ref_name, oid, true, &format!("checkpoint: {}", label))?;
+        repo.reference(&ref_name, oid, true, &format!("checkpoint: {label}"))?;
 
         let checkpoint = Checkpoint {
             oid: oid.to_string(),
@@ -292,7 +292,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             CheckpointError::NoCheckpoints => {}
-            other => panic!("Expected NoCheckpoints, got {:?}", other),
+            other => panic!("Expected NoCheckpoints, got {other:?}"),
         }
     }
 

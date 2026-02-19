@@ -114,21 +114,21 @@ impl SelfImprovementTool {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ToolError::ExecutionFailed {
                 name: "self_improvement".to_string(),
-                message: format!("Failed to create state dir: {}", e),
+                message: format!("Failed to create state dir: {e}"),
             })?;
         }
         let json = serde_json::to_string_pretty(state).map_err(|e| ToolError::ExecutionFailed {
             name: "self_improvement".to_string(),
-            message: format!("Failed to serialize state: {}", e),
+            message: format!("Failed to serialize state: {e}"),
         })?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, &json).map_err(|e| ToolError::ExecutionFailed {
             name: "self_improvement".to_string(),
-            message: format!("Failed to write state: {}", e),
+            message: format!("Failed to write state: {e}"),
         })?;
         std::fs::rename(&tmp, &path).map_err(|e| ToolError::ExecutionFailed {
             name: "self_improvement".to_string(),
-            message: format!("Failed to rename state file: {}", e),
+            message: format!("Failed to rename state file: {e}"),
         })?;
         Ok(())
     }
@@ -332,7 +332,7 @@ impl SelfImprovementTool {
             let mut sorted_types: Vec<_> = task_types.iter().collect();
             sorted_types.sort_by(|a, b| b.1.cmp(a.1));
             for (task_type, count) in sorted_types {
-                output.push_str(&format!("  {}: {}\n", task_type, count));
+                output.push_str(&format!("  {task_type}: {count}\n"));
             }
         }
 
@@ -341,7 +341,7 @@ impl SelfImprovementTool {
             let mut sorted_tools: Vec<_> = tool_mentions.iter().collect();
             sorted_tools.sort_by(|a, b| b.1.cmp(a.1));
             for (tool, count) in sorted_tools {
-                output.push_str(&format!("  {}: {}\n", tool, count));
+                output.push_str(&format!("  {tool}: {count}\n"));
             }
         }
 
@@ -491,7 +491,7 @@ impl SelfImprovementTool {
         if active_sessions > 0 {
             let add = active_sessions as u32;
             score += add;
-            factors.push(format!("{} active session(s) (+{})", active_sessions, add));
+            factors.push(format!("{active_sessions} active session(s) (+{add})"));
         }
 
         // Count pending inbox items
@@ -500,10 +500,7 @@ impl SelfImprovementTool {
             let add = (inbox_items / 5) as u32;
             if add > 0 {
                 score += add;
-                factors.push(format!(
-                    "{} inbox items (+{}, 1 per 5 items)",
-                    inbox_items, add
-                ));
+                factors.push(format!("{inbox_items} inbox items (+{add}, 1 per 5 items)"));
             }
         }
 
@@ -512,15 +509,12 @@ impl SelfImprovementTool {
         if critical > 0 {
             let add = critical as u32 * 2;
             score += add;
-            factors.push(format!(
-                "{} critical deadline(s) (+{}, 2 each)",
-                critical, add
-            ));
+            factors.push(format!("{critical} critical deadline(s) (+{add}, 2 each)"));
         }
         if overdue > 0 {
             let add = overdue as u32;
             score += add;
-            factors.push(format!("{} overdue deadline(s) (+{})", overdue, add));
+            factors.push(format!("{overdue} overdue deadline(s) (+{add})"));
         }
 
         // Cap at 10
@@ -535,8 +529,7 @@ impl SelfImprovementTool {
 
         let mut output = format!(
             "=== Cognitive Load Estimate ===\n\
-             Score: {}/10 ({})\n",
-            score, level,
+             Score: {score}/10 ({level})\n",
         );
 
         if factors.is_empty() {
@@ -544,12 +537,12 @@ impl SelfImprovementTool {
         } else {
             output.push_str("Factors:\n");
             for f in &factors {
-                output.push_str(&format!("  - {}\n", f));
+                output.push_str(&format!("  - {f}\n"));
             }
         }
 
         if let Some(desc) = task_description {
-            output.push_str(&format!("\nTask context: {}\n", desc));
+            output.push_str(&format!("\nTask context: {desc}\n"));
             if score >= 7 {
                 output.push_str(
                     "Recommendation: Consider deferring non-critical tasks or breaking this into smaller steps.\n",
@@ -757,10 +750,7 @@ impl Tool for SelfImprovementTool {
                     });
                 }
                 self.save_state(&state)?;
-                Ok(ToolOutput::text(format!(
-                    "Preference set: {} = {}",
-                    key, value
-                )))
+                Ok(ToolOutput::text(format!("Preference set: {key} = {value}")))
             }
 
             "get_preferences" => {
@@ -775,8 +765,7 @@ impl Tool for SelfImprovementTool {
                         )))
                     } else {
                         Ok(ToolOutput::text(format!(
-                            "No preference found for key '{}'.",
-                            key
+                            "No preference found for key '{key}'."
                         )))
                     }
                 } else if state.preferences.is_empty() {
@@ -841,8 +830,7 @@ impl Tool for SelfImprovementTool {
                 self.save_state(&state)?;
 
                 Ok(ToolOutput::text(format!(
-                    "Feedback recorded: satisfaction={}/5 for '{}'.",
-                    satisfaction, task_description
+                    "Feedback recorded: satisfaction={satisfaction}/5 for '{task_description}'."
                 )))
             }
 
@@ -859,8 +847,7 @@ impl Tool for SelfImprovementTool {
             }
 
             _ => Ok(ToolOutput::text(format!(
-                "Unknown action: '{}'. Use: analyze_patterns, performance_report, suggest_improvements, set_preference, get_preferences, cognitive_load, feedback, reset_baseline.",
-                action
+                "Unknown action: '{action}'. Use: analyze_patterns, performance_report, suggest_improvements, set_preference, get_preferences, cognitive_load, feedback, reset_baseline."
             ))),
         }
     }

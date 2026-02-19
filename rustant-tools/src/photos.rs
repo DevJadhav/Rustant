@@ -27,7 +27,7 @@ impl MacosPhotosTool {
             .output()
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "macos_photos".into(),
-                message: format!("Failed to run osascript: {}", e),
+                message: format!("Failed to run osascript: {e}"),
             })?;
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
@@ -79,15 +79,14 @@ impl Tool for MacosPhotosTool {
     set albumNames to {{}}
     set albumList to albums
     repeat with a in albumList
-        if (count of albumNames) >= {} then exit repeat
+        if (count of albumNames) >= {limit} then exit repeat
         set end of albumNames to (name of a) & " (" & (count of media items of a) & " items)"
     end repeat
     return albumNames as text
-end tell"#,
-                    limit
+end tell"#
                 );
                 let result = Self::run_osascript(&script)?;
-                Ok(ToolOutput::text(format!("Photo albums:\n{}", result)))
+                Ok(ToolOutput::text(format!("Photo albums:\n{result}")))
             }
             "recent" => {
                 let script = format!(
@@ -95,18 +94,17 @@ end tell"#,
     set recentItems to {{}}
     set allItems to media items
     set itemCount to count of allItems
-    set startIdx to (itemCount - {} + 1)
+    set startIdx to (itemCount - {limit} + 1)
     if startIdx < 1 then set startIdx to 1
     repeat with i from startIdx to itemCount
         set item_ to item i of allItems
         set end of recentItems to (filename of item_) & " — " & (date of item_ as text)
     end repeat
     return recentItems as text
-end tell"#,
-                    limit
+end tell"#
                 );
                 let result = Self::run_osascript(&script)?;
-                Ok(ToolOutput::text(format!("Recent photos:\n{}", result)))
+                Ok(ToolOutput::text(format!("Recent photos:\n{result}")))
             }
             "search" => {
                 let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
@@ -117,25 +115,22 @@ end tell"#,
                 let script = format!(
                     r#"tell application "Photos"
     set results to {{}}
-    set searchResults to (search for "{}")
+    set searchResults to (search for "{safe_query}")
     repeat with item_ in searchResults
-        if (count of results) >= {} then exit repeat
+        if (count of results) >= {limit} then exit repeat
         set end of results to (filename of item_) & " — " & (date of item_ as text)
     end repeat
     if (count of results) = 0 then return "No photos found."
     return results as text
-end tell"#,
-                    safe_query, limit
+end tell"#
                 );
                 let result = Self::run_osascript(&script)?;
                 Ok(ToolOutput::text(format!(
-                    "Search results for '{}':\n{}",
-                    query, result
+                    "Search results for '{query}':\n{result}"
                 )))
             }
             _ => Ok(ToolOutput::text(format!(
-                "Unknown action: {}. Use: search, list_albums, recent",
-                action
+                "Unknown action: {action}. Use: search, list_albums, recent"
             ))),
         }
     }

@@ -180,21 +180,21 @@ impl LifePlannerTool {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ToolError::ExecutionFailed {
                 name: "life_planner".to_string(),
-                message: format!("Failed to create state dir: {}", e),
+                message: format!("Failed to create state dir: {e}"),
             })?;
         }
         let json = serde_json::to_string_pretty(state).map_err(|e| ToolError::ExecutionFailed {
             name: "life_planner".to_string(),
-            message: format!("Failed to serialize state: {}", e),
+            message: format!("Failed to serialize state: {e}"),
         })?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, &json).map_err(|e| ToolError::ExecutionFailed {
             name: "life_planner".to_string(),
-            message: format!("Failed to write state: {}", e),
+            message: format!("Failed to write state: {e}"),
         })?;
         std::fs::rename(&tmp, &path).map_err(|e| ToolError::ExecutionFailed {
             name: "life_planner".to_string(),
-            message: format!("Failed to rename state file: {}", e),
+            message: format!("Failed to rename state file: {e}"),
         })?;
         Ok(())
     }
@@ -263,7 +263,7 @@ impl LifePlannerTool {
             if h > 23 {
                 return Err(ToolError::InvalidArguments {
                     name: "life_planner".to_string(),
-                    reason: format!("Invalid hour {}: must be 0-23", h),
+                    reason: format!("Invalid hour {h}: must be 0-23"),
                 });
             }
         }
@@ -273,7 +273,7 @@ impl LifePlannerTool {
             if low_energy_hours.contains(&h) {
                 return Err(ToolError::InvalidArguments {
                     name: "life_planner".to_string(),
-                    reason: format!("Hour {} appears in both peak_hours and low_energy_hours", h),
+                    reason: format!("Hour {h} appears in both peak_hours and low_energy_hours"),
                 });
             }
         }
@@ -291,8 +291,7 @@ impl LifePlannerTool {
         self.save_state(state)?;
 
         Ok(ToolOutput::text(format!(
-            "Energy profile updated.\n  Peak hours: {:?}\n  Low energy hours: {:?}\n  Break interval: {} mins",
-            peak_hours, low_energy_hours, break_interval
+            "Energy profile updated.\n  Peak hours: {peak_hours:?}\n  Low energy hours: {low_energy_hours:?}\n  Break interval: {break_interval} mins"
         )))
     }
 
@@ -329,7 +328,7 @@ impl LifePlannerTool {
         let parsed_date = NaiveDate::parse_from_str(&due_date, "%Y-%m-%d").map_err(|_| {
             ToolError::InvalidArguments {
                 name: "life_planner".to_string(),
-                reason: format!("Invalid due_date '{}': expected YYYY-MM-DD", due_date),
+                reason: format!("Invalid due_date '{due_date}': expected YYYY-MM-DD"),
             }
         })?;
 
@@ -378,8 +377,7 @@ impl LifePlannerTool {
         self.save_state(state)?;
 
         Ok(ToolOutput::text(format!(
-            "Deadline #{} added: '{}' due {} [{}] ({})",
-            id, title, due_date, priority, status
+            "Deadline #{id} added: '{title}' due {due_date} [{priority}] ({status})"
         )))
     }
 
@@ -403,7 +401,7 @@ impl LifePlannerTool {
                 .find(|h| h.id == hid)
                 .ok_or_else(|| ToolError::InvalidArguments {
                     name: "life_planner".to_string(),
-                    reason: format!("Habit #{} not found", hid),
+                    reason: format!("Habit #{hid} not found"),
                 })?;
 
             // Check if already completed today
@@ -499,8 +497,7 @@ impl LifePlannerTool {
             self.save_state(state)?;
 
             Ok(ToolOutput::text(format!(
-                "Habit #{} created: '{}' ({}, target streak: {}). Marked complete for today.",
-                id, habit_name, frequency, target_streak
+                "Habit #{id} created: '{habit_name}' ({frequency}, target streak: {target_streak}). Marked complete for today."
             )))
         } else {
             Err(ToolError::InvalidArguments {
@@ -747,7 +744,7 @@ impl LifePlannerTool {
             sorted.sort_by(|a, b| b.1.cmp(a.1));
             output.push_str("  Most interrupted tasks:\n");
             for (task, count) in sorted.iter().take(5) {
-                output.push_str(&format!("    '{}' — {} switches\n", task, count));
+                output.push_str(&format!("    '{task}' — {count} switches\n"));
             }
         }
 
@@ -809,7 +806,7 @@ impl LifePlannerTool {
         let reason_str = if reason.is_empty() {
             String::new()
         } else {
-            format!(" (reason: {})", reason)
+            format!(" (reason: {reason})")
         };
 
         Ok(ToolOutput::text(format!(
@@ -860,8 +857,7 @@ impl LifePlannerTool {
                     0
                 };
                 output.push_str(&format!(
-                    "  {}: {:.1}h ({}%) — {} total, {} done, {} overdue\n",
-                    cat, hours, pct, total, completed, overdue
+                    "  {cat}: {hours:.1}h ({pct}%) — {total} total, {completed} done, {overdue} overdue\n"
                 ));
             }
         }
@@ -904,8 +900,7 @@ impl LifePlannerTool {
             .count();
         let total_switches = state.context_switches.len();
         output.push_str(&format!(
-            "Context switches:\n  Today: {}\n  Total recorded: {}\n",
-            today_switches, total_switches
+            "Context switches:\n  Today: {today_switches}\n  Total recorded: {total_switches}\n"
         ));
 
         Ok(ToolOutput::text(output))
@@ -1122,8 +1117,7 @@ impl Tool for LifePlannerTool {
             "balance_report" => self.action_balance_report(&state),
             "optimize_schedule" => self.action_optimize_schedule(&state),
             _ => Ok(ToolOutput::text(format!(
-                "Unknown action: '{}'. Use: set_energy_profile, add_deadline, log_habit, daily_plan, weekly_review, context_switch_log, balance_report, optimize_schedule",
-                action
+                "Unknown action: '{action}'. Use: set_energy_profile, add_deadline, log_habit, daily_plan, weekly_review, context_switch_log, balance_report, optimize_schedule"
             ))),
         }
     }
@@ -1218,7 +1212,7 @@ mod tests {
                 assert!(reason.contains("25"));
                 assert!(reason.contains("0-23"));
             }
-            e => panic!("Expected InvalidArguments, got: {:?}", e),
+            e => panic!("Expected InvalidArguments, got: {e:?}"),
         }
     }
 
@@ -1238,7 +1232,7 @@ mod tests {
                 assert!(reason.contains("14"));
                 assert!(reason.contains("both"));
             }
-            e => panic!("Expected InvalidArguments, got: {:?}", e),
+            e => panic!("Expected InvalidArguments, got: {e:?}"),
         }
     }
 

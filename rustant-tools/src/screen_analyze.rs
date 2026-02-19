@@ -148,7 +148,7 @@ try:
     import Quartz
     from Foundation import NSURL
 
-    image_url = NSURL.fileURLWithPath_("{path}")
+    image_url = NSURL.fileURLWithPath_("{image_path}")
     image_source = Quartz.CGImageSourceCreateWithURL(image_url, None)
     if image_source is None:
         print("Error: Could not load image", file=sys.stderr)
@@ -181,8 +181,7 @@ except ImportError:
 except Exception as e:
     print(f"OCR error: {{e}}", file=sys.stderr)
     sys.exit(1)
-"#,
-        path = image_path
+"#
     );
 
     let output = tokio::process::Command::new("python3")
@@ -357,7 +356,7 @@ mod tests {
                 assert_eq!(name, "macos_screen_analyze");
                 assert!(reason.contains("action"));
             }
-            other => panic!("Expected InvalidArguments, got: {:?}", other),
+            other => panic!("Expected InvalidArguments, got: {other:?}"),
         }
     }
 
@@ -371,7 +370,7 @@ mod tests {
                 assert_eq!(name, "macos_screen_analyze");
                 assert!(reason.contains("bad"));
             }
-            other => panic!("Expected InvalidArguments, got: {:?}", other),
+            other => panic!("Expected InvalidArguments, got: {other:?}"),
         }
     }
 }

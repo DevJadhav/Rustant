@@ -100,7 +100,7 @@ async fn get_weather(location: &str) -> Result<String, String> {
     }
 
     // Return a graceful fallback instead of propagating the error
-    Ok(format!("Weather unavailable ({})", last_err))
+    Ok(format!("Weather unavailable ({last_err})"))
 }
 
 /// Simple URL encoding for location strings.
@@ -273,7 +273,7 @@ impl Tool for MacosDailyBriefingTool {
                     let weather = get_weather(location)
                         .await
                         .unwrap_or_else(|e| format!("Weather unavailable: {e}"));
-                    sections.push(format!("<h2>Weather</h2><p>{}</p>", weather));
+                    sections.push(format!("<h2>Weather</h2><p>{weather}</p>"));
                 }
 
                 // System status
@@ -405,8 +405,7 @@ impl Tool for MacosDailyBriefingTool {
             other => Err(ToolError::InvalidArguments {
                 name: "macos_daily_briefing".to_string(),
                 reason: format!(
-                    "unknown action '{}'. Valid actions: morning, evening, custom",
-                    other
+                    "unknown action '{other}'. Valid actions: morning, evening, custom"
                 ),
             }),
         }

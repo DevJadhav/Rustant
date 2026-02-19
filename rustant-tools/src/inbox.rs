@@ -63,21 +63,21 @@ impl InboxTool {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ToolError::ExecutionFailed {
                 name: "inbox".to_string(),
-                message: format!("Failed to create dir: {}", e),
+                message: format!("Failed to create dir: {e}"),
             })?;
         }
         let json = serde_json::to_string_pretty(state).map_err(|e| ToolError::ExecutionFailed {
             name: "inbox".to_string(),
-            message: format!("Serialize error: {}", e),
+            message: format!("Serialize error: {e}"),
         })?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, &json).map_err(|e| ToolError::ExecutionFailed {
             name: "inbox".to_string(),
-            message: format!("Write error: {}", e),
+            message: format!("Write error: {e}"),
         })?;
         std::fs::rename(&tmp, &path).map_err(|e| ToolError::ExecutionFailed {
             name: "inbox".to_string(),
-            message: format!("Rename error: {}", e),
+            message: format!("Rename error: {e}"),
         })?;
         Ok(())
     }
@@ -135,7 +135,7 @@ impl Tool for InboxTool {
                     done: false,
                 });
                 self.save_state(&state)?;
-                Ok(ToolOutput::text(format!("Added to inbox (#{}).", id)))
+                Ok(ToolOutput::text(format!("Added to inbox (#{id}).")))
             }
             "list" => {
                 let active: Vec<&InboxItem> = state.items.iter().filter(|i| !i.done).collect();
@@ -182,7 +182,7 @@ impl Tool for InboxTool {
                     })
                     .collect();
                 if matches.is_empty() {
-                    Ok(ToolOutput::text(format!("No items matching '{}'.", query)))
+                    Ok(ToolOutput::text(format!("No items matching '{query}'.")))
                 } else {
                     Ok(ToolOutput::text(format!(
                         "Found {} items:\n{}",
@@ -202,9 +202,9 @@ impl Tool for InboxTool {
                         item.tags.push(tag.to_string());
                     }
                     self.save_state(&state)?;
-                    Ok(ToolOutput::text(format!("Tagged #{} with '{}'.", id, tag)))
+                    Ok(ToolOutput::text(format!("Tagged #{id} with '{tag}'.")))
                 } else {
-                    Ok(ToolOutput::text(format!("Item #{} not found.", id)))
+                    Ok(ToolOutput::text(format!("Item #{id} not found.")))
                 }
             }
             "done" => {
@@ -212,9 +212,9 @@ impl Tool for InboxTool {
                 if let Some(item) = state.items.iter_mut().find(|i| i.id == id) {
                     item.done = true;
                     self.save_state(&state)?;
-                    Ok(ToolOutput::text(format!("Marked #{} as done.", id)))
+                    Ok(ToolOutput::text(format!("Marked #{id} as done.")))
                 } else {
-                    Ok(ToolOutput::text(format!("Item #{} not found.", id)))
+                    Ok(ToolOutput::text(format!("Item #{id} not found.")))
                 }
             }
             "clear" => {
@@ -222,13 +222,11 @@ impl Tool for InboxTool {
                 state.items.retain(|i| !i.done);
                 self.save_state(&state)?;
                 Ok(ToolOutput::text(format!(
-                    "Cleared {} completed items.",
-                    count
+                    "Cleared {count} completed items."
                 )))
             }
             _ => Ok(ToolOutput::text(format!(
-                "Unknown action: {}. Use: add, list, search, clear, tag, done",
-                action
+                "Unknown action: {action}. Use: add, list, search, clear, tag, done"
             ))),
         }
     }

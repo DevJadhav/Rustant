@@ -34,13 +34,13 @@ fn validate_workspace_path(
             .canonicalize()
             .map_err(|e| ToolError::ExecutionFailed {
                 name: tool_name.into(),
-                message: format!("Path resolution failed: {}", e),
+                message: format!("Path resolution failed: {e}"),
             })?;
 
         if !canonical.starts_with(&workspace_canonical) {
             return Err(ToolError::PermissionDenied {
                 name: tool_name.into(),
-                reason: format!("Path '{}' is outside the workspace", path_str),
+                reason: format!("Path '{path_str}' is outside the workspace"),
             });
         }
         return Ok(canonical);
@@ -54,7 +54,7 @@ fn validate_workspace_path(
                 if normalized.pop().is_none() {
                     return Err(ToolError::PermissionDenied {
                         name: tool_name.into(),
-                        reason: format!("Path '{}' escapes the workspace", path_str),
+                        reason: format!("Path '{path_str}' escapes the workspace"),
                     });
                 }
             }
@@ -67,7 +67,7 @@ fn validate_workspace_path(
     if !normalized_path.starts_with(&workspace_canonical) {
         return Err(ToolError::PermissionDenied {
             name: tool_name.into(),
-            reason: format!("Path '{}' is outside the workspace", path_str),
+            reason: format!("Path '{path_str}' is outside the workspace"),
         });
     }
 
@@ -96,7 +96,7 @@ impl FileReadTool {
             .canonicalize()
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "file_read".into(),
-                message: format!("Path resolution failed: {}", e),
+                message: format!("Path resolution failed: {e}"),
             })?;
 
         // Canonicalize workspace too, to handle symlinks (e.g., /var -> /private/var on macOS)
@@ -108,7 +108,7 @@ impl FileReadTool {
         if !canonical.starts_with(&workspace_canonical) {
             return Err(ToolError::PermissionDenied {
                 name: "file_read".into(),
-                reason: format!("Path '{}' is outside the workspace", path),
+                reason: format!("Path '{path}' is outside the workspace"),
             });
         }
 
@@ -164,7 +164,7 @@ impl Tool for FileReadTool {
                 .await
                 .map_err(|e| ToolError::ExecutionFailed {
                     name: "file_read".into(),
-                    message: format!("Failed to read '{}': {}", path_str, e),
+                    message: format!("Failed to read '{path_str}': {e}"),
                 })?;
 
         let start_line = args["start_line"].as_u64().map(|n| n as usize);
@@ -264,14 +264,14 @@ impl Tool for FileListTool {
         if !target_dir.exists() {
             return Err(ToolError::ExecutionFailed {
                 name: "file_list".into(),
-                message: format!("Directory '{}' does not exist", path_str),
+                message: format!("Directory '{path_str}' does not exist"),
             });
         }
 
         if !target_dir.is_dir() {
             return Err(ToolError::ExecutionFailed {
                 name: "file_list".into(),
-                message: format!("'{}' is not a directory", path_str),
+                message: format!("'{path_str}' is not a directory"),
             });
         }
 
@@ -309,7 +309,7 @@ impl Tool for FileListTool {
                     .await
                     .map_err(|e| ToolError::ExecutionFailed {
                         name: "file_list".into(),
-                        message: format!("Failed to read directory '{}': {}", path_str, e),
+                        message: format!("Failed to read directory '{path_str}': {e}"),
                     })?;
 
             while let Some(entry) =
@@ -318,7 +318,7 @@ impl Tool for FileListTool {
                     .await
                     .map_err(|e| ToolError::ExecutionFailed {
                         name: "file_list".into(),
-                        message: format!("Error reading entry: {}", e),
+                        message: format!("Error reading entry: {e}"),
                     })?
             {
                 let file_type =
@@ -327,18 +327,18 @@ impl Tool for FileListTool {
                         .await
                         .map_err(|e| ToolError::ExecutionFailed {
                             name: "file_list".into(),
-                            message: format!("Error reading file type: {}", e),
+                            message: format!("Error reading file type: {e}"),
                         })?;
 
                 let name = entry.file_name().to_string_lossy().to_string();
                 let type_indicator = if file_type.is_dir() { "/" } else { "" };
-                entries.push(format!("{}{}", name, type_indicator));
+                entries.push(format!("{name}{type_indicator}"));
             }
         }
 
         entries.sort();
         let output = if entries.is_empty() {
-            format!("Directory '{}' is empty", path_str)
+            format!("Directory '{path_str}' is empty")
         } else {
             format!("Contents of '{}':\n{}", path_str, entries.join("\n"))
         };
@@ -493,7 +493,7 @@ impl Tool for FileSearchTool {
         }
 
         let output = if results.is_empty() {
-            format!("No matches found for pattern '{}'", pattern)
+            format!("No matches found for pattern '{pattern}'")
         } else {
             format!(
                 "Found {} match{}:\n{}",
@@ -641,7 +641,7 @@ impl Tool for FileWriteTool {
                 .await
                 .map_err(|e| ToolError::ExecutionFailed {
                     name: "file_write".into(),
-                    message: format!("Failed to create directories: {}", e),
+                    message: format!("Failed to create directories: {e}"),
                 })?;
         }
 
@@ -654,7 +654,7 @@ impl Tool for FileWriteTool {
             .await
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "file_write".into(),
-                message: format!("Failed to write '{}': {}", path_str, e),
+                message: format!("Failed to write '{path_str}': {e}"),
             })?;
 
         let action = if existed { "Updated" } else { "Created" };
@@ -670,7 +670,7 @@ impl Tool for FileWriteTool {
         };
 
         Ok(
-            ToolOutput::text(format!("{} '{}' ({} bytes)", action, path_str, bytes))
+            ToolOutput::text(format!("{action} '{path_str}' ({bytes} bytes)"))
                 .with_artifact(artifact),
         )
     }
@@ -751,15 +751,14 @@ impl Tool for FilePatchTool {
                 .await
                 .map_err(|e| ToolError::ExecutionFailed {
                     name: "file_patch".into(),
-                    message: format!("Failed to read '{}': {}", path_str, e),
+                    message: format!("Failed to read '{path_str}': {e}"),
                 })?;
 
         if !content.contains(old_text) {
             return Err(ToolError::ExecutionFailed {
                 name: "file_patch".into(),
                 message: format!(
-                    "Could not find the specified text in '{}'. The old_text must match exactly.",
-                    path_str
+                    "Could not find the specified text in '{path_str}'. The old_text must match exactly."
                 ),
             });
         }
@@ -771,7 +770,7 @@ impl Tool for FilePatchTool {
             .await
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "file_patch".into(),
-                message: format!("Failed to write '{}': {}", path_str, e),
+                message: format!("Failed to write '{path_str}': {e}"),
             })?;
 
         let mut output = ToolOutput::text(format!(
@@ -873,7 +872,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             ToolError::InvalidArguments { name, .. } => assert_eq!(name, "file_read"),
-            e => panic!("Expected InvalidArguments, got: {:?}", e),
+            e => panic!("Expected InvalidArguments, got: {e:?}"),
         }
     }
 
@@ -1189,7 +1188,7 @@ mod tests {
                 assert_eq!(name, "file_patch");
                 assert!(message.contains("Could not find"));
             }
-            e => panic!("Expected ExecutionFailed, got: {:?}", e),
+            e => panic!("Expected ExecutionFailed, got: {e:?}"),
         }
     }
 
@@ -1232,7 +1231,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             ToolError::PermissionDenied { name, .. } => assert_eq!(name, "file_write"),
-            e => panic!("Expected PermissionDenied, got: {:?}", e),
+            e => panic!("Expected PermissionDenied, got: {e:?}"),
         }
     }
 
@@ -1250,7 +1249,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             ToolError::PermissionDenied { name, .. } => assert_eq!(name, "file_write"),
-            e => panic!("Expected PermissionDenied, got: {:?}", e),
+            e => panic!("Expected PermissionDenied, got: {e:?}"),
         }
     }
 
@@ -1273,7 +1272,7 @@ mod tests {
                 assert_eq!(name, "file_write");
                 assert!(reason.contains("exceeds maximum"));
             }
-            e => panic!("Expected InvalidArguments, got: {:?}", e),
+            e => panic!("Expected InvalidArguments, got: {e:?}"),
         }
     }
 
@@ -1308,7 +1307,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             ToolError::PermissionDenied { name, .. } => assert_eq!(name, "file_patch"),
-            e => panic!("Expected PermissionDenied, got: {:?}", e),
+            e => panic!("Expected PermissionDenied, got: {e:?}"),
         }
     }
 

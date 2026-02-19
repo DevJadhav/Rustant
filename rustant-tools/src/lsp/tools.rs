@@ -434,7 +434,7 @@ impl Tool for LspCompletionsTool {
                 let detail = item
                     .detail
                     .as_deref()
-                    .map(|d| format!(" - {}", d))
+                    .map(|d| format!(" - {d}"))
                     .unwrap_or_default();
                 format!("  {}{}", item.label, detail)
             })
@@ -528,7 +528,7 @@ impl Tool for LspRenameTool {
 
         let mut lines = Vec::new();
         for (uri, edits) in changes {
-            lines.push(format!("{}:", uri));
+            lines.push(format!("{uri}:"));
             for te in edits {
                 lines.push(format!(
                     "  line {}:{}-{}:{}: \"{}\"",
@@ -1274,7 +1274,7 @@ mod tests {
             ToolError::InvalidArguments { reason, .. } => {
                 assert!(reason.contains("character"));
             }
-            other => panic!("Expected InvalidArguments, got: {:?}", other),
+            other => panic!("Expected InvalidArguments, got: {other:?}"),
         }
 
         // Missing 'file'
@@ -1288,7 +1288,7 @@ mod tests {
             ToolError::InvalidArguments { reason, .. } => {
                 assert!(reason.contains("file"));
             }
-            other => panic!("Expected InvalidArguments, got: {:?}", other),
+            other => panic!("Expected InvalidArguments, got: {other:?}"),
         }
 
         // Missing 'line'
@@ -1302,7 +1302,7 @@ mod tests {
             ToolError::InvalidArguments { reason, .. } => {
                 assert!(reason.contains("line"));
             }
-            other => panic!("Expected InvalidArguments, got: {:?}", other),
+            other => panic!("Expected InvalidArguments, got: {other:?}"),
         }
     }
 }

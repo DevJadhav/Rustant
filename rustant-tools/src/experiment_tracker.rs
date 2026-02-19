@@ -142,21 +142,21 @@ impl ExperimentTrackerTool {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ToolError::ExecutionFailed {
                 name: "experiment_tracker".to_string(),
-                message: format!("Failed to create state dir: {}", e),
+                message: format!("Failed to create state dir: {e}"),
             })?;
         }
         let json = serde_json::to_string_pretty(state).map_err(|e| ToolError::ExecutionFailed {
             name: "experiment_tracker".to_string(),
-            message: format!("Failed to serialize state: {}", e),
+            message: format!("Failed to serialize state: {e}"),
         })?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, &json).map_err(|e| ToolError::ExecutionFailed {
             name: "experiment_tracker".to_string(),
-            message: format!("Failed to write state: {}", e),
+            message: format!("Failed to write state: {e}"),
         })?;
         std::fs::rename(&tmp, &path).map_err(|e| ToolError::ExecutionFailed {
             name: "experiment_tracker".to_string(),
-            message: format!("Failed to rename state file: {}", e),
+            message: format!("Failed to rename state file: {e}"),
         })?;
         Ok(())
     }
@@ -195,8 +195,7 @@ impl ExperimentTrackerTool {
         });
         self.save_state(&state)?;
         Ok(ToolOutput::text(format!(
-            "Added hypothesis {} — '{}'.",
-            id, title
+            "Added hypothesis {id} — '{title}'."
         )))
     }
 
@@ -229,11 +228,10 @@ impl ExperimentTrackerTool {
                 let status = h.status.clone();
                 self.save_state(&state)?;
                 Ok(ToolOutput::text(format!(
-                    "Updated hypothesis {} — '{}' [{}].",
-                    id, title, status
+                    "Updated hypothesis {id} — '{title}' [{status}]."
                 )))
             }
-            None => Ok(ToolOutput::text(format!("Hypothesis {} not found.", id))),
+            None => Ok(ToolOutput::text(format!("Hypothesis {id} not found."))),
         }
     }
 
@@ -344,7 +342,7 @@ impl ExperimentTrackerTool {
 
                 Ok(ToolOutput::text(out))
             }
-            None => Ok(ToolOutput::text(format!("Hypothesis {} not found.", id))),
+            None => Ok(ToolOutput::text(format!("Hypothesis {id} not found."))),
         }
     }
 
@@ -377,7 +375,7 @@ impl ExperimentTrackerTool {
         if let Some(ref hid) = hypothesis_id
             && !state.hypotheses.iter().any(|h| h.id == *hid)
         {
-            return Ok(ToolOutput::text(format!("Hypothesis {} not found.", hid)));
+            return Ok(ToolOutput::text(format!("Hypothesis {hid} not found.")));
         }
 
         let id = format!("e{}", state.next_experiment_id);
@@ -398,8 +396,7 @@ impl ExperimentTrackerTool {
         });
         self.save_state(&state)?;
         Ok(ToolOutput::text(format!(
-            "Added experiment {} — '{}'.",
-            id, name
+            "Added experiment {id} — '{name}'."
         )))
     }
 
@@ -423,11 +420,10 @@ impl ExperimentTrackerTool {
                 let name = e.name.clone();
                 self.save_state(&state)?;
                 Ok(ToolOutput::text(format!(
-                    "Experiment {} '{}' is now running.",
-                    id, name
+                    "Experiment {id} '{name}' is now running."
                 )))
             }
-            None => Ok(ToolOutput::text(format!("Experiment {} not found.", id))),
+            None => Ok(ToolOutput::text(format!("Experiment {id} not found."))),
         }
     }
 
@@ -457,11 +453,10 @@ impl ExperimentTrackerTool {
                 let name = e.name.clone();
                 self.save_state(&state)?;
                 Ok(ToolOutput::text(format!(
-                    "Experiment {} '{}' completed.",
-                    id, name
+                    "Experiment {id} '{name}' completed."
                 )))
             }
-            None => Ok(ToolOutput::text(format!("Experiment {} not found.", id))),
+            None => Ok(ToolOutput::text(format!("Experiment {id} not found."))),
         }
     }
 
@@ -488,11 +483,10 @@ impl ExperimentTrackerTool {
                 let name = e.name.clone();
                 self.save_state(&state)?;
                 Ok(ToolOutput::text(format!(
-                    "Experiment {} '{}' failed.",
-                    id, name
+                    "Experiment {id} '{name}' failed."
                 )))
             }
-            None => Ok(ToolOutput::text(format!("Experiment {} not found.", id))),
+            None => Ok(ToolOutput::text(format!("Experiment {id} not found."))),
         }
     }
 
@@ -562,7 +556,7 @@ impl ExperimentTrackerTool {
 
                 Ok(ToolOutput::text(out))
             }
-            None => Ok(ToolOutput::text(format!("Experiment {} not found.", id))),
+            None => Ok(ToolOutput::text(format!("Experiment {id} not found."))),
         }
     }
 
@@ -605,7 +599,7 @@ impl ExperimentTrackerTool {
                 let hyp = e
                     .hypothesis_id
                     .as_deref()
-                    .map(|h| format!(" ({})", h))
+                    .map(|h| format!(" ({h})"))
                     .unwrap_or_default();
                 let tags = if e.tags.is_empty() {
                     String::new()
@@ -653,8 +647,7 @@ impl ExperimentTrackerTool {
         // Validate experiment exists
         if !state.experiments.iter().any(|e| e.id == experiment_id) {
             return Ok(ToolOutput::text(format!(
-                "Experiment {} not found.",
-                experiment_id
+                "Experiment {experiment_id} not found."
             )));
         }
 
@@ -670,13 +663,11 @@ impl ExperimentTrackerTool {
                 });
                 self.save_state(&state)?;
                 Ok(ToolOutput::text(format!(
-                    "Recorded evidence for {} from {} (supports: {}, confidence: {:.2}).",
-                    hypothesis_id, experiment_id, supports, confidence
+                    "Recorded evidence for {hypothesis_id} from {experiment_id} (supports: {supports}, confidence: {confidence:.2})."
                 )))
             }
             None => Ok(ToolOutput::text(format!(
-                "Hypothesis {} not found.",
-                hypothesis_id
+                "Hypothesis {hypothesis_id} not found."
             ))),
         }
     }
@@ -777,8 +768,7 @@ impl ExperimentTrackerTool {
             .filter(|h| h.status == HypothesisStatus::Inconclusive)
             .count();
         out.push_str(&format!(
-            "  Proposed: {}, Testing: {}, Supported: {}, Refuted: {}, Inconclusive: {}\n",
-            proposed, testing, supported, refuted, inconclusive
+            "  Proposed: {proposed}, Testing: {testing}, Supported: {supported}, Refuted: {refuted}, Inconclusive: {inconclusive}\n"
         ));
 
         // Evidence balance
@@ -790,8 +780,7 @@ impl ExperimentTrackerTool {
             .count();
         let opposing = total_evidence - supporting;
         out.push_str(&format!(
-            "\nEvidence: {} total ({} supporting, {} opposing)\n",
-            total_evidence, supporting, opposing
+            "\nEvidence: {total_evidence} total ({supporting} supporting, {opposing} opposing)\n"
         ));
 
         if total_evidence > 0 {
@@ -801,7 +790,7 @@ impl ExperimentTrackerTool {
                 .map(|e| e.confidence)
                 .sum::<f64>()
                 / total_evidence as f64;
-            out.push_str(&format!("  Average confidence: {:.2}\n", avg_confidence));
+            out.push_str(&format!("  Average confidence: {avg_confidence:.2}\n"));
         }
 
         // Experiment stats
@@ -823,13 +812,12 @@ impl ExperimentTrackerTool {
             .filter(|e| e.status == ExperimentStatus::Planned)
             .count();
         out.push_str(&format!(
-            "  Planned: {}, Running: {}, Completed: {}, Failed: {}\n",
-            planned, running, completed, failed
+            "  Planned: {planned}, Running: {running}, Completed: {completed}, Failed: {failed}\n"
         ));
 
         if completed + failed > 0 {
             let success_rate = completed as f64 / (completed + failed) as f64 * 100.0;
-            out.push_str(&format!("  Success rate: {:.0}%\n", success_rate));
+            out.push_str(&format!("  Success rate: {success_rate:.0}%\n"));
         }
 
         Ok(ToolOutput::text(out))
@@ -1037,8 +1025,7 @@ impl Tool for ExperimentTrackerTool {
             "summary" => self.action_summary(&args),
             "export_markdown" => self.action_export_markdown(&args),
             _ => Ok(ToolOutput::text(format!(
-                "Unknown action: '{}'. Use: add_hypothesis, update_hypothesis, list_hypotheses, get_hypothesis, add_experiment, start_experiment, complete_experiment, fail_experiment, get_experiment, list_experiments, record_evidence, compare_experiments, summary, export_markdown",
-                action
+                "Unknown action: '{action}'. Use: add_hypothesis, update_hypothesis, list_hypotheses, get_hypothesis, add_experiment, start_experiment, complete_experiment, fail_experiment, get_experiment, list_experiments, record_evidence, compare_experiments, summary, export_markdown"
             ))),
         }
     }

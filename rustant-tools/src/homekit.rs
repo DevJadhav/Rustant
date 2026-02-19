@@ -77,7 +77,7 @@ impl Tool for HomeKitTool {
                     .output()
                     .map_err(|e| ToolError::ExecutionFailed {
                         name: "homekit".to_string(),
-                        message: format!("Failed to list shortcuts: {}", e),
+                        message: format!("Failed to list shortcuts: {e}"),
                     })?;
 
                 let stdout = String::from_utf8_lossy(&output.stdout);
@@ -131,27 +131,25 @@ impl Tool for HomeKitTool {
                     .output()
                     .map_err(|e| ToolError::ExecutionFailed {
                         name: "homekit".to_string(),
-                        message: format!("Failed to run shortcut '{}': {}", name, e),
+                        message: format!("Failed to run shortcut '{name}': {e}"),
                     })?;
 
                 if output.status.success() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     if stdout.is_empty() {
                         Ok(ToolOutput::text(format!(
-                            "Shortcut '{}' executed successfully.",
-                            name
+                            "Shortcut '{name}' executed successfully."
                         )))
                     } else {
                         Ok(ToolOutput::text(format!(
-                            "Shortcut '{}' output:\n{}",
-                            name, stdout
+                            "Shortcut '{name}' output:\n{stdout}"
                         )))
                     }
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     Err(ToolError::ExecutionFailed {
                         name: "homekit".to_string(),
-                        message: format!("Shortcut '{}' failed: {}", name, stderr),
+                        message: format!("Shortcut '{name}' failed: {stderr}"),
                     })
                 }
             }
@@ -174,33 +172,31 @@ impl Tool for HomeKitTool {
                     .output()
                     .map_err(|e| ToolError::ExecutionFailed {
                         name: "homekit".to_string(),
-                        message: format!("Failed to run shortcut '{}' with input: {}", name, e),
+                        message: format!("Failed to run shortcut '{name}' with input: {e}"),
                     })?;
 
                 if output.status.success() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     if stdout.is_empty() {
                         Ok(ToolOutput::text(format!(
-                            "Shortcut '{}' executed with input '{}'.",
-                            name, input
+                            "Shortcut '{name}' executed with input '{input}'."
                         )))
                     } else {
                         Ok(ToolOutput::text(format!(
-                            "Shortcut '{}' output:\n{}",
-                            name, stdout
+                            "Shortcut '{name}' output:\n{stdout}"
                         )))
                     }
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     Err(ToolError::ExecutionFailed {
                         name: "homekit".to_string(),
-                        message: format!("Shortcut '{}' failed: {}", name, stderr),
+                        message: format!("Shortcut '{name}' failed: {stderr}"),
                     })
                 }
             }
             _ => Err(ToolError::InvalidArguments {
                 name: "homekit".to_string(),
-                reason: format!("Unknown action: {}", action),
+                reason: format!("Unknown action: {action}"),
             }),
         }
     }

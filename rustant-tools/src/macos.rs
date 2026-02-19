@@ -100,7 +100,7 @@ pub(crate) fn require_str<'a>(
         .as_str()
         .ok_or_else(|| ToolError::InvalidArguments {
             name: tool_name.to_string(),
-            reason: format!("missing required '{}' parameter", field),
+            reason: format!("missing required '{field}' parameter"),
         })
 }
 
@@ -274,8 +274,7 @@ end tell"#
             other => Err(ToolError::InvalidArguments {
                 name: "macos_calendar".to_string(),
                 reason: format!(
-                    "unknown action '{}'. Valid actions: list, create, delete, search",
-                    other
+                    "unknown action '{other}'. Valid actions: list, create, delete, search"
                 ),
             }),
         }
@@ -468,8 +467,7 @@ end tell"#
             other => Err(ToolError::InvalidArguments {
                 name: "macos_reminders".to_string(),
                 reason: format!(
-                    "unknown action '{}'. Valid actions: list, create, complete, search",
-                    other
+                    "unknown action '{other}'. Valid actions: list, create, complete, search"
                 ),
             }),
         }
@@ -649,8 +647,7 @@ end tell"#
             other => Err(ToolError::InvalidArguments {
                 name: "macos_notes".to_string(),
                 reason: format!(
-                    "unknown action '{}'. Valid actions: list, create, read, search",
-                    other
+                    "unknown action '{other}'. Valid actions: list, create, read, search"
                 ),
             }),
         }
@@ -760,8 +757,7 @@ impl Tool for MacosAppControlTool {
             other => Err(ToolError::InvalidArguments {
                 name: "macos_app_control".to_string(),
                 reason: format!(
-                    "unknown action '{}'. Valid actions: open, quit, list_running, activate",
-                    other
+                    "unknown action '{other}'. Valid actions: open, quit, list_running, activate"
                 ),
             }),
         }
@@ -934,7 +930,7 @@ impl Tool for MacosClipboardTool {
             }
             other => Err(ToolError::InvalidArguments {
                 name: "macos_clipboard".to_string(),
-                reason: format!("unknown action '{}'. Valid actions: read, write", other),
+                reason: format!("unknown action '{other}'. Valid actions: read, write"),
             }),
         }
     }
@@ -1326,8 +1322,7 @@ end tell"#
             other => Err(ToolError::InvalidArguments {
                 name: "macos_finder".to_string(),
                 reason: format!(
-                    "unknown action '{}'. Valid actions: reveal, open_folder, get_selection, trash",
-                    other
+                    "unknown action '{other}'. Valid actions: reveal, open_folder, get_selection, trash"
                 ),
             }),
         }
@@ -1455,8 +1450,7 @@ impl Tool for MacosFocusModeTool {
             other => Err(ToolError::InvalidArguments {
                 name: "macos_focus_mode".to_string(),
                 reason: format!(
-                    "unknown action '{}'. Valid actions: status, enable, disable, toggle",
-                    other
+                    "unknown action '{other}'. Valid actions: status, enable, disable, toggle"
                 ),
             }),
         }
@@ -1682,8 +1676,7 @@ end tell"#
             other => Err(ToolError::InvalidArguments {
                 name: "macos_mail".to_string(),
                 reason: format!(
-                    "unknown action '{}'. Valid actions: list_unread, read, search, compose, send",
-                    other
+                    "unknown action '{other}'. Valid actions: list_unread, read, search, compose, send"
                 ),
             }),
         }
@@ -1856,8 +1849,7 @@ end tell"#
             other => Err(ToolError::InvalidArguments {
                 name: "macos_music".to_string(),
                 reason: format!(
-                    "unknown action '{}'. Valid: play, pause, next, previous, now_playing, search_play, set_volume",
-                    other
+                    "unknown action '{other}'. Valid: play, pause, next, previous, now_playing, search_play, set_volume"
                 ),
             }),
         }
@@ -1940,9 +1932,9 @@ impl Tool for MacosShortcutsTool {
                         message: e,
                     })?;
                 Ok(ToolOutput::text(if result.is_empty() {
-                    format!("Shortcut '{}' executed.", name)
+                    format!("Shortcut '{name}' executed.")
                 } else {
-                    format!("Shortcut '{}' output:\n{}", name, result)
+                    format!("Shortcut '{name}' output:\n{result}")
                 }))
             }
             "run_with_input" => {
@@ -1977,9 +1969,9 @@ impl Tool for MacosShortcutsTool {
                 let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if output.status.success() {
                     Ok(ToolOutput::text(if stdout.is_empty() {
-                        format!("Shortcut '{}' executed with input.", name)
+                        format!("Shortcut '{name}' executed with input.")
                     } else {
-                        format!("Shortcut '{}' output:\n{}", name, stdout)
+                        format!("Shortcut '{name}' output:\n{stdout}")
                     }))
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -1992,8 +1984,7 @@ impl Tool for MacosShortcutsTool {
             other => Err(ToolError::InvalidArguments {
                 name: "macos_shortcuts".to_string(),
                 reason: format!(
-                    "unknown action '{}'. Valid actions: list, run, run_with_input",
-                    other
+                    "unknown action '{other}'. Valid actions: list, run, run_with_input"
                 ),
             }),
         }

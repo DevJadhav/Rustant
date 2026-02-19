@@ -117,10 +117,7 @@ impl Tool for SlackTool {
 
                 let ts = resp["ts"].as_str().unwrap_or("unknown");
                 let ch = resp["channel"].as_str().unwrap_or(channel);
-                Ok(ToolOutput::text(format!(
-                    "Message sent to {} (ts: {})",
-                    ch, ts
-                )))
+                Ok(ToolOutput::text(format!("Message sent to {ch} (ts: {ts})")))
             }
 
             "read_messages" => {
@@ -154,13 +151,12 @@ impl Tool for SlackTool {
                             let user = msg["user"].as_str().unwrap_or("unknown");
                             let text = msg["text"].as_str().unwrap_or("");
                             let ts = msg["ts"].as_str().unwrap_or("");
-                            output.push_str(&format!("[{}] {}: {}\n", ts, user, text));
+                            output.push_str(&format!("[{ts}] {user}: {text}\n"));
                         }
                         Ok(ToolOutput::text(output))
                     }
                     _ => Ok(ToolOutput::text(format!(
-                        "No recent messages in {}.",
-                        channel
+                        "No recent messages in {channel}."
                     ))),
                 }
             }
@@ -185,12 +181,10 @@ impl Tool for SlackTool {
                             } else {
                                 ""
                             };
-                            output.push_str(&format!(
-                                "#{}{} [{}] — {} members",
-                                name, private, id, members
-                            ));
+                            output
+                                .push_str(&format!("#{name}{private} [{id}] — {members} members"));
                             if !purpose.is_empty() {
-                                output.push_str(&format!(" — {}", purpose));
+                                output.push_str(&format!(" — {purpose}"));
                             }
                             output.push('\n');
                         }
@@ -244,8 +238,7 @@ impl Tool for SlackTool {
 
                 let ts = resp["ts"].as_str().unwrap_or("unknown");
                 Ok(ToolOutput::text(format!(
-                    "Thread reply sent to {} (ts: {})",
-                    channel, ts
+                    "Thread reply sent to {channel} (ts: {ts})"
                 )))
             }
 
@@ -266,10 +259,7 @@ impl Tool for SlackTool {
                             let id = user["id"].as_str().unwrap_or("?");
                             let is_bot = user["is_bot"].as_bool().unwrap_or(false);
                             let bot_tag = if is_bot { " [bot]" } else { "" };
-                            output.push_str(&format!(
-                                "@{}{} ({}) [{}]\n",
-                                name, bot_tag, real_name, id
-                            ));
+                            output.push_str(&format!("@{name}{bot_tag} ({real_name}) [{id}]\n"));
                         }
                         Ok(ToolOutput::text(output))
                     }
@@ -322,16 +312,14 @@ impl Tool for SlackTool {
                 .await?;
 
                 Ok(ToolOutput::text(format!(
-                    "Reaction :{}:  added to message in {}.",
-                    emoji, channel
+                    "Reaction :{emoji}:  added to message in {channel}."
                 )))
             }
 
             other => Err(ToolError::InvalidArguments {
                 name: "slack".to_string(),
                 reason: format!(
-                    "unknown action '{}'. Valid: send_message, read_messages, list_channels, reply_thread, list_users, add_reaction",
-                    other
+                    "unknown action '{other}'. Valid: send_message, read_messages, list_channels, reply_thread, list_users, add_reaction"
                 ),
             }),
         }
@@ -390,25 +378,25 @@ async fn slack_api_get(
 ) -> Result<serde_json::Value, ToolError> {
     let resp = client
         .get(url)
-        .header("Authorization", format!("Bearer {}", token))
+        .header("Authorization", format!("Bearer {token}"))
         .timeout(Duration::from_secs(15))
         .send()
         .await
         .map_err(|e| ToolError::ExecutionFailed {
             name: "slack".to_string(),
-            message: format!("HTTP request failed: {}", e),
+            message: format!("HTTP request failed: {e}"),
         })?;
 
     let status = resp.status();
     let body: serde_json::Value = resp.json().await.map_err(|e| ToolError::ExecutionFailed {
         name: "slack".to_string(),
-        message: format!("Failed to parse response: {}", e),
+        message: format!("Failed to parse response: {e}"),
     })?;
 
     if !status.is_success() {
         return Err(ToolError::ExecutionFailed {
             name: "slack".to_string(),
-            message: format!("Slack API returned HTTP {}: {:?}", status, body),
+            message: format!("Slack API returned HTTP {status}: {body:?}"),
         });
     }
 
@@ -416,7 +404,7 @@ async fn slack_api_get(
         let error = body["error"].as_str().unwrap_or("unknown_error");
         return Err(ToolError::ExecutionFailed {
             name: "slack".to_string(),
-            message: format!("Slack API error: {}", error),
+            message: format!("Slack API error: {error}"),
         });
     }
 
@@ -432,7 +420,7 @@ async fn slack_api_post(
 ) -> Result<serde_json::Value, ToolError> {
     let resp = client
         .post(url)
-        .header("Authorization", format!("Bearer {}", token))
+        .header("Authorization", format!("Bearer {token}"))
         .header("Content-Type", "application/json; charset=utf-8")
         .timeout(Duration::from_secs(15))
         .json(body)
@@ -440,20 +428,20 @@ async fn slack_api_post(
         .await
         .map_err(|e| ToolError::ExecutionFailed {
             name: "slack".to_string(),
-            message: format!("HTTP request failed: {}", e),
+            message: format!("HTTP request failed: {e}"),
         })?;
 
     let status = resp.status();
     let resp_body: serde_json::Value =
         resp.json().await.map_err(|e| ToolError::ExecutionFailed {
             name: "slack".to_string(),
-            message: format!("Failed to parse response: {}", e),
+            message: format!("Failed to parse response: {e}"),
         })?;
 
     if !status.is_success() {
         return Err(ToolError::ExecutionFailed {
             name: "slack".to_string(),
-            message: format!("Slack API returned HTTP {}: {:?}", status, resp_body),
+            message: format!("Slack API returned HTTP {status}: {resp_body:?}"),
         });
     }
 
@@ -461,7 +449,7 @@ async fn slack_api_post(
         let error = resp_body["error"].as_str().unwrap_or("unknown_error");
         return Err(ToolError::ExecutionFailed {
             name: "slack".to_string(),
-            message: format!("Slack API error: {}", error),
+            message: format!("Slack API error: {error}"),
         });
     }
 

@@ -115,7 +115,7 @@ impl ShellExecTool {
             .spawn()
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "shell_exec".into(),
-                message: format!("Failed to execute command: {}", e),
+                message: format!("Failed to execute command: {e}"),
             })?;
 
         // Send initial progress
@@ -170,7 +170,7 @@ impl ShellExecTool {
         // Wait for the process to complete
         let status = child.wait().await.map_err(|e| ToolError::ExecutionFailed {
             name: "shell_exec".into(),
-            message: format!("Failed to wait for command: {}", e),
+            message: format!("Failed to wait for command: {e}"),
         })?;
 
         // Collect output from tasks
@@ -224,7 +224,7 @@ impl ShellExecTool {
             .await
             .map_err(|e| ToolError::ExecutionFailed {
                 name: "shell_exec".into(),
-                message: format!("Failed to execute command: {}", e),
+                message: format!("Failed to execute command: {e}"),
             })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -346,7 +346,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             ToolError::InvalidArguments { name, .. } => assert_eq!(name, "shell_exec"),
-            e => panic!("Expected InvalidArguments, got: {:?}", e),
+            e => panic!("Expected InvalidArguments, got: {e:?}"),
         }
     }
 
@@ -390,8 +390,7 @@ mod tests {
         // At least the initial ToolProgress + 2 stdout lines
         assert!(
             progress_count >= 3,
-            "Expected at least 3 progress updates, got {}",
-            progress_count
+            "Expected at least 3 progress updates, got {progress_count}"
         );
     }
 

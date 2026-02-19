@@ -137,7 +137,7 @@ impl Tool for CalculatorTool {
                 let formatted = if result.fract() == 0.0 && result.abs() < i64::MAX as f64 {
                     format!("{}", result as i64)
                 } else {
-                    format!("{}", result)
+                    format!("{result}")
                 };
                 Ok(ToolOutput::text(formatted))
             }
@@ -205,7 +205,7 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                 }
                 let num: f64 = num_str
                     .parse()
-                    .map_err(|_| format!("Invalid number: {}", num_str))?;
+                    .map_err(|_| format!("Invalid number: {num_str}"))?;
                 tokens.push(Token::Number(num));
             }
             '+' => {
@@ -245,7 +245,7 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                             }
                             let num: f64 = num_str
                                 .parse()
-                                .map_err(|_| format!("Invalid number: {}", num_str))?;
+                                .map_err(|_| format!("Invalid number: {num_str}"))?;
                             tokens.push(Token::Number(-num));
                         } else if c == '(' {
                             // Unary minus before parenthesized expression:
@@ -253,7 +253,7 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                             tokens.push(Token::Number(-1.0));
                             tokens.push(Token::Star);
                         } else {
-                            return Err(format!("Unexpected character after unary minus: {}", c));
+                            return Err(format!("Unexpected character after unary minus: {c}"));
                         }
                     } else {
                         return Err("Unexpected end of expression after minus".to_string());
@@ -279,7 +279,7 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                 chars.next();
             }
             _ => {
-                return Err(format!("Unexpected character: '{}'", ch));
+                return Err(format!("Unexpected character: '{ch}'"));
             }
         }
     }
@@ -357,7 +357,7 @@ fn parse_factor(tokens: &[Token], pos: &mut usize) -> Result<f64, String> {
                 _ => Err("Expected closing parenthesis".to_string()),
             }
         }
-        other => Err(format!("Unexpected token: {:?}", other)),
+        other => Err(format!("Unexpected token: {other:?}")),
     }
 }
 

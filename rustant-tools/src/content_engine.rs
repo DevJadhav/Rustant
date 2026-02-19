@@ -170,21 +170,21 @@ impl ContentEngineTool {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ToolError::ExecutionFailed {
                 name: "content_engine".to_string(),
-                message: format!("Failed to create state dir: {}", e),
+                message: format!("Failed to create state dir: {e}"),
             })?;
         }
         let json = serde_json::to_string_pretty(state).map_err(|e| ToolError::ExecutionFailed {
             name: "content_engine".to_string(),
-            message: format!("Failed to serialize state: {}", e),
+            message: format!("Failed to serialize state: {e}"),
         })?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, &json).map_err(|e| ToolError::ExecutionFailed {
             name: "content_engine".to_string(),
-            message: format!("Failed to write state: {}", e),
+            message: format!("Failed to write state: {e}"),
         })?;
         std::fs::rename(&tmp, &path).map_err(|e| ToolError::ExecutionFailed {
             name: "content_engine".to_string(),
-            message: format!("Failed to rename state file: {}", e),
+            message: format!("Failed to rename state file: {e}"),
         })?;
         Ok(())
     }
@@ -403,8 +403,7 @@ impl Tool for ContentEngineTool {
                 self.save_state(&state)?;
 
                 Ok(ToolOutput::text(format!(
-                    "Created content #{} '{}' ({}, {}).",
-                    id, title, platform, status
+                    "Created content #{id} '{title}' ({platform}, {status})."
                 )))
             }
 
@@ -412,7 +411,7 @@ impl Tool for ContentEngineTool {
                 let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                 let idx = match Self::find_piece(&state.pieces, id) {
                     Some(i) => i,
-                    None => return Ok(ToolOutput::text(format!("Content #{} not found.", id))),
+                    None => return Ok(ToolOutput::text(format!("Content #{id} not found."))),
                 };
 
                 if let Some(title) = args.get("title").and_then(|v| v.as_str()) {
@@ -449,14 +448,13 @@ impl Tool for ContentEngineTool {
                     Some(s) => s,
                     None => {
                         return Ok(ToolOutput::text(format!(
-                            "Unknown status '{}'. Use: idea, draft, review, scheduled, published, archived.",
-                            status_str
+                            "Unknown status '{status_str}'. Use: idea, draft, review, scheduled, published, archived."
                         )));
                     }
                 };
                 let idx = match Self::find_piece(&state.pieces, id) {
                     Some(i) => i,
-                    None => return Ok(ToolOutput::text(format!("Content #{} not found.", id))),
+                    None => return Ok(ToolOutput::text(format!("Content #{id} not found."))),
                 };
 
                 state.pieces[idx].status = new_status.clone();
@@ -467,8 +465,7 @@ impl Tool for ContentEngineTool {
                 self.save_state(&state)?;
 
                 Ok(ToolOutput::text(format!(
-                    "Content #{} status set to {}.",
-                    id, new_status
+                    "Content #{id} status set to {new_status}."
                 )))
             }
 
@@ -478,7 +475,7 @@ impl Tool for ContentEngineTool {
                     Some(idx) => Ok(ToolOutput::text(Self::format_piece_detail(
                         &state.pieces[idx],
                     ))),
-                    None => Ok(ToolOutput::text(format!("Content #{} not found.", id))),
+                    None => Ok(ToolOutput::text(format!("Content #{id} not found."))),
                 }
             }
 
@@ -552,10 +549,7 @@ impl Tool for ContentEngineTool {
                     .collect();
 
                 if matches.is_empty() {
-                    Ok(ToolOutput::text(format!(
-                        "No content matching '{}'.",
-                        query
-                    )))
+                    Ok(ToolOutput::text(format!("No content matching '{query}'.")))
                 } else {
                     Ok(ToolOutput::text(format!(
                         "Found {} pieces:\n{}",
@@ -569,7 +563,7 @@ impl Tool for ContentEngineTool {
                 let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                 let idx = match Self::find_piece(&state.pieces, id) {
                     Some(i) => i,
-                    None => return Ok(ToolOutput::text(format!("Content #{} not found.", id))),
+                    None => return Ok(ToolOutput::text(format!("Content #{id} not found."))),
                 };
                 let title = state.pieces[idx].title.clone();
                 state.pieces.remove(idx);
@@ -578,8 +572,7 @@ impl Tool for ContentEngineTool {
                 self.save_state(&state)?;
 
                 Ok(ToolOutput::text(format!(
-                    "Deleted content #{} '{}' and linked calendar entries.",
-                    id, title
+                    "Deleted content #{id} '{title}' and linked calendar entries."
                 )))
             }
 
@@ -593,17 +586,17 @@ impl Tool for ContentEngineTool {
                 }
                 let time_str = args.get("time").and_then(|v| v.as_str()).unwrap_or("09:00");
 
-                let datetime_str = format!("{}T{}:00Z", date_str, time_str);
+                let datetime_str = format!("{date_str}T{time_str}:00Z");
                 let scheduled_dt = datetime_str.parse::<DateTime<Utc>>().map_err(|e| {
                     ToolError::ExecutionFailed {
                         name: "content_engine".to_string(),
-                        message: format!("Invalid date/time '{}': {}", datetime_str, e),
+                        message: format!("Invalid date/time '{datetime_str}': {e}"),
                     }
                 })?;
 
                 let idx = match Self::find_piece(&state.pieces, id) {
                     Some(i) => i,
-                    None => return Ok(ToolOutput::text(format!("Content #{} not found.", id))),
+                    None => return Ok(ToolOutput::text(format!("Content #{id} not found."))),
                 };
 
                 state.pieces[idx].status = ContentStatus::Scheduled;
@@ -662,8 +655,7 @@ impl Tool for ContentEngineTool {
                 self.save_state(&state)?;
 
                 Ok(ToolOutput::text(format!(
-                    "Added calendar entry: {} on {} ({}).",
-                    topic, date, platform
+                    "Added calendar entry: {topic} on {date} ({platform})."
                 )))
             }
 
@@ -695,7 +687,7 @@ impl Tool for ContentEngineTool {
                     .map(|c| {
                         let linked = c
                             .content_id
-                            .map(|id| format!(" (content #{})", id))
+                            .map(|id| format!(" (content #{id})"))
                             .unwrap_or_default();
                         let notes = if c.notes.is_empty() {
                             String::new()
@@ -723,8 +715,7 @@ impl Tool for ContentEngineTool {
                     Some(p) => p,
                     None => {
                         return Ok(ToolOutput::text(format!(
-                            "Unknown platform '{}'. Use: blog, twitter, linkedin, github, medium, newsletter.",
-                            platform_str
+                            "Unknown platform '{platform_str}'. Use: blog, twitter, linkedin, github, medium, newsletter."
                         )));
                     }
                 };
@@ -737,15 +728,13 @@ impl Tool for ContentEngineTool {
 
                 if removed == 0 {
                     return Ok(ToolOutput::text(format!(
-                        "No calendar entry found for {} on {}.",
-                        platform, date
+                        "No calendar entry found for {platform} on {date}."
                     )));
                 }
 
                 self.save_state(&state)?;
                 Ok(ToolOutput::text(format!(
-                    "Removed {} calendar entry/entries for {} on {}.",
-                    removed, platform, date
+                    "Removed {removed} calendar entry/entries for {platform} on {date}."
                 )))
             }
 
@@ -786,20 +775,20 @@ impl Tool for ContentEngineTool {
 
                 let mut out = String::from("Content stats:\n");
                 out.push_str(&format!("  Total pieces: {}\n", state.pieces.len()));
-                out.push_str(&format!("  Total words:  {}\n\n", total_words));
+                out.push_str(&format!("  Total words:  {total_words}\n\n"));
 
                 out.push_str("  By status:\n");
                 let mut status_entries: Vec<_> = by_status.iter().collect();
                 status_entries.sort_by_key(|(k, _)| (*k).clone());
                 for (status, count) in &status_entries {
-                    out.push_str(&format!("    {}: {}\n", status, count));
+                    out.push_str(&format!("    {status}: {count}\n"));
                 }
 
                 out.push_str("\n  By platform:\n");
                 let mut platform_entries: Vec<_> = by_platform.iter().collect();
                 platform_entries.sort_by_key(|(k, _)| (*k).clone());
                 for (platform, count) in &platform_entries {
-                    out.push_str(&format!("    {}: {}\n", platform, count));
+                    out.push_str(&format!("    {platform}: {count}\n"));
                 }
 
                 if !upcoming.is_empty() {
@@ -826,8 +815,7 @@ impl Tool for ContentEngineTool {
                     Some(p) => p,
                     None => {
                         return Ok(ToolOutput::text(format!(
-                            "Unknown target platform '{}'. Use: blog, twitter, linkedin, github, medium, newsletter.",
-                            target_str
+                            "Unknown target platform '{target_str}'. Use: blog, twitter, linkedin, github, medium, newsletter."
                         )));
                     }
                 };
@@ -838,7 +826,7 @@ impl Tool for ContentEngineTool {
 
                 let idx = match Self::find_piece(&state.pieces, id) {
                     Some(i) => i,
-                    None => return Ok(ToolOutput::text(format!("Content #{} not found.", id))),
+                    None => return Ok(ToolOutput::text(format!("Content #{id} not found."))),
                 };
 
                 let piece = &state.pieces[idx];
@@ -846,12 +834,11 @@ impl Tool for ContentEngineTool {
 
                 let mut prompt = String::new();
                 prompt.push_str(&format!(
-                    "Adapt the following content for {}.\n\n",
-                    target_platform
+                    "Adapt the following content for {target_platform}.\n\n"
                 ));
-                prompt.push_str(&format!("Platform constraints:\n{}\n\n", constraints));
+                prompt.push_str(&format!("Platform constraints:\n{constraints}\n\n"));
                 if !target_tone.is_empty() {
-                    prompt.push_str(&format!("Target tone: {}\n\n", target_tone));
+                    prompt.push_str(&format!("Target tone: {target_tone}\n\n"));
                 } else if !piece.tone.is_empty() {
                     prompt.push_str(&format!("Original tone: {}\n\n", piece.tone));
                 }
@@ -863,8 +850,7 @@ impl Tool for ContentEngineTool {
                 prompt.push_str(&format!("Original content:\n{}\n", piece.body));
 
                 Ok(ToolOutput::text(format!(
-                    "Adaptation prompt for #{} → {}:\n\n{}",
-                    id, target_platform, prompt
+                    "Adaptation prompt for #{id} → {target_platform}:\n\n{prompt}"
                 )))
             }
 
@@ -921,8 +907,7 @@ impl Tool for ContentEngineTool {
             }
 
             _ => Ok(ToolOutput::text(format!(
-                "Unknown action: '{}'. Use: create, update, set_status, get, list, search, delete, schedule, calendar_add, calendar_list, calendar_remove, stats, adapt, export_markdown.",
-                action
+                "Unknown action: '{action}'. Use: create, update, set_status, get, list, search, delete, schedule, calendar_add, calendar_list, calendar_remove, stats, adapt, export_markdown."
             ))),
         }
     }

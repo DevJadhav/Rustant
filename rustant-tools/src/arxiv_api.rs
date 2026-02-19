@@ -261,7 +261,7 @@ impl std::fmt::Display for ImplementationStatus {
             Self::Implementing => write!(f, "implementing"),
             Self::TestsPassing => write!(f, "tests_passing"),
             Self::Complete => write!(f, "complete"),
-            Self::Failed(msg) => write!(f, "failed: {}", msg),
+            Self::Failed(msg) => write!(f, "failed: {msg}"),
         }
     }
 }
@@ -382,7 +382,7 @@ impl ArxivClient {
             .connect_timeout(Duration::from_secs(10))
             .user_agent(USER_AGENT)
             .build()
-            .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+            .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
         Ok(Self {
             client,
             last_request: std::sync::Mutex::new(None),
@@ -424,17 +424,17 @@ impl ArxivClient {
             .get(&url)
             .send()
             .await
-            .map_err(|e| format!("ArXiv API request failed: {}", e))?;
+            .map_err(|e| format!("ArXiv API request failed: {e}"))?;
 
         let status = response.status();
         if !status.is_success() {
-            return Err(format!("ArXiv API returned status {}", status));
+            return Err(format!("ArXiv API returned status {status}"));
         }
 
         let body = response
             .text()
             .await
-            .map_err(|e| format!("Failed to read ArXiv response: {}", e))?;
+            .map_err(|e| format!("Failed to read ArXiv response: {e}"))?;
 
         parse_atom_response(&body)
     }
@@ -457,19 +457,19 @@ impl ArxivClient {
             .get(&url)
             .send()
             .await
-            .map_err(|e| format!("ArXiv API request failed: {}", e))?;
+            .map_err(|e| format!("ArXiv API request failed: {e}"))?;
 
         let body = response
             .text()
             .await
-            .map_err(|e| format!("Failed to read ArXiv response: {}", e))?;
+            .map_err(|e| format!("Failed to read ArXiv response: {e}"))?;
 
         let result = parse_atom_response(&body)?;
         result
             .papers
             .into_iter()
             .next()
-            .ok_or_else(|| format!("Paper '{}' not found on ArXiv", clean_id))
+            .ok_or_else(|| format!("Paper '{clean_id}' not found on ArXiv"))
     }
 }
 
@@ -484,7 +484,7 @@ pub fn build_search_url(params: &ArxivSearchParams) -> String {
     };
 
     if let Some(cat) = &params.category {
-        search_query = format!("{} AND cat:{}", search_query, cat);
+        search_query = format!("{search_query} AND cat:{cat}");
     }
 
     format!(
@@ -637,7 +637,7 @@ fn parse_entry(entry: &str) -> Option<ArxivPaper> {
     }
 
     if pdf_url.is_empty() {
-        pdf_url = format!("https://arxiv.org/pdf/{}", arxiv_id);
+        pdf_url = format!("https://arxiv.org/pdf/{arxiv_id}");
     }
 
     let doi = extract_tag_text_ns(entry, "arxiv:doi");
@@ -664,8 +664,8 @@ fn parse_entry(entry: &str) -> Option<ArxivPaper> {
 
 /// Extract the text content of the first occurrence of <tag>text</tag>.
 fn extract_tag_text(xml: &str, tag: &str) -> Option<String> {
-    let open = format!("<{}", tag);
-    let close = format!("</{}>", tag);
+    let open = format!("<{tag}");
+    let close = format!("</{tag}>");
 
     let start_pos = xml.find(&open)?;
     // Find the end of the opening tag (could have attributes)
@@ -682,7 +682,7 @@ fn extract_tag_text_ns(xml: &str, tag: &str) -> Option<String> {
 
 /// Extract an attribute value from a tag string.
 pub fn extract_attribute(tag: &str, attr: &str) -> Option<String> {
-    let search = format!("{}=\"", attr);
+    let search = format!("{attr}=\"");
     let start = tag.find(&search)? + search.len();
     let end = tag[start..].find('"')? + start;
     Some(tag[start..end].to_string())
@@ -707,7 +707,7 @@ pub fn normalize_whitespace(s: &str) -> String {
 
 /// Extract an OpenSearch value like <opensearch:totalResults>100</opensearch:totalResults>.
 fn extract_opensearch_value(xml: &str, field: &str) -> Option<usize> {
-    let tag = format!("opensearch:{}", field);
+    let tag = format!("opensearch:{field}");
     extract_tag_text(xml, &tag).and_then(|s| s.trim().parse().ok())
 }
 
@@ -730,8 +730,7 @@ pub fn validate_arxiv_id(id: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "Invalid ArXiv ID '{}'. Expected format: YYMM.NNNNN (e.g., 2301.12345) or category/NNNNNNN (e.g., hep-th/9901001)",
-            id
+            "Invalid ArXiv ID '{id}'. Expected format: YYMM.NNNNN (e.g., 2301.12345) or category/NNNNNNN (e.g., hep-th/9901001)"
         ))
     }
 }
@@ -804,7 +803,7 @@ pub fn generate_bibtex(paper: &ArxivPaper) -> String {
     );
 
     if let Some(doi) = &paper.doi {
-        entry.push_str(&format!(",\n  doi = {{{}}}", doi));
+        entry.push_str(&format!(",\n  doi = {{{doi}}}"));
     }
     if let Some(journal) = &paper.journal_ref {
         entry.push_str(&format!(",\n  journal = {{{}}}", escape_bibtex(journal)));
@@ -842,7 +841,7 @@ fn generate_cite_key(paper: &ArxivPaper) -> String {
         .filter(|c| c.is_ascii_alphanumeric())
         .collect::<String>();
 
-    format!("{}{}{}", first_author, year, title_word)
+    format!("{first_author}{year}{title_word}")
 }
 
 /// Escape special LaTeX characters in BibTeX fields.
@@ -938,8 +937,7 @@ convolutional neural networks that include an encoder and a decoder.  </summary>
         let feed = format!(
             r#"<feed><opensearch:totalResults>1</opensearch:totalResults>
             <opensearch:startIndex>0</opensearch:startIndex>
-            <opensearch:itemsPerPage>1</opensearch:itemsPerPage>{}</feed>"#,
-            SAMPLE_ENTRY
+            <opensearch:itemsPerPage>1</opensearch:itemsPerPage>{SAMPLE_ENTRY}</feed>"#
         );
         let result = parse_atom_response(&feed).unwrap();
         assert_eq!(result.papers.len(), 1);
@@ -976,8 +974,7 @@ convolutional neural networks that include an encoder and a decoder.  </summary>
         let feed = format!(
             r#"<feed><opensearch:totalResults>1</opensearch:totalResults>
             <opensearch:startIndex>0</opensearch:startIndex>
-            <opensearch:itemsPerPage>1</opensearch:itemsPerPage>{}</feed>"#,
-            SAMPLE_ENTRY
+            <opensearch:itemsPerPage>1</opensearch:itemsPerPage>{SAMPLE_ENTRY}</feed>"#
         );
         let result = parse_atom_response(&feed).unwrap();
         let paper = &result.papers[0];

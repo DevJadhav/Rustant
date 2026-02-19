@@ -75,21 +75,21 @@ impl RelationshipsTool {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ToolError::ExecutionFailed {
                 name: "relationships".to_string(),
-                message: format!("Failed to create dir: {}", e),
+                message: format!("Failed to create dir: {e}"),
             })?;
         }
         let json = serde_json::to_string_pretty(state).map_err(|e| ToolError::ExecutionFailed {
             name: "relationships".to_string(),
-            message: format!("Serialize error: {}", e),
+            message: format!("Serialize error: {e}"),
         })?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, &json).map_err(|e| ToolError::ExecutionFailed {
             name: "relationships".to_string(),
-            message: format!("Write error: {}", e),
+            message: format!("Write error: {e}"),
         })?;
         std::fs::rename(&tmp, &path).map_err(|e| ToolError::ExecutionFailed {
             name: "relationships".to_string(),
-            message: format!("Rename error: {}", e),
+            message: format!("Rename error: {e}"),
         })?;
         Ok(())
     }
@@ -165,10 +165,7 @@ impl Tool for RelationshipsTool {
                     created_at: Utc::now(),
                 });
                 self.save_state(&state)?;
-                Ok(ToolOutput::text(format!(
-                    "Added contact '{}' (#{}).",
-                    name, id
-                )))
+                Ok(ToolOutput::text(format!("Added contact '{name}' (#{id}).")))
             }
             "update" => {
                 let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
@@ -186,9 +183,9 @@ impl Tool for RelationshipsTool {
                         contact.notes = notes.to_string();
                     }
                     self.save_state(&state)?;
-                    Ok(ToolOutput::text(format!("Updated contact #{}.", id)))
+                    Ok(ToolOutput::text(format!("Updated contact #{id}.")))
                 } else {
-                    Ok(ToolOutput::text(format!("Contact #{} not found.", id)))
+                    Ok(ToolOutput::text(format!("Contact #{id} not found.")))
                 }
             }
             "search" => {
@@ -222,10 +219,7 @@ impl Tool for RelationshipsTool {
                     })
                     .collect();
                 if matches.is_empty() {
-                    Ok(ToolOutput::text(format!(
-                        "No contacts matching '{}'.",
-                        query
-                    )))
+                    Ok(ToolOutput::text(format!("No contacts matching '{query}'.")))
                 } else {
                     Ok(ToolOutput::text(format!(
                         "Found {}:\n{}",
@@ -269,16 +263,14 @@ impl Tool for RelationshipsTool {
                     });
                     self.save_state(&state)?;
                     Ok(ToolOutput::text(format!(
-                        "Logged {} interaction for '{}'.",
-                        kind, contact_name
+                        "Logged {kind} interaction for '{contact_name}'."
                     )))
                 } else {
-                    Ok(ToolOutput::text(format!("Contact #{} not found.", id)))
+                    Ok(ToolOutput::text(format!("Contact #{id} not found.")))
                 }
             }
             _ => Ok(ToolOutput::text(format!(
-                "Unknown action: {}. Use: add_contact, update, search, list, log_interaction",
-                action
+                "Unknown action: {action}. Use: add_contact, update, search, list, log_interaction"
             ))),
         }
     }

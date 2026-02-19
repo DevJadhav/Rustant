@@ -625,7 +625,7 @@ mod tests {
                 assert_eq!(name, "macos_gui_scripting");
                 assert!(reason.contains("action"));
             }
-            other => panic!("Expected InvalidArguments, got: {:?}", other),
+            other => panic!("Expected InvalidArguments, got: {other:?}"),
         }
     }
 
@@ -639,7 +639,7 @@ mod tests {
                 assert_eq!(name, "macos_gui_scripting");
                 assert!(reason.contains("nope"));
             }
-            other => panic!("Expected InvalidArguments, got: {:?}", other),
+            other => panic!("Expected InvalidArguments, got: {other:?}"),
         }
     }
 
@@ -671,7 +671,7 @@ mod tests {
                 assert_eq!(name, "macos_gui_scripting");
                 assert!(reason.contains("loginwindow"));
             }
-            other => panic!("Expected PermissionDenied, got: {:?}", other),
+            other => panic!("Expected PermissionDenied, got: {other:?}"),
         }
     }
 

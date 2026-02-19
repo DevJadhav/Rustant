@@ -15,6 +15,8 @@ pub mod code_intelligence;
 pub mod codebase_search;
 pub mod compress;
 pub mod content_engine;
+pub mod database;
+pub mod dev_server;
 pub mod experiment_tracker;
 pub mod paper_sources;
 
@@ -36,6 +38,7 @@ pub mod imessage;
 pub mod inbox;
 pub mod knowledge_graph;
 pub mod life_planner;
+pub mod lint;
 pub mod lsp;
 #[cfg(target_os = "macos")]
 pub mod macos;
@@ -51,6 +54,7 @@ pub mod relationships;
 #[cfg(target_os = "macos")]
 pub mod safari;
 pub mod sandbox;
+pub mod scaffold;
 #[cfg(target_os = "macos")]
 pub mod screen_analyze;
 pub mod self_improvement;
@@ -60,6 +64,8 @@ pub mod slack;
 pub mod smart_edit;
 pub mod system_monitor;
 pub mod template;
+pub mod templates;
+pub mod test_runner;
 pub mod travel;
 pub mod utils;
 #[cfg(target_os = "macos")]
@@ -149,6 +155,12 @@ pub fn register_builtin_tools_with_progress(
         )),
         // Slack tool — cross-platform, uses Slack Bot Token API
         Arc::new(slack::SlackTool::new(workspace.clone())),
+        // Fullstack development tools
+        Arc::new(scaffold::ScaffoldTool::new(workspace.clone())),
+        Arc::new(dev_server::DevServerTool::new(workspace.clone())),
+        Arc::new(database::DatabaseTool::new(workspace.clone())),
+        Arc::new(test_runner::TestRunnerTool::new(workspace.clone())),
+        Arc::new(lint::LintTool::new(workspace.clone())),
     ];
 
     // iMessage tools — macOS only
@@ -222,11 +234,11 @@ mod tests {
         let mut registry = ToolRegistry::new();
         register_builtin_tools(&mut registry, dir.path().to_path_buf());
 
-        // 40 base + 3 iMessage + 24 macOS native = 67 on macOS
+        // 45 base + 3 iMessage + 24 macOS native = 72 on macOS
         #[cfg(target_os = "macos")]
-        assert_eq!(registry.len(), 67);
+        assert_eq!(registry.len(), 72);
         #[cfg(not(target_os = "macos"))]
-        assert_eq!(registry.len(), 40);
+        assert_eq!(registry.len(), 45);
 
         // Verify all expected tools are registered
         let names = registry.list_names();

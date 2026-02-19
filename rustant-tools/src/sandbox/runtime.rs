@@ -365,7 +365,7 @@ mod tests {
         assert!(result.is_err());
         match result {
             Err(SandboxError::ModuleInvalid(_)) => {}
-            other => panic!("expected ModuleInvalid, got {:?}", other),
+            other => panic!("expected ModuleInvalid, got {other:?}"),
         }
     }
 
@@ -420,8 +420,7 @@ mod tests {
         let result = runtime.execute(wat, &[], &config);
         assert!(
             matches!(result, Err(SandboxError::OutOfFuel)),
-            "expected OutOfFuel, got {:?}",
-            result,
+            "expected OutOfFuel, got {result:?}",
         );
     }
 

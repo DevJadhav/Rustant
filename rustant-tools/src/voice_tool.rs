@@ -82,7 +82,7 @@ impl Tool for MacosSayTool {
                     .output()
                     .map_err(|e| ToolError::ExecutionFailed {
                         name: "macos_say".into(),
-                        message: format!("Failed to run say: {}", e),
+                        message: format!("Failed to run say: {e}"),
                     })?;
 
                 if output.status.success() {
@@ -92,7 +92,7 @@ impl Tool for MacosSayTool {
                     )))
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    Ok(ToolOutput::text(format!("Say command failed: {}", stderr)))
+                    Ok(ToolOutput::text(format!("Say command failed: {stderr}")))
                 }
             }
             "list_voices" => {
@@ -101,7 +101,7 @@ impl Tool for MacosSayTool {
                     .output()
                     .map_err(|e| ToolError::ExecutionFailed {
                         name: "macos_say".into(),
-                        message: format!("Failed to list voices: {}", e),
+                        message: format!("Failed to list voices: {e}"),
                     })?;
 
                 let text = String::from_utf8_lossy(&output.stdout);
@@ -113,8 +113,7 @@ impl Tool for MacosSayTool {
                 )))
             }
             _ => Ok(ToolOutput::text(format!(
-                "Unknown action: {}. Use: speak, list_voices",
-                action
+                "Unknown action: {action}. Use: speak, list_voices"
             ))),
         }
     }

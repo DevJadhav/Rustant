@@ -49,12 +49,12 @@ impl ArxivResearchTool {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ToolError::ExecutionFailed {
                 name: "arxiv_research".to_string(),
-                message: format!("Create dir failed: {}", e),
+                message: format!("Create dir failed: {e}"),
             })?;
         }
         let json = serde_json::to_string_pretty(state).map_err(|e| ToolError::ExecutionFailed {
             name: "arxiv_research".to_string(),
-            message: format!("Serialize failed: {}", e),
+            message: format!("Serialize failed: {e}"),
         })?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, &json).map_err(|e| ToolError::ExecutionFailed {
@@ -119,8 +119,7 @@ impl ArxivResearchTool {
 
         if result.papers.is_empty() {
             return Ok(ToolOutput::text(format!(
-                "No papers found for query: \"{}\"",
-                query
+                "No papers found for query: \"{query}\""
             )));
         }
 
@@ -181,17 +180,17 @@ impl ArxivResearchTool {
             paper
                 .doi
                 .as_ref()
-                .map(|d| format!("\nDOI: {}", d))
+                .map(|d| format!("\nDOI: {d}"))
                 .unwrap_or_default(),
             paper
                 .comment
                 .as_ref()
-                .map(|c| format!("\nComment: {}", c))
+                .map(|c| format!("\nComment: {c}"))
                 .unwrap_or_default(),
             paper
                 .journal_ref
                 .as_ref()
-                .map(|j| format!("\nJournal: {}", j))
+                .map(|j| format!("\nJournal: {j}"))
                 .unwrap_or_default(),
             paper.summary,
         );
@@ -343,7 +342,7 @@ impl ArxivResearchTool {
             .min(50) as usize;
 
         let query = if let Some(cat) = &category {
-            format!("cat:{}", cat)
+            format!("cat:{cat}")
         } else {
             "cat:cs.AI OR cat:cs.LG OR cat:cs.CL".to_string()
         };
@@ -369,7 +368,7 @@ impl ArxivResearchTool {
                 "No trending papers found{}",
                 category
                     .as_ref()
-                    .map(|c| format!(" in category {}", c))
+                    .map(|c| format!(" in category {c}"))
                     .unwrap_or_default()
             )));
         }
@@ -378,7 +377,7 @@ impl ArxivResearchTool {
             "Trending papers{} (sorted by submission date):\n\n",
             category
                 .as_ref()
-                .map(|c| format!(" in {}", c))
+                .map(|c| format!(" in {c}"))
                 .unwrap_or_default()
         );
 
@@ -486,7 +485,7 @@ impl ArxivResearchTool {
                 String::new()
             },
             collection
-                .map(|c| format!(" Collection: {}", c))
+                .map(|c| format!(" Collection: {c}"))
                 .unwrap_or_default(),
         )))
     }
@@ -544,7 +543,7 @@ impl ArxivResearchTool {
                 entry
                     .collection
                     .as_ref()
-                    .map(|c| format!("\n   Collection: {}", c))
+                    .map(|c| format!("\n   Collection: {c}"))
                     .unwrap_or_default(),
             ));
         }
@@ -567,16 +566,14 @@ impl ArxivResearchTool {
 
         if state.entries.len() == before {
             return Ok(ToolOutput::text(format!(
-                "Paper '{}' not found in library.",
-                arxiv_id
+                "Paper '{arxiv_id}' not found in library."
             )));
         }
 
         self.save_state(&state)?;
 
         Ok(ToolOutput::text(format!(
-            "Removed paper '{}' from library.",
-            arxiv_id
+            "Removed paper '{arxiv_id}' from library."
         )))
     }
 
@@ -642,7 +639,7 @@ impl ArxivResearchTool {
                         .iter()
                         .filter(|e| e.collection.as_deref() == Some(col))
                         .count();
-                    output.push_str(&format!("  - {} ({} papers)\n", col, count));
+                    output.push_str(&format!("  - {col} ({count} papers)\n"));
                 }
                 Ok(ToolOutput::text(output))
             }
@@ -655,13 +652,12 @@ impl ArxivResearchTool {
                 })?;
                 if state.collections.contains(&name.to_string()) {
                     return Ok(ToolOutput::text(format!(
-                        "Collection '{}' already exists.",
-                        name
+                        "Collection '{name}' already exists."
                     )));
                 }
                 state.collections.push(name.to_string());
                 self.save_state(&state)?;
-                Ok(ToolOutput::text(format!("Created collection '{}'.", name)))
+                Ok(ToolOutput::text(format!("Created collection '{name}'.")))
             }
             "rename" => {
                 let old_name = args.get("name").and_then(|v| v.as_str()).ok_or_else(|| {
@@ -688,13 +684,11 @@ impl ArxivResearchTool {
                     }
                     self.save_state(&state)?;
                     Ok(ToolOutput::text(format!(
-                        "Renamed collection '{}' to '{}'.",
-                        old_name, new_name
+                        "Renamed collection '{old_name}' to '{new_name}'."
                     )))
                 } else {
                     Ok(ToolOutput::text(format!(
-                        "Collection '{}' not found.",
-                        old_name
+                        "Collection '{old_name}' not found."
                     )))
                 }
             }
@@ -714,17 +708,13 @@ impl ArxivResearchTool {
                         }
                     }
                     self.save_state(&state)?;
-                    Ok(ToolOutput::text(format!("Deleted collection '{}'.", name)))
+                    Ok(ToolOutput::text(format!("Deleted collection '{name}'.")))
                 } else {
-                    Ok(ToolOutput::text(format!(
-                        "Collection '{}' not found.",
-                        name
-                    )))
+                    Ok(ToolOutput::text(format!("Collection '{name}' not found.")))
                 }
             }
             _ => Ok(ToolOutput::text(format!(
-                "Unknown collection sub_action '{}'. Use: list, create, rename, delete.",
-                sub_action
+                "Unknown collection sub_action '{sub_action}'. Use: list, create, rename, delete."
             ))),
         }
     }
@@ -973,8 +963,7 @@ impl ArxivResearchTool {
         let lang_config = language_config(language).ok_or_else(|| ToolError::InvalidArguments {
             name: "arxiv_research".to_string(),
             reason: format!(
-                "Unsupported language '{}'. Supported: python, rust, typescript, go, cpp, julia",
-                language
+                "Unsupported language '{language}'. Supported: python, rust, typescript, go, cpp, julia"
             ),
         })?;
 
@@ -1029,7 +1018,7 @@ impl ArxivResearchTool {
             paper.title, paper.arxiv_id
         );
         output.push_str(&format!("Target directory: {}\n", base_dir.display()));
-        output.push_str(&format!("Language: {} | TDD: {}\n\n", language, tdd));
+        output.push_str(&format!("Language: {language} | TDD: {tdd}\n\n"));
 
         // Environment isolation warning
         if !lang_config.env_setup_commands.is_empty() {
@@ -1096,7 +1085,7 @@ impl ArxivResearchTool {
 
         // Step 3: Install dependencies (inside venv/isolated env)
         let step_n = if tdd { 4 } else { 3 };
-        output.push_str(&format!("Step {}: Install dependencies\n", step_n));
+        output.push_str(&format!("Step {step_n}: Install dependencies\n"));
         for cmd in &scaffold.setup_commands {
             if !lang_config.env_activate.is_empty() {
                 output.push_str(&format!(
@@ -1159,8 +1148,7 @@ impl ArxivResearchTool {
             .ok_or_else(|| ToolError::InvalidArguments {
                 name: "arxiv_research".to_string(),
                 reason: format!(
-                    "No implementation found for paper '{}'. Run 'implement' first.",
-                    arxiv_id
+                    "No implementation found for paper '{arxiv_id}'. Run 'implement' first."
                 ),
             })?;
 
@@ -1209,8 +1197,7 @@ impl ArxivResearchTool {
             .ok_or_else(|| ToolError::InvalidArguments {
                 name: "arxiv_research".to_string(),
                 reason: format!(
-                    "No implementation found for paper '{}'. Run 'implement' first.",
-                    arxiv_id
+                    "No implementation found for paper '{arxiv_id}'. Run 'implement' first."
                 ),
             })?;
 
@@ -1384,8 +1371,7 @@ impl ArxivResearchTool {
 
         if scored.is_empty() {
             return Ok(ToolOutput::text(format!(
-                "No papers in your library match '{}'. Try 'search' to find papers on arXiv.",
-                query
+                "No papers in your library match '{query}'. Try 'search' to find papers on arXiv."
             )));
         }
 
@@ -1582,8 +1568,7 @@ impl ArxivResearchTool {
             "similar" => self.citation_graph_similar(arxiv_id, args),
             "path" => self.citation_graph_path(arxiv_id, args),
             _ => Ok(ToolOutput::text(format!(
-                "Unknown sub_action '{}'. Use: build, pagerank, similar, path.",
-                sub_action
+                "Unknown sub_action '{sub_action}'. Use: build, pagerank, similar, path."
             ))),
         }
     }
@@ -1602,7 +1587,7 @@ impl ArxivResearchTool {
         let s2_client = SemanticScholarClient::new(None, 3600, 1000).map_err(|e| {
             ToolError::ExecutionFailed {
                 name: "arxiv_research".to_string(),
-                message: format!("Failed to create Semantic Scholar client: {}", e),
+                message: format!("Failed to create Semantic Scholar client: {e}"),
             }
         })?;
 
@@ -1673,10 +1658,7 @@ impl ArxivResearchTool {
         state.citation_graph = Some(graph.to_state(arxiv_id));
         self.save_state(&state)?;
 
-        let mut output = format!(
-            "Citation graph built for {} (depth {}):\n\n",
-            arxiv_id, depth
-        );
+        let mut output = format!("Citation graph built for {arxiv_id} (depth {depth}):\n\n");
         output.push_str(&format!(
             "  Nodes: {}\n  References tracked: {}\n  Citations tracked: {}\n\n",
             graph.node_count(),
@@ -1696,8 +1678,7 @@ impl ArxivResearchTool {
             ToolError::InvalidArguments {
                 name: "arxiv_research".to_string(),
                 reason: format!(
-                    "No citation graph found. Run citation_graph with sub_action 'build' for {} first.",
-                    arxiv_id
+                    "No citation graph found. Run citation_graph with sub_action 'build' for {arxiv_id} first."
                 ),
             }
         })?;
@@ -1751,12 +1732,11 @@ impl ArxivResearchTool {
 
         if coupling.is_empty() {
             return Ok(ToolOutput::text(format!(
-                "No bibliographically coupled papers found for {}. The graph may need more depth.",
-                arxiv_id
+                "No bibliographically coupled papers found for {arxiv_id}. The graph may need more depth."
             )));
         }
 
-        let mut output = format!("Papers similar to {} (by shared references):\n\n", arxiv_id);
+        let mut output = format!("Papers similar to {arxiv_id} (by shared references):\n\n");
         for (i, (paper_id, shared)) in coupling.iter().enumerate() {
             let title = graph
                 .titles
@@ -1810,13 +1790,12 @@ impl ArxivResearchTool {
                         .map(|s| s.as_str())
                         .unwrap_or("Unknown");
                     let arrow = if i < path.len() - 1 { " →" } else { "" };
-                    output.push_str(&format!("  {} ({}){}\n", node, title, arrow));
+                    output.push_str(&format!("  {node} ({title}){arrow}\n"));
                 }
                 Ok(ToolOutput::text(output))
             }
             None => Ok(ToolOutput::text(format!(
-                "No citation path found between {} and {}. They may be in disconnected components.",
-                arxiv_id, other_id
+                "No citation path found between {arxiv_id} and {other_id}. They may be in disconnected components."
             ))),
         }
     }
@@ -1858,10 +1837,10 @@ impl ArxivResearchTool {
             && let Ok(meta) = s2_client.fetch_by_arxiv_id(arxiv_id).await
         {
             if let Some(count) = meta.citation_count {
-                citation_info = format!("\nCitation count: {}", count);
+                citation_info = format!("\nCitation count: {count}");
             }
             if let Some(tldr) = &meta.tldr {
-                citation_info.push_str(&format!("\nTL;DR: {}", tldr));
+                citation_info.push_str(&format!("\nTL;DR: {tldr}"));
             }
         }
 
@@ -2468,8 +2447,7 @@ impl Tool for ArxivResearchTool {
             _ => Err(ToolError::InvalidArguments {
                 name: "arxiv_research".to_string(),
                 reason: format!(
-                    "Unknown action '{}'. Valid actions: search, fetch, analyze, compare, trending, save, library, remove, export_bibtex, collections, digest_config, paper_to_code, paper_to_notebook, implement, setup_env, verify, implementation_status, semantic_search, summarize, citation_graph, blueprint, reindex",
-                    action
+                    "Unknown action '{action}'. Valid actions: search, fetch, analyze, compare, trending, save, library, remove, export_bibtex, collections, digest_config, paper_to_code, paper_to_notebook, implement, setup_env, verify, implementation_status, semantic_search, summarize, citation_graph, blueprint, reindex"
                 ),
             }),
         }
@@ -2553,7 +2531,7 @@ mod tests {
             ToolError::InvalidArguments { reason, .. } => {
                 assert!(reason.contains("action"));
             }
-            other => panic!("Expected InvalidArguments, got {:?}", other),
+            other => panic!("Expected InvalidArguments, got {other:?}"),
         }
     }
 
@@ -2567,7 +2545,7 @@ mod tests {
             ToolError::InvalidArguments { reason, .. } => {
                 assert!(reason.contains("nonexistent"));
             }
-            other => panic!("Expected InvalidArguments, got {:?}", other),
+            other => panic!("Expected InvalidArguments, got {other:?}"),
         }
     }
 
@@ -2581,7 +2559,7 @@ mod tests {
             ToolError::InvalidArguments { reason, .. } => {
                 assert!(reason.contains("query"));
             }
-            other => panic!("Expected InvalidArguments, got {:?}", other),
+            other => panic!("Expected InvalidArguments, got {other:?}"),
         }
     }
 
@@ -2595,7 +2573,7 @@ mod tests {
             ToolError::InvalidArguments { reason, .. } => {
                 assert!(reason.contains("arxiv_id"));
             }
-            other => panic!("Expected InvalidArguments, got {:?}", other),
+            other => panic!("Expected InvalidArguments, got {other:?}"),
         }
     }
 
@@ -2846,7 +2824,7 @@ mod tests {
             ToolError::InvalidArguments { reason, .. } => {
                 assert!(reason.contains("query"));
             }
-            other => panic!("Expected InvalidArguments, got {:?}", other),
+            other => panic!("Expected InvalidArguments, got {other:?}"),
         }
     }
 
@@ -2871,7 +2849,7 @@ mod tests {
             ToolError::InvalidArguments { reason, .. } => {
                 assert!(reason.contains("arxiv_id"));
             }
-            other => panic!("Expected InvalidArguments, got {:?}", other),
+            other => panic!("Expected InvalidArguments, got {other:?}"),
         }
     }
 
@@ -2885,7 +2863,7 @@ mod tests {
             ToolError::InvalidArguments { reason, .. } => {
                 assert!(reason.contains("arxiv_id"));
             }
-            other => panic!("Expected InvalidArguments, got {:?}", other),
+            other => panic!("Expected InvalidArguments, got {other:?}"),
         }
     }
 
@@ -2899,7 +2877,7 @@ mod tests {
             ToolError::InvalidArguments { reason, .. } => {
                 assert!(reason.contains("arxiv_id"));
             }
-            other => panic!("Expected InvalidArguments, got {:?}", other),
+            other => panic!("Expected InvalidArguments, got {other:?}"),
         }
     }
 
