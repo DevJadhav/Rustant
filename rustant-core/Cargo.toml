@@ -62,6 +62,7 @@ self_update = { workspace = true }
 aes-gcm = { workspace = true }
 openssl = { workspace = true }
 unicode-normalization = "0.1"
+regex = "1"
 
 # Optional voice dependencies (only compiled with "voice" feature)
 cpal = { workspace = true, optional = true }
@@ -70,11 +71,30 @@ whisper-rs = { workspace = true, optional = true }
 # Optional browser automation (only compiled with "browser" feature)
 chromiumoxide = { workspace = true, optional = true }
 
+# Optional tree-sitter AST parsing (feature-gated per language)
+tree-sitter = { workspace = true, optional = true }
+streaming-iterator = { workspace = true, optional = true }
+tree-sitter-rust = { workspace = true, optional = true }
+tree-sitter-python = { workspace = true, optional = true }
+tree-sitter-javascript = { workspace = true, optional = true }
+tree-sitter-typescript = { workspace = true, optional = true }
+tree-sitter-go = { workspace = true, optional = true }
+tree-sitter-java = { workspace = true, optional = true }
+
+# Graph data structure for code reference graph
+petgraph = { workspace = true }
+
 [features]
-default = []
+default = ["ast-rust"]
 voice = ["dep:cpal", "dep:whisper-rs"]
 browser = ["dep:chromiumoxide"]
 semantic-search = []
+ast-rust = ["dep:tree-sitter", "dep:streaming-iterator", "dep:tree-sitter-rust"]
+ast-python = ["dep:tree-sitter", "dep:streaming-iterator", "dep:tree-sitter-python"]
+ast-javascript = ["dep:tree-sitter", "dep:streaming-iterator", "dep:tree-sitter-javascript", "dep:tree-sitter-typescript"]
+ast-go = ["dep:tree-sitter", "dep:streaming-iterator", "dep:tree-sitter-go"]
+ast-java = ["dep:tree-sitter", "dep:streaming-iterator", "dep:tree-sitter-java"]
+ast-all = ["ast-rust", "ast-python", "ast-javascript", "ast-go", "ast-java"]
 
 [dev-dependencies]
 tokio-test = "0.4"

@@ -7,12 +7,14 @@ members = [
     "rustant-mcp",
     "rustant-ui",
     "rustant-plugins",
+    "rustant-security",
+    "rustant-ml",
 ]
 
 [workspace.package]
 version = "1.0.1"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "MIT"
 authors = ["Dev Jadhav"]
 repository = "https://github.com/DevJadhav/Rustant"
@@ -110,6 +112,10 @@ sha2 = "0.10"
 hmac = "0.12"
 rand = "0.8"
 
+# Graphs & version parsing
+petgraph = "0.6"
+semver = "1"
+
 # File system traversal
 walkdir = "2.5"
 ignore = "0.4"
@@ -165,11 +171,26 @@ genpdf = "0.2"
 # Timezone support
 chrono-tz = "0.10"
 
+# Platform utilities
+libc = "0.2"
+
+# Tree-sitter AST parsing
+tree-sitter = "0.24"
+streaming-iterator = "0.1"
+tree-sitter-rust = "0.23"
+tree-sitter-python = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-typescript = "0.23"
+tree-sitter-go = "0.23"
+tree-sitter-java = "0.23"
+
 # Internal crates
 rustant-core = { path = "rustant-core", version = "1.0.1" }
 rustant-tools = { path = "rustant-tools", version = "1.0.1" }
 rustant-mcp = { path = "rustant-mcp", version = "1.0.1" }
 rustant-plugins = { path = "rustant-plugins", version = "1.0.1" }
+rustant-security = { path = "rustant-security", version = "1.0.1" }
+rustant-ml = { path = "rustant-ml", version = "1.0.1" }
 
 [profile.release]
 lto = "thin"

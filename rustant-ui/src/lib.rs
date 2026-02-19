@@ -62,7 +62,7 @@ pub async fn do_resolve_approval(
     id: &str,
     approved: bool,
 ) -> Result<bool, String> {
-    let approval_id: uuid::Uuid = id.parse().map_err(|e| format!("Invalid UUID: {}", e))?;
+    let approval_id: uuid::Uuid = id.parse().map_err(|e| format!("Invalid UUID: {e}"))?;
     let mut gw = state.gateway.lock().await;
     Ok(gw.resolve_approval(&approval_id, approved))
 }
@@ -71,7 +71,7 @@ pub async fn do_resolve_approval(
 pub async fn fetch_config(state: &AppState) -> Result<serde_json::Value, String> {
     let gw = state.gateway.lock().await;
     let json_str = gw.config_json();
-    serde_json::from_str(json_str).map_err(|e| format!("Invalid config JSON: {}", e))
+    serde_json::from_str(json_str).map_err(|e| format!("Invalid config JSON: {e}"))
 }
 
 /// Get metrics snapshot.

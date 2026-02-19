@@ -140,7 +140,7 @@ fn main() {
     let _gateway_handle = rt.spawn(async move {
         let host = config.host.clone();
         let port = config.port;
-        let addr = format!("{}:{}", host, port);
+        let addr = format!("{host}:{port}");
 
         // Build the gateway API router (WebSocket, REST endpoints)
         let api_router = gateway_router(gw_for_server);
