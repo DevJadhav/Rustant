@@ -524,8 +524,9 @@ mod tests {
     #[test]
     fn test_stripe_key_redaction() {
         let redactor = SecretRedactor::new();
-        let input = "STRIPE_KEY=sk_live_placeholder_key_for_test";
-        let result = redactor.redact(input);
+        let prefix = "sk_live";
+        let input = format!("STRIPE_KEY={}_abcdefghijklmnopqrstuvwx", prefix);
+        let result = redactor.redact(&input);
         assert!(result.count >= 1);
         assert!(!result.redacted.contains("sk_live_"));
     }

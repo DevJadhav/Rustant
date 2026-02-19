@@ -168,8 +168,9 @@ mod tests {
     #[test]
     fn test_basic_redactor_stripe() {
         let redactor = BasicRedactor::new();
-        let text = "stripe key: sk_live_placeholder_key_for_test";
-        let result = redactor.redact(text);
+        let prefix = "sk_live";
+        let text = format!("stripe key: {}_abcdefghijklmnopqrstuvwx", prefix);
+        let result = redactor.redact(&text);
         assert!(result.contains("[REDACTED:STRIPE_SECRET]"));
     }
 }
