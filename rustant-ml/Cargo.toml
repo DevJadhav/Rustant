@@ -1,0 +1,40 @@
+[package]
+name = "rustant-ml"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "AI/ML engineering, training, evaluation, and research for Rustant"
+keywords = ["agent", "llm", "ai", "ml", "training"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+rustant-core = { workspace = true }
+rustant-tools = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+async-trait = "0.1"
+reqwest = { workspace = true }
+sha2 = { workspace = true }
+rusqlite = { workspace = true }
+walkdir = { workspace = true }
+ignore = { workspace = true }
+regex = "1"
+rand = { workspace = true }
+
+[features]
+default = []
+columnar = []  # Future: arrow + parquet dependencies for columnar data formats
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.14"
+pretty_assertions = "1.4"
