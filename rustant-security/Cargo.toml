@@ -1,0 +1,62 @@
+[package]
+name = "rustant-security"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Security scanning, code review, and compliance for Rustant"
+keywords = ["agent", "llm", "ai", "security", "sast"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+rustant-core = { workspace = true }
+rustant-tools = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+async-trait = "0.1"
+regex = "1"
+sha2 = { workspace = true }
+git2 = { workspace = true }
+similar = { workspace = true }
+walkdir = { workspace = true }
+ignore = { workspace = true }
+reqwest = { workspace = true }
+petgraph = { workspace = true }
+semver = { workspace = true }
+toml = { workspace = true }
+
+# Tree-sitter (optional, feature-gated SAST support)
+tree-sitter = { version = "0.24", optional = true }
+streaming-iterator = { version = "0.1", optional = true }
+tree-sitter-rust = { version = "0.23", optional = true }
+tree-sitter-python = { version = "0.23", optional = true }
+tree-sitter-javascript = { version = "0.23", optional = true }
+tree-sitter-typescript = { version = "0.23", optional = true }
+tree-sitter-go = { version = "0.23", optional = true }
+tree-sitter-java = { version = "0.23", optional = true }
+tree-sitter-bash = { version = "0.23", optional = true }
+tree-sitter-hcl = { version = "1", optional = true }
+
+[features]
+default = ["sast-rust"]
+sast-rust = ["dep:tree-sitter", "dep:streaming-iterator", "dep:tree-sitter-rust"]
+sast-python = ["dep:tree-sitter", "dep:streaming-iterator", "dep:tree-sitter-python"]
+sast-javascript = ["dep:tree-sitter", "dep:streaming-iterator", "dep:tree-sitter-javascript", "dep:tree-sitter-typescript"]
+sast-go = ["dep:tree-sitter", "dep:streaming-iterator", "dep:tree-sitter-go"]
+sast-java = ["dep:tree-sitter", "dep:streaming-iterator", "dep:tree-sitter-java"]
+sast-shell = ["dep:tree-sitter", "dep:streaming-iterator", "dep:tree-sitter-bash"]
+sast-iac = ["dep:tree-sitter", "dep:streaming-iterator", "dep:tree-sitter-hcl"]
+sast-all = ["sast-rust", "sast-python", "sast-javascript", "sast-go", "sast-java", "sast-shell", "sast-iac"]
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.14"
+pretty_assertions = "1.4"
