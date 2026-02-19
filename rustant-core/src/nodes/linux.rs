@@ -29,10 +29,10 @@ impl LinuxNode {
         let hostname = std::env::var("HOSTNAME")
             .or_else(|_| std::env::var("HOST"))
             .unwrap_or_else(|_| "linux-local".to_string());
-        let node_id = NodeId::new(format!("linux-{}", hostname));
+        let node_id = NodeId::new(format!("linux-{hostname}"));
         let info = NodeInfo {
             node_id: node_id.clone(),
-            name: format!("Linux ({})", hostname),
+            name: format!("Linux ({hostname})"),
             platform: Platform::Linux,
             hostname,
             registered_at: Utc::now(),

@@ -23,12 +23,12 @@ pub struct SecretRef(String);
 impl SecretRef {
     /// Create a new keychain-backed secret reference.
     pub fn keychain(account: &str) -> Self {
-        Self(format!("keychain:{}", account))
+        Self(format!("keychain:{account}"))
     }
 
     /// Create a new environment variable-backed secret reference.
     pub fn env(var_name: &str) -> Self {
-        Self(format!("env:{}", var_name))
+        Self(format!("env:{var_name}"))
     }
 
     /// Create an inline (plaintext) secret reference. This is deprecated.
@@ -189,7 +189,7 @@ pub fn migrate_channel_secrets(
                     Err(e) => {
                         result
                             .errors
-                            .push(format!("Failed to store {}: {}", account, e));
+                            .push(format!("Failed to store {account}: {e}"));
                     }
                 }
             }

@@ -100,8 +100,8 @@ impl std::fmt::Display for Capability {
             Self::Camera => write!(f, "camera"),
             Self::ScreenRecord => write!(f, "screen_record"),
             Self::Location => write!(f, "location"),
-            Self::AppControl(app) => write!(f, "app_control:{}", app),
-            Self::Custom(name) => write!(f, "custom:{}", name),
+            Self::AppControl(app) => write!(f, "app_control:{app}"),
+            Self::Custom(name) => write!(f, "custom:{name}"),
         }
     }
 }

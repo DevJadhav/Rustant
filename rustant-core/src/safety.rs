@@ -100,10 +100,10 @@ impl ApprovalContext {
                 } else {
                     command.clone()
                 };
-                Some(format!("$ {}", truncated))
+                Some(format!("$ {truncated}"))
             }
             ("git_commit", ActionDetails::GitOperation { operation }) => {
-                Some(format!("git {}", operation))
+                Some(format!("git {operation}"))
             }
             ("smart_edit", ActionDetails::FileWrite { path, .. }) => {
                 Some(format!("Will smart-edit {}", path.display()))
@@ -125,8 +125,7 @@ impl ApprovalContext {
                 // Store the full draft so approval dialogs can show the complete text
                 self.full_draft = Some(reply_preview.clone());
                 Some(format!(
-                    "[{}] → {} (priority: {:?}): {}",
-                    channel, recipient, priority, truncated
+                    "[{channel}] → {recipient} (priority: {priority:?}): {truncated}"
                 ))
             }
             (
@@ -139,9 +138,9 @@ impl ApprovalContext {
             ) => {
                 let elem_str = element
                     .as_deref()
-                    .map(|e| format!(" → \"{}\"", e))
+                    .map(|e| format!(" → \"{e}\""))
                     .unwrap_or_default();
-                Some(format!("GUI: {} {} in '{}'", action, elem_str, app_name))
+                Some(format!("GUI: {action} {elem_str} in '{app_name}'"))
             }
             // Browser automation previews.
             (
@@ -153,15 +152,168 @@ impl ApprovalContext {
                 },
             ) => {
                 let target = url.as_deref().or(selector.as_deref()).unwrap_or("page");
-                Some(format!("Browser: {} {}", action, target))
+                Some(format!("Browser: {action} {target}"))
             }
             // Network request previews.
-            (_, ActionDetails::NetworkRequest { host, method }) => {
-                Some(format!("{} {}", method, host))
-            }
+            (_, ActionDetails::NetworkRequest { host, method }) => Some(format!("{method} {host}")),
             // File deletion preview.
             (_, ActionDetails::FileDelete { path }) => {
                 Some(format!("Will delete {}", path.display()))
+            }
+            // Security scan previews.
+            (
+                _,
+                ActionDetails::SecurityScan {
+                    scanner,
+                    target,
+                    scope,
+                },
+            ) => Some(format!(
+                "Security scan [{scanner}]: {target} (scope: {scope})"
+            )),
+            (
+                _,
+                ActionDetails::VulnerabilityLookup {
+                    database,
+                    package,
+                    version,
+                },
+            ) => Some(format!("Vuln check: {package}@{version} via {database}")),
+            (
+                _,
+                ActionDetails::SecretDetected {
+                    secret_type,
+                    file_path,
+                },
+            ) => Some(format!(
+                "Secret detected: {} in {}",
+                secret_type,
+                file_path.display()
+            )),
+            (_, ActionDetails::ComplianceCheck { framework, scope }) => {
+                Some(format!("Compliance: {framework} (scope: {scope})"))
+            }
+            (
+                _,
+                ActionDetails::IncidentAction {
+                    action_type,
+                    target,
+                    reversible,
+                    ..
+                },
+            ) => {
+                let rev = if *reversible {
+                    "reversible"
+                } else {
+                    "IRREVERSIBLE"
+                };
+                Some(format!("Incident: {action_type} on {target} [{rev}]"))
+            }
+            // Fullstack development tool previews.
+            (
+                _,
+                ActionDetails::Scaffold {
+                    template,
+                    target_dir,
+                    framework,
+                },
+            ) => {
+                let fw = framework.as_deref().unwrap_or("auto");
+                Some(format!(
+                    "Scaffold '{template}' template into {target_dir} ({fw})"
+                ))
+            }
+            (_, ActionDetails::DevServer { action, port }) => {
+                if let Some(p) = port {
+                    Some(format!("Dev server: {action} (port {p})"))
+                } else {
+                    Some(format!("Dev server: {action}"))
+                }
+            }
+            (
+                _,
+                ActionDetails::DatabaseOperation {
+                    action,
+                    database,
+                    reversible,
+                },
+            ) => {
+                let db = database.as_deref().unwrap_or("default");
+                let rev = if *reversible { "read-only" } else { "MUTATING" };
+                Some(format!("Database: {action} on {db} [{rev}]"))
+            }
+            (_, ActionDetails::TestExecution { scope, framework }) => {
+                let fw = framework.as_deref().unwrap_or("auto-detect");
+                Some(format!("Test: {scope} ({fw})"))
+            }
+            (_, ActionDetails::LintCheck { action, auto_fix }) => {
+                if *auto_fix {
+                    Some(format!("Lint: {action} (auto-fix enabled)"))
+                } else {
+                    Some(format!("Lint: {action} (check only)"))
+                }
+            }
+            (
+                _,
+                ActionDetails::DataPipeline {
+                    action,
+                    dataset,
+                    contains_pii,
+                },
+            ) => {
+                let pii_note = if *contains_pii { " [PII detected]" } else { "" };
+                Some(format!(
+                    "Data pipeline: {action} on dataset '{dataset}'{pii_note}"
+                ))
+            }
+            (
+                _,
+                ActionDetails::ModelTraining {
+                    framework,
+                    model_type,
+                    dataset_id,
+                },
+            ) => Some(format!(
+                "Training: {model_type} model ({framework}) on dataset '{dataset_id}'"
+            )),
+            (
+                _,
+                ActionDetails::ModelInference {
+                    model_name,
+                    backend,
+                    action,
+                },
+            ) => Some(format!("Inference: {model_name} via {backend} — {action}")),
+            (
+                _,
+                ActionDetails::RagQuery {
+                    query_type,
+                    collection,
+                    top_k,
+                },
+            ) => Some(format!(
+                "RAG {query_type}: collection '{collection}' (top_k={top_k})"
+            )),
+            (
+                _,
+                ActionDetails::EvaluationRun {
+                    evaluator,
+                    scope,
+                    traces_count,
+                },
+            ) => Some(format!(
+                "Evaluation: {evaluator} on {scope} ({traces_count} traces)"
+            )),
+            (
+                _,
+                ActionDetails::ResearchAction {
+                    action,
+                    source,
+                    query,
+                },
+            ) => {
+                let q = query.as_deref().unwrap_or("—");
+                Some(format!("Research: {action} from {source} [{q}]"))
             }
             _ => None,
         };
@@ -274,6 +426,85 @@ pub enum ActionDetails {
         action: String,
         /// The target element description, if any.
         element: Option<String>,
+    },
+    // --- Fullstack development tools ---
+    Scaffold {
+        template: String,
+        target_dir: String,
+        framework: Option<String>,
+    },
+    DevServer {
+        action: String,
+        port: Option<u16>,
+    },
+    DatabaseOperation {
+        action: String,
+        database: Option<String>,
+        reversible: bool,
+    },
+    TestExecution {
+        scope: String,
+        framework: Option<String>,
+    },
+    LintCheck {
+        action: String,
+        auto_fix: bool,
+    },
+    // --- AI/ML engineer tools ---
+    DataPipeline {
+        action: String,
+        dataset: String,
+        contains_pii: bool,
+    },
+    ModelTraining {
+        framework: String,
+        model_type: String,
+        dataset_id: String,
+    },
+    ModelInference {
+        model_name: String,
+        backend: String,
+        action: String,
+    },
+    RagQuery {
+        query_type: String,
+        collection: String,
+        top_k: usize,
+    },
+    ResearchAction {
+        action: String,
+        source: String,
+        query: Option<String>,
+    },
+    EvaluationRun {
+        evaluator: String,
+        scope: String,
+        traces_count: usize,
+    },
+    // --- Security & compliance tools ---
+    SecurityScan {
+        scanner: String,
+        target: String,
+        scope: String,
+    },
+    VulnerabilityLookup {
+        database: String,
+        package: String,
+        version: String,
+    },
+    SecretDetected {
+        secret_type: String,
+        file_path: PathBuf,
+    },
+    ComplianceCheck {
+        framework: String,
+        scope: String,
+    },
+    IncidentAction {
+        action_type: String,
+        target: String,
+        reversible: bool,
+        incident_id: Option<String>,
     },
     Other {
         info: String,
@@ -515,7 +746,7 @@ impl ContractEnforcer {
                 if !cond.evaluate(tool_name, risk_level, arguments) {
                     let result = ContractCheckResult::PreConditionViolation {
                         tool: tool_name.to_string(),
-                        condition: format!("{:?}", cond),
+                        condition: format!("{cond:?}"),
                     };
                     self.violations.push(result.clone());
                     return result;
@@ -1011,6 +1242,44 @@ impl SafetyGuardian {
             ActionDetails::FileWrite { path, .. } => path.to_string_lossy().to_string(),
             ActionDetails::NetworkRequest { host, .. } => host.clone(),
             ActionDetails::Other { info } => info.clone(),
+            ActionDetails::DataPipeline {
+                action, dataset, ..
+            } => {
+                format!("{action} {dataset}")
+            }
+            ActionDetails::ModelTraining {
+                framework,
+                model_type,
+                dataset_id,
+            } => {
+                format!("{framework} {model_type} {dataset_id}")
+            }
+            ActionDetails::ModelInference {
+                model_name,
+                backend,
+                action,
+            } => {
+                format!("{model_name} {backend} {action}")
+            }
+            ActionDetails::RagQuery {
+                query_type,
+                collection,
+                ..
+            } => {
+                format!("{query_type} {collection}")
+            }
+            ActionDetails::EvaluationRun {
+                evaluator, scope, ..
+            } => {
+                format!("{evaluator} {scope}")
+            }
+            ActionDetails::ResearchAction {
+                action,
+                source,
+                query,
+            } => {
+                format!("{} {} {}", action, source, query.as_deref().unwrap_or(""))
+            }
             _ => String::new(),
         }
     }
@@ -1049,6 +1318,80 @@ impl SafetyGuardian {
             | ActionDetails::FileDelete { path } => self.check_path_denied(path),
             ActionDetails::ShellCommand { command } => self.check_command_denied(command),
             ActionDetails::NetworkRequest { host, .. } => self.check_host_denied(host),
+            ActionDetails::DataPipeline { dataset, .. } => {
+                if self
+                    .config
+                    .denied_commands
+                    .iter()
+                    .any(|d| dataset.contains(d))
+                {
+                    Some(format!("Dataset '{dataset}' matches denied pattern"))
+                } else {
+                    None
+                }
+            }
+            ActionDetails::ModelTraining { dataset_id, .. } => {
+                if self
+                    .config
+                    .denied_commands
+                    .iter()
+                    .any(|d| dataset_id.contains(d))
+                {
+                    Some(format!(
+                        "Training dataset '{dataset_id}' matches denied pattern"
+                    ))
+                } else {
+                    None
+                }
+            }
+            ActionDetails::ModelInference { model_name, .. } => {
+                if self
+                    .config
+                    .denied_commands
+                    .iter()
+                    .any(|d| model_name.contains(d))
+                {
+                    Some(format!("Model '{model_name}' matches denied pattern"))
+                } else {
+                    None
+                }
+            }
+            ActionDetails::RagQuery { collection, .. } => {
+                if self
+                    .config
+                    .denied_commands
+                    .iter()
+                    .any(|d| collection.contains(d))
+                {
+                    Some(format!("Collection '{collection}' matches denied pattern"))
+                } else {
+                    None
+                }
+            }
+            ActionDetails::EvaluationRun { evaluator, .. } => {
+                if self
+                    .config
+                    .denied_commands
+                    .iter()
+                    .any(|d| evaluator.contains(d))
+                {
+                    Some(format!("Evaluator '{evaluator}' matches denied pattern"))
+                } else {
+                    None
+                }
+            }
+            ActionDetails::ResearchAction { source, .. } => {
+                if self
+                    .config
+                    .denied_commands
+                    .iter()
+                    .any(|d| source.contains(d))
+                {
+                    Some(format!("Research source '{source}' matches denied pattern"))
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
@@ -1063,8 +1406,7 @@ impl SafetyGuardian {
         for pattern in &self.config.denied_paths {
             if Self::glob_matches(pattern, &path_str) {
                 return Some(format!(
-                    "Path '{}' matches denied pattern '{}'",
-                    path_str, pattern
+                    "Path '{path_str}' matches denied pattern '{pattern}'"
                 ));
             }
         }
@@ -1101,8 +1443,7 @@ impl SafetyGuardian {
                 || cmd_lower.contains(&denied.to_lowercase())
             {
                 return Some(format!(
-                    "Command '{}' matches denied pattern '{}'",
-                    command, denied
+                    "Command '{command}' matches denied pattern '{denied}'"
                 ));
             }
         }
@@ -1197,7 +1538,7 @@ impl SafetyGuardian {
             return None;
         }
         if !self.config.allowed_hosts.iter().any(|h| h == host) {
-            return Some(format!("Host '{}' not in allowed hosts list", host));
+            return Some(format!("Host '{host}' not in allowed hosts list"));
         }
         None
     }
@@ -1212,8 +1553,8 @@ impl SafetyGuardian {
         // Pattern: **/dir/** — matches any path containing the dir segment
         if pattern.starts_with("**/") && pattern.ends_with("/**") {
             let middle = &pattern[3..pattern.len() - 3];
-            let segment = format!("/{}/", middle);
-            let starts_with = format!("{}/", middle);
+            let segment = format!("/{middle}/");
+            let starts_with = format!("{middle}/");
             return path.contains(&segment) || path.starts_with(&starts_with) || path == middle;
         }
 
@@ -1226,7 +1567,7 @@ impl SafetyGuardian {
             }
             // Direct suffix match: **/foo matches any path ending in /foo or equal to foo
             return path.ends_with(suffix)
-                || path.ends_with(&format!("/{}", suffix))
+                || path.ends_with(&format!("/{suffix}"))
                 || path == suffix;
         }
 
@@ -1395,7 +1736,7 @@ impl SafetyGuardian {
             PermissionResult::Allowed
         } else {
             PermissionResult::Denied {
-                reason: format!("Host '{}' is not in allowed_hosts whitelist", host),
+                reason: format!("Host '{host}' is not in allowed_hosts whitelist"),
             }
         }
     }
@@ -1508,7 +1849,7 @@ mod tests {
     }
 
     fn make_action(tool: &str, risk: RiskLevel, details: ActionDetails) -> ActionRequest {
-        SafetyGuardian::create_action_request(tool, risk, format!("{} action", tool), details)
+        SafetyGuardian::create_action_request(tool, risk, format!("{tool} action"), details)
     }
 
     #[test]
@@ -1797,7 +2138,7 @@ mod tests {
         guardian.max_audit_entries = 5;
 
         for i in 0..10 {
-            guardian.log_execution(&format!("tool_{}", i), true, 1);
+            guardian.log_execution(&format!("tool_{i}"), true, 1);
         }
 
         assert_eq!(guardian.audit_log().len(), 5);
@@ -1848,18 +2189,15 @@ mod tests {
         let preview = ctx.preview.unwrap();
         assert!(
             preview.contains("click_element"),
-            "Preview should contain action: {}",
-            preview
+            "Preview should contain action: {preview}"
         );
         assert!(
             preview.contains("TextEdit"),
-            "Preview should contain app name: {}",
-            preview
+            "Preview should contain app name: {preview}"
         );
         assert!(
             preview.contains("Save"),
-            "Preview should contain element: {}",
-            preview
+            "Preview should contain element: {preview}"
         );
     }
 

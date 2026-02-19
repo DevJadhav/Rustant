@@ -415,26 +415,22 @@ impl UserGuidance for LlmError {
     fn suggestion(&self) -> Option<String> {
         match self {
             LlmError::AuthFailed { provider } => Some(format!(
-                "Authentication failed for {}. Check your API key.",
-                provider
+                "Authentication failed for {provider}. Check your API key."
             )),
             LlmError::RateLimited { retry_after_secs } => Some(format!(
-                "Rate limited. Rustant will retry in {}s.",
-                retry_after_secs
+                "Rate limited. Rustant will retry in {retry_after_secs}s."
             )),
             LlmError::Connection { .. } => {
                 Some("Cannot reach the LLM provider. Check your network.".into())
             }
             LlmError::Timeout { timeout_secs } => {
-                Some(format!("Request timed out after {}s.", timeout_secs))
+                Some(format!("Request timed out after {timeout_secs}s."))
             }
             LlmError::ContextOverflow { used, limit } => Some(format!(
-                "Context full ({}/{} tokens). Use /compact to free space.",
-                used, limit
+                "Context full ({used}/{limit} tokens). Use /compact to free space."
             )),
             LlmError::UnsupportedModel { model } => Some(format!(
-                "Model '{}' is not supported by this provider.",
-                model
+                "Model '{model}' is not supported by this provider."
             )),
             _ => None,
         }
@@ -466,11 +462,10 @@ impl UserGuidance for ToolError {
     fn suggestion(&self) -> Option<String> {
         match self {
             ToolError::NotFound { name } => Some(format!(
-                "Tool '{}' is not registered. Use /tools to list available tools.",
-                name
+                "Tool '{name}' is not registered. Use /tools to list available tools."
             )),
             ToolError::InvalidArguments { name, reason } => {
-                Some(format!("Invalid arguments for '{}': {}", name, reason))
+                Some(format!("Invalid arguments for '{name}': {reason}"))
             }
             ToolError::ExecutionFailed { name, message } => {
                 // Try to categorize the failure
@@ -487,12 +482,10 @@ impl UserGuidance for ToolError {
                 }
             }
             ToolError::Timeout { name, timeout_secs } => Some(format!(
-                "Tool '{}' timed out after {}s. Consider breaking the task into smaller steps.",
-                name, timeout_secs
+                "Tool '{name}' timed out after {timeout_secs}s. Consider breaking the task into smaller steps."
             )),
             ToolError::PermissionDenied { name, .. } => Some(format!(
-                "Permission denied for '{}'. Adjust with /permissions.",
-                name
+                "Permission denied for '{name}'. Adjust with /permissions."
             )),
             _ => None,
         }
@@ -519,8 +512,7 @@ impl UserGuidance for MemoryError {
                 Some("Memory capacity exceeded. Use /compact or start a new session.".into())
             }
             MemoryError::SessionLoadFailed { message } => Some(format!(
-                "Session load failed: {}. Use /sessions to list available sessions.",
-                message
+                "Session load failed: {message}. Use /sessions to list available sessions."
             )),
             _ => None,
         }
@@ -535,11 +527,10 @@ impl UserGuidance for ConfigError {
     fn suggestion(&self) -> Option<String> {
         match self {
             ConfigError::MissingField { field } => Some(format!(
-                "Missing config field '{}'. Run /setup to configure.",
-                field
+                "Missing config field '{field}'. Run /setup to configure."
             )),
             ConfigError::EnvVarMissing { var } => {
-                Some(format!("Set environment variable {} or run /setup.", var))
+                Some(format!("Set environment variable {var} or run /setup."))
             }
             _ => None,
         }
@@ -561,8 +552,7 @@ impl UserGuidance for SafetyError {
                 path.display()
             )),
             SafetyError::CommandDenied { command } => Some(format!(
-                "Command '{}' is not in the allowed list. Adjust in config.",
-                command
+                "Command '{command}' is not in the allowed list. Adjust in config."
             )),
             _ => None,
         }
@@ -577,8 +567,7 @@ impl UserGuidance for AgentError {
     fn suggestion(&self) -> Option<String> {
         match self {
             AgentError::MaxIterationsReached { max } => Some(format!(
-                "Task exceeded {} iterations. Break it into smaller steps.",
-                max
+                "Task exceeded {max} iterations. Break it into smaller steps."
             )),
             AgentError::BudgetExceeded { .. } => {
                 Some("Token budget exceeded. Start a new session or increase the budget.".into())
@@ -603,12 +592,10 @@ impl UserGuidance for ChannelError {
     fn suggestion(&self) -> Option<String> {
         match self {
             ChannelError::ConnectionFailed { name, .. } => Some(format!(
-                "Channel '{}' connection failed. Check credentials.",
-                name
+                "Channel '{name}' connection failed. Check credentials."
             )),
             ChannelError::AuthFailed { name } => Some(format!(
-                "Channel '{}' auth failed. Re-run channel setup.",
-                name
+                "Channel '{name}' auth failed. Re-run channel setup."
             )),
             _ => None,
         }
@@ -623,20 +610,16 @@ impl UserGuidance for NodeError {
     fn suggestion(&self) -> Option<String> {
         match self {
             NodeError::NoCapableNode { capability } => Some(format!(
-                "No node has the '{}' capability. Check node configuration.",
-                capability
+                "No node has the '{capability}' capability. Check node configuration."
             )),
             NodeError::ExecutionFailed { node_id, .. } => Some(format!(
-                "Node '{}' failed. It may be overloaded or misconfigured.",
-                node_id
+                "Node '{node_id}' failed. It may be overloaded or misconfigured."
             )),
             NodeError::Unreachable { node_id } => Some(format!(
-                "Node '{}' is unreachable. Check network connectivity.",
-                node_id
+                "Node '{node_id}' is unreachable. Check network connectivity."
             )),
             NodeError::ConsentDenied { capability } => Some(format!(
-                "Consent denied for '{}'. Grant permission in node settings.",
-                capability
+                "Consent denied for '{capability}'. Grant permission in node settings."
             )),
             NodeError::DiscoveryFailed { .. } => {
                 Some("Node discovery failed. Check gateway configuration.".into())
@@ -659,20 +642,16 @@ impl UserGuidance for WorkflowError {
     fn suggestion(&self) -> Option<String> {
         match self {
             WorkflowError::NotFound { name } => Some(format!(
-                "Workflow '{}' not found. Use /workflows to list available workflows.",
-                name
+                "Workflow '{name}' not found. Use /workflows to list available workflows."
             )),
             WorkflowError::StepFailed { step, .. } => Some(format!(
-                "Workflow step '{}' failed. Check inputs and retry.",
-                step
+                "Workflow step '{step}' failed. Check inputs and retry."
             )),
             WorkflowError::ValidationFailed { message } => Some(format!(
-                "Workflow validation failed: {}. Fix the definition and retry.",
-                message
+                "Workflow validation failed: {message}. Fix the definition and retry."
             )),
             WorkflowError::ApprovalTimeout { step } => Some(format!(
-                "Approval timed out for step '{}'. Re-run the workflow.",
-                step
+                "Approval timed out for step '{step}'. Re-run the workflow."
             )),
             WorkflowError::Cancelled => Some("Workflow was cancelled.".into()),
             _ => None,
@@ -696,15 +675,13 @@ impl UserGuidance for BrowserError {
                 Some("Browser is not connected. Start a browser session first.".into())
             }
             BrowserError::Timeout { timeout_secs } => Some(format!(
-                "Browser timed out after {}s. The page may be slow to load.",
-                timeout_secs
+                "Browser timed out after {timeout_secs}s. The page may be slow to load."
             )),
             BrowserError::ElementNotFound { selector } => Some(format!(
-                "Element '{}' not found. The page structure may have changed.",
-                selector
+                "Element '{selector}' not found. The page structure may have changed."
             )),
             BrowserError::UrlBlocked { url } => {
-                Some(format!("URL '{}' is blocked by security policy.", url))
+                Some(format!("URL '{url}' is blocked by security policy."))
             }
             BrowserError::NavigationFailed { .. } => {
                 Some("Navigation failed. Check the URL and try again.".into())
@@ -727,20 +704,16 @@ impl UserGuidance for SchedulerError {
     fn suggestion(&self) -> Option<String> {
         match self {
             SchedulerError::InvalidCronExpression { expression, .. } => Some(format!(
-                "Invalid cron expression '{}'. Use standard cron syntax (e.g., '0 9 * * *').",
-                expression
+                "Invalid cron expression '{expression}'. Use standard cron syntax (e.g., '0 9 * * *')."
             )),
             SchedulerError::JobNotFound { name } => Some(format!(
-                "Job '{}' not found. Use 'rustant cron list' to see existing jobs.",
-                name
+                "Job '{name}' not found. Use 'rustant cron list' to see existing jobs."
             )),
             SchedulerError::JobAlreadyExists { name } => Some(format!(
-                "Job '{}' already exists. Use a different name or remove the existing one.",
-                name
+                "Job '{name}' already exists. Use a different name or remove the existing one."
             )),
             SchedulerError::MaxJobsExceeded { max } => Some(format!(
-                "Maximum of {} jobs reached. Remove some before adding new ones.",
-                max
+                "Maximum of {max} jobs reached. Remove some before adding new ones."
             )),
             _ => None,
         }
@@ -767,17 +740,14 @@ impl UserGuidance for VoiceError {
                 Some("Audio device error. Check that a microphone/speaker is connected.".into())
             }
             VoiceError::AuthFailed { provider } => Some(format!(
-                "Voice provider '{}' auth failed. Check API key.",
-                provider
+                "Voice provider '{provider}' auth failed. Check API key."
             )),
             VoiceError::ModelNotFound { model } => Some(format!(
-                "Voice model '{}' not found. Check available models.",
-                model
+                "Voice model '{model}' not found. Check available models."
             )),
-            VoiceError::Timeout { timeout_secs } => Some(format!(
-                "Voice operation timed out after {}s.",
-                timeout_secs
-            )),
+            VoiceError::Timeout { timeout_secs } => {
+                Some(format!("Voice operation timed out after {timeout_secs}s."))
+            }
             _ => None,
         }
     }

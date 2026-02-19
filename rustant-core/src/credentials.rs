@@ -57,7 +57,7 @@ impl KeyringCredentialStore {
 
     /// Format the account name for a given provider.
     pub fn account_name(provider: &str) -> String {
-        format!("provider:{}", provider)
+        format!("provider:{provider}")
     }
 }
 

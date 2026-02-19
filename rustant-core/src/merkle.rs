@@ -126,7 +126,7 @@ impl MerkleChain {
 
         // Auto-checkpoint if interval is configured
         if self.checkpoint_interval > 0
-            && (sequence + 1).is_multiple_of(self.checkpoint_interval)
+            && (sequence + 1) % self.checkpoint_interval == 0
             && let Some(hash) = self.root_hash()
         {
             self.checkpoints.push((sequence, hash.to_string()));
@@ -314,7 +314,7 @@ mod tests {
     fn test_verify_valid_chain() {
         let mut chain = MerkleChain::new();
         for i in 0..10 {
-            chain.append(format!("event-{}", i).as_bytes());
+            chain.append(format!("event-{i}").as_bytes());
         }
 
         let result = chain.verify_chain();
@@ -447,7 +447,7 @@ mod tests {
     fn test_checkpoint_creation() {
         let mut chain = MerkleChain::with_checkpoint_interval(5);
         for i in 0..10 {
-            chain.append(format!("event-{}", i).as_bytes());
+            chain.append(format!("event-{i}").as_bytes());
         }
         // Checkpoints at sequence 4 and 9
         assert_eq!(chain.checkpoints().len(), 2);
@@ -459,7 +459,7 @@ mod tests {
     fn test_checkpoint_verification_valid() {
         let mut chain = MerkleChain::with_checkpoint_interval(3);
         for i in 0..9 {
-            chain.append(format!("event-{}", i).as_bytes());
+            chain.append(format!("event-{i}").as_bytes());
         }
         assert!(chain.verify_checkpoints());
         assert!(chain.verify_chain().is_valid);
@@ -469,7 +469,7 @@ mod tests {
     fn test_checkpoint_verification_detects_tampering() {
         let mut chain = MerkleChain::with_checkpoint_interval(3);
         for i in 0..6 {
-            chain.append(format!("event-{}", i).as_bytes());
+            chain.append(format!("event-{i}").as_bytes());
         }
         assert_eq!(chain.checkpoints().len(), 2);
 
@@ -485,7 +485,7 @@ mod tests {
     fn test_no_checkpoints_when_disabled() {
         let mut chain = MerkleChain::new();
         for i in 0..100 {
-            chain.append(format!("event-{}", i).as_bytes());
+            chain.append(format!("event-{i}").as_bytes());
         }
         assert!(chain.checkpoints().is_empty());
     }
@@ -494,7 +494,7 @@ mod tests {
     fn test_checkpoint_serialization_roundtrip() {
         let mut chain = MerkleChain::with_checkpoint_interval(2);
         for i in 0..4 {
-            chain.append(format!("event-{}", i).as_bytes());
+            chain.append(format!("event-{i}").as_bytes());
         }
         assert_eq!(chain.checkpoints().len(), 2);
 

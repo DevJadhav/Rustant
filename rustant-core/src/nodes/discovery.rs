@@ -252,7 +252,7 @@ pub struct UdpMdnsTransport {
 impl UdpMdnsTransport {
     pub fn new() -> Self {
         Self {
-            bind_addr: format!("0.0.0.0:{}", MDNS_PORT),
+            bind_addr: format!("0.0.0.0:{MDNS_PORT}"),
         }
     }
 
@@ -279,7 +279,7 @@ impl MdnsTransport for UdpMdnsTransport {
         let payload =
             serde_json::to_vec(record).map_err(|e| format!("Failed to serialize record: {e}"))?;
 
-        let dest = format!("{}:{}", MDNS_MULTICAST_ADDR, MDNS_PORT);
+        let dest = format!("{MDNS_MULTICAST_ADDR}:{MDNS_PORT}");
         socket
             .send_to(&payload, &dest)
             .await
@@ -366,8 +366,8 @@ impl NodeDiscovery {
         let platform = Self::detect_platform();
         let hostname = Self::get_hostname();
         let info = NodeInfo {
-            node_id: NodeId::new(format!("local-{}", hostname)),
-            name: format!("Local ({})", hostname),
+            node_id: NodeId::new(format!("local-{hostname}")),
+            name: format!("Local ({hostname})"),
             platform,
             hostname,
             registered_at: Utc::now(),
@@ -491,7 +491,7 @@ mod tests {
     fn sample_record(node_id: &str, addr: &str, port: u16) -> MdnsServiceRecord {
         MdnsServiceRecord {
             service_name: RUSTANT_SERVICE_NAME.to_string(),
-            instance_name: format!("{}-Rustant", node_id),
+            instance_name: format!("{node_id}-Rustant"),
             address: addr.to_string(),
             port,
             platform: Platform::Linux,

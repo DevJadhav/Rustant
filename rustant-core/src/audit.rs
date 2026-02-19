@@ -94,6 +94,83 @@ pub enum TraceEventKind {
         provider: String,
         reason: String,
     },
+    /// A model inference was performed.
+    ModelInferencePerformed {
+        model: String,
+        backend: String,
+        input_tokens: usize,
+        output_tokens: usize,
+        latency_ms: u64,
+    },
+    /// A training run completed.
+    TrainingCompleted {
+        experiment_id: String,
+        epochs: usize,
+        final_loss: f64,
+        duration_ms: u64,
+    },
+    /// A RAG query was executed.
+    RagQueryExecuted {
+        collection: String,
+        chunks_retrieved: usize,
+        groundedness_score: f64,
+    },
+    /// An AI safety check was performed.
+    AiSafetyCheckPerformed {
+        check_type: String,
+        result: String,
+        details: String,
+    },
+    /// A red team attack was tested.
+    RedTeamAttackTested {
+        attack_type: String,
+        result: String,
+    },
+    /// A data pipeline operation was audited.
+    DataPipelineAudited {
+        action: String,
+        dataset: String,
+        pii_detected: bool,
+    },
+    /// A security scan completed.
+    SecurityScanCompleted {
+        scanner: String,
+        target: String,
+        findings_count: usize,
+        critical_count: usize,
+    },
+    /// A security finding was detected.
+    FindingDetected {
+        finding_id: String,
+        severity: String,
+        category: String,
+        title: String,
+    },
+    /// A security finding was suppressed.
+    FindingSuppressed {
+        finding_id: String,
+        suppressed_by: String,
+        reason: String,
+    },
+    /// A policy was evaluated.
+    PolicyEvaluated {
+        policy_id: String,
+        result: String,
+        violations: usize,
+    },
+    /// A compliance report was generated.
+    ComplianceReportGenerated {
+        framework: String,
+        compliance_rate: f64,
+        controls_assessed: usize,
+    },
+    /// An incident response action was taken.
+    IncidentActionTaken {
+        action_type: String,
+        target: String,
+        incident_id: String,
+        success: bool,
+    },
 }
 
 impl TraceEventKind {
@@ -155,6 +232,18 @@ impl TraceEventKind {
             TraceEventKind::PersonaSwitched { .. } => "persona_switched",
             TraceEventKind::CacheCreated { .. } => "cache_created",
             TraceEventKind::CacheInvalidated { .. } => "cache_invalidated",
+            TraceEventKind::ModelInferencePerformed { .. } => "model_inference_performed",
+            TraceEventKind::TrainingCompleted { .. } => "training_completed",
+            TraceEventKind::RagQueryExecuted { .. } => "rag_query_executed",
+            TraceEventKind::AiSafetyCheckPerformed { .. } => "ai_safety_check_performed",
+            TraceEventKind::RedTeamAttackTested { .. } => "red_team_attack_tested",
+            TraceEventKind::DataPipelineAudited { .. } => "data_pipeline_audited",
+            TraceEventKind::SecurityScanCompleted { .. } => "security_scan_completed",
+            TraceEventKind::FindingDetected { .. } => "finding_detected",
+            TraceEventKind::FindingSuppressed { .. } => "finding_suppressed",
+            TraceEventKind::PolicyEvaluated { .. } => "policy_evaluated",
+            TraceEventKind::ComplianceReportGenerated { .. } => "compliance_report_generated",
+            TraceEventKind::IncidentActionTaken { .. } => "incident_action_taken",
         }
     }
 
@@ -174,28 +263,28 @@ impl TraceEventKind {
     /// Produce a short, single-line human-readable summary of the event.
     fn summary(&self) -> String {
         match self {
-            TraceEventKind::TaskStarted { goal, .. } => format!("Task started: {}", goal),
+            TraceEventKind::TaskStarted { goal, .. } => format!("Task started: {goal}"),
             TraceEventKind::TaskCompleted {
                 success,
                 iterations,
                 ..
             } => {
                 let tag = if *success { "SUCCESS" } else { "FAILED" };
-                format!("Task completed [{}] after {} iterations", tag, iterations)
+                format!("Task completed [{tag}] after {iterations} iterations")
             }
             TraceEventKind::ToolRequested {
                 tool, risk_level, ..
-            } => format!("Tool requested: {} (risk: {})", tool, risk_level),
-            TraceEventKind::ToolApproved { tool } => format!("Tool approved: {}", tool),
+            } => format!("Tool requested: {tool} (risk: {risk_level})"),
+            TraceEventKind::ToolApproved { tool } => format!("Tool approved: {tool}"),
             TraceEventKind::ToolDenied { tool, reason } => {
-                format!("Tool denied: {} — {}", tool, reason)
+                format!("Tool denied: {tool} — {reason}")
             }
             TraceEventKind::ApprovalRequested { tool, .. } => {
-                format!("Approval requested for: {}", tool)
+                format!("Approval requested for: {tool}")
             }
             TraceEventKind::ApprovalDecision { tool, approved } => {
                 let decision = if *approved { "approved" } else { "denied" };
-                format!("Approval decision for {}: {}", tool, decision)
+                format!("Approval decision for {tool}: {decision}")
             }
             TraceEventKind::ToolExecuted {
                 tool,
@@ -204,33 +293,109 @@ impl TraceEventKind {
                 ..
             } => {
                 let tag = if *success { "OK" } else { "ERR" };
-                format!("Tool executed: {} [{}] ({}ms)", tool, tag, duration_ms)
+                format!("Tool executed: {tool} [{tag}] ({duration_ms}ms)")
             }
             TraceEventKind::LlmCall {
                 model,
                 input_tokens,
                 output_tokens,
                 cost,
-            } => format!(
-                "LLM call: {} ({}/{} tokens, ${:.4})",
-                model, input_tokens, output_tokens, cost
-            ),
+            } => format!("LLM call: {model} ({input_tokens}/{output_tokens} tokens, ${cost:.4})"),
             TraceEventKind::StatusChange { from, to } => {
-                format!("Status: {} -> {}", from, to)
+                format!("Status: {from} -> {to}")
             }
-            TraceEventKind::Error { message } => format!("Error: {}", message),
+            TraceEventKind::Error { message } => format!("Error: {message}"),
             TraceEventKind::PersonaSwitched {
                 from,
                 to,
                 rationale,
             } => {
-                format!("Persona: {} -> {} ({})", from, to, rationale)
+                format!("Persona: {from} -> {to} ({rationale})")
             }
             TraceEventKind::CacheCreated { provider, tokens } => {
-                format!("Cache created: {} ({} tokens)", provider, tokens)
+                format!("Cache created: {provider} ({tokens} tokens)")
             }
             TraceEventKind::CacheInvalidated { provider, reason } => {
-                format!("Cache invalidated: {} ({})", provider, reason)
+                format!("Cache invalidated: {provider} ({reason})")
+            }
+            TraceEventKind::ModelInferencePerformed {
+                model,
+                backend,
+                input_tokens,
+                output_tokens,
+                latency_ms,
+            } => format!(
+                "Model inference: {model} via {backend} ({input_tokens}/{output_tokens} tokens, {latency_ms}ms)"
+            ),
+            TraceEventKind::TrainingCompleted {
+                experiment_id,
+                epochs,
+                final_loss,
+                duration_ms,
+            } => format!(
+                "Training completed: {experiment_id} ({epochs} epochs, loss={final_loss:.4}, {duration_ms}ms)"
+            ),
+            TraceEventKind::RagQueryExecuted {
+                collection,
+                chunks_retrieved,
+                groundedness_score,
+            } => format!(
+                "RAG query: {collection} ({chunks_retrieved} chunks, groundedness={groundedness_score:.2})"
+            ),
+            TraceEventKind::AiSafetyCheckPerformed {
+                check_type, result, ..
+            } => format!("AI safety check: {check_type} -> {result}"),
+            TraceEventKind::RedTeamAttackTested {
+                attack_type,
+                result,
+            } => format!("Red team: {attack_type} -> {result}"),
+            TraceEventKind::DataPipelineAudited {
+                action,
+                dataset,
+                pii_detected,
+            } => format!("Data pipeline: {action} on {dataset} (PII: {pii_detected})"),
+            TraceEventKind::SecurityScanCompleted {
+                scanner,
+                target,
+                findings_count,
+                critical_count,
+            } => format!(
+                "Security scan: {scanner} on {target} ({findings_count} findings, {critical_count} critical)"
+            ),
+            TraceEventKind::FindingDetected {
+                severity,
+                category,
+                title,
+                ..
+            } => format!("Finding [{severity}][{category}]: {title}"),
+            TraceEventKind::FindingSuppressed {
+                finding_id,
+                suppressed_by,
+                reason,
+            } => format!("Finding suppressed: {finding_id} by {suppressed_by} ({reason})"),
+            TraceEventKind::PolicyEvaluated {
+                policy_id,
+                result,
+                violations,
+            } => format!("Policy {policy_id}: {result} ({violations} violations)"),
+            TraceEventKind::ComplianceReportGenerated {
+                framework,
+                compliance_rate,
+                controls_assessed,
+            } => format!(
+                "Compliance report: {} ({:.0}%, {} controls)",
+                framework,
+                compliance_rate * 100.0,
+                controls_assessed
+            ),
+            TraceEventKind::IncidentActionTaken {
+                action_type,
+                target,
+                success,
+                ..
+            } => {
+                let tag = if *success { "OK" } else { "FAILED" };
+                format!("Incident action: {action_type} on {target} [{tag}]")
             }
         }
     }
@@ -245,7 +410,7 @@ impl TraceEventKind {
                 ..
             } => (
                 String::new(),
-                format!("success={} iterations={}", success, iterations),
+                format!("success={success} iterations={iterations}"),
             ),
             TraceEventKind::ToolRequested {
                 tool,
@@ -253,13 +418,13 @@ impl TraceEventKind {
                 args_summary,
             } => (
                 tool.clone(),
-                format!("risk={} args={}", risk_level, args_summary),
+                format!("risk={risk_level} args={args_summary}"),
             ),
             TraceEventKind::ToolApproved { tool } => (tool.clone(), String::new()),
             TraceEventKind::ToolDenied { tool, reason } => (tool.clone(), reason.clone()),
             TraceEventKind::ApprovalRequested { tool, context } => (tool.clone(), context.clone()),
             TraceEventKind::ApprovalDecision { tool, approved } => {
-                (tool.clone(), format!("approved={}", approved))
+                (tool.clone(), format!("approved={approved}"))
             }
             TraceEventKind::ToolExecuted {
                 tool,
@@ -268,10 +433,7 @@ impl TraceEventKind {
                 output_preview,
             } => (
                 tool.clone(),
-                format!(
-                    "success={} duration_ms={} output={}",
-                    success, duration_ms, output_preview
-                ),
+                format!("success={success} duration_ms={duration_ms} output={output_preview}"),
             ),
             TraceEventKind::LlmCall {
                 model,
@@ -280,27 +442,133 @@ impl TraceEventKind {
                 cost,
             } => (
                 String::new(),
-                format!(
-                    "model={} in={} out={} cost={:.6}",
-                    model, input_tokens, output_tokens, cost
-                ),
+                format!("model={model} in={input_tokens} out={output_tokens} cost={cost:.6}"),
             ),
-            TraceEventKind::StatusChange { from, to } => {
-                (String::new(), format!("{} -> {}", from, to))
-            }
+            TraceEventKind::StatusChange { from, to } => (String::new(), format!("{from} -> {to}")),
             TraceEventKind::Error { message } => (String::new(), message.clone()),
             TraceEventKind::PersonaSwitched {
                 from,
                 to,
                 rationale,
-            } => (String::new(), format!("{} -> {} ({})", from, to, rationale)),
+            } => (String::new(), format!("{from} -> {to} ({rationale})")),
             TraceEventKind::CacheCreated { provider, tokens } => (
                 String::new(),
-                format!("provider={} tokens={}", provider, tokens),
+                format!("provider={provider} tokens={tokens}"),
             ),
             TraceEventKind::CacheInvalidated { provider, reason } => (
                 String::new(),
-                format!("provider={} reason={}", provider, reason),
+                format!("provider={provider} reason={reason}"),
+            ),
+            TraceEventKind::ModelInferencePerformed {
+                model,
+                backend,
+                input_tokens,
+                output_tokens,
+                latency_ms,
+            } => (
+                String::new(),
+                format!(
+                    "model={model} backend={backend} in={input_tokens} out={output_tokens} latency_ms={latency_ms}"
+                ),
+            ),
+            TraceEventKind::TrainingCompleted {
+                experiment_id,
+                epochs,
+                final_loss,
+                duration_ms,
+            } => (
+                String::new(),
+                format!(
+                    "experiment={experiment_id} epochs={epochs} loss={final_loss:.6} duration_ms={duration_ms}"
+                ),
+            ),
+            TraceEventKind::RagQueryExecuted {
+                collection,
+                chunks_retrieved,
+                groundedness_score,
+            } => (
+                String::new(),
+                format!(
+                    "collection={collection} chunks={chunks_retrieved} groundedness={groundedness_score:.4}"
+                ),
+            ),
+            TraceEventKind::AiSafetyCheckPerformed {
+                check_type,
+                result,
+                details,
+            } => (
+                String::new(),
+                format!("check={check_type} result={result} details={details}"),
+            ),
+            TraceEventKind::RedTeamAttackTested {
+                attack_type,
+                result,
+            } => (
+                String::new(),
+                format!("attack={attack_type} result={result}"),
+            ),
+            TraceEventKind::DataPipelineAudited {
+                action,
+                dataset,
+                pii_detected,
+            } => (
+                String::new(),
+                format!("action={action} dataset={dataset} pii={pii_detected}"),
+            ),
+            TraceEventKind::SecurityScanCompleted {
+                scanner,
+                target,
+                findings_count,
+                critical_count,
+            } => (
+                scanner.clone(),
+                format!("target={target} findings={findings_count} critical={critical_count}"),
+            ),
+            TraceEventKind::FindingDetected {
+                finding_id,
+                severity,
+                category,
+                title,
+            } => (
+                String::new(),
+                format!("id={finding_id} severity={severity} category={category} title={title}"),
+            ),
+            TraceEventKind::FindingSuppressed {
+                finding_id,
+                suppressed_by,
+                reason,
+            } => (
+                String::new(),
+                format!("id={finding_id} by={suppressed_by} reason={reason}"),
+            ),
+            TraceEventKind::PolicyEvaluated {
+                policy_id,
+                result,
+                violations,
+            } => (
+                String::new(),
+                format!("policy={policy_id} result={result} violations={violations}"),
+            ),
+            TraceEventKind::ComplianceReportGenerated {
+                framework,
+                compliance_rate,
+                controls_assessed,
+            } => (
+                String::new(),
+                format!(
+                    "framework={framework} rate={compliance_rate:.4} controls={controls_assessed}"
+                ),
+            ),
+            TraceEventKind::IncidentActionTaken {
+                action_type,
+                target,
+                incident_id,
+                success,
+            } => (
+                String::new(),
+                format!(
+                    "action={action_type} target={target} incident={incident_id} success={success}"
+                ),
             ),
         }
     }
@@ -791,7 +1059,7 @@ impl AuditExporter {
 fn csv_escape(value: &str) -> String {
     if value.contains(',') || value.contains('"') || value.contains('\n') {
         let escaped = value.replace('"', "\"\"");
-        format!("\"{}\"", escaped)
+        format!("\"{escaped}\"")
     } else {
         value.to_string()
     }
@@ -1022,7 +1290,7 @@ impl Analytics {
             if *count >= threshold {
                 patterns.push(Pattern {
                     kind: PatternKind::FrequentDenial,
-                    description: format!("Tool '{}' was denied {} times", tool, count),
+                    description: format!("Tool '{tool}' was denied {count} times"),
                     occurrences: *count,
                 });
             }
@@ -1032,7 +1300,7 @@ impl Analytics {
             if *count >= threshold {
                 patterns.push(Pattern {
                     kind: PatternKind::ApprovalBottleneck,
-                    description: format!("Tool '{}' required approval {} times", tool, count),
+                    description: format!("Tool '{tool}' required approval {count} times"),
                     occurrences: *count,
                 });
             }
@@ -1045,8 +1313,7 @@ impl Analytics {
                 patterns.push(Pattern {
                     kind: PatternKind::SlowTool,
                     description: format!(
-                        "Tool '{}' was slow (>={}ms) {} times",
-                        tool, slow_threshold_ms, slow
+                        "Tool '{tool}' was slow (>={slow_threshold_ms}ms) {slow} times"
                     ),
                     occurrences: slow,
                 });
@@ -1062,7 +1329,7 @@ impl Analytics {
                 };
                 patterns.push(Pattern {
                     kind: PatternKind::RepeatedError,
-                    description: format!("Error '{}' occurred {} times", preview, count),
+                    description: format!("Error '{preview}' occurred {count} times"),
                     occurrences: *count,
                 });
             }
@@ -1073,7 +1340,7 @@ impl Analytics {
             if *cost >= cost_threshold {
                 patterns.push(Pattern {
                     kind: PatternKind::HighCostTool,
-                    description: format!("'{}' accumulated ${:.4} in costs", label, cost),
+                    description: format!("'{label}' accumulated ${cost:.4} in costs"),
                     occurrences: 1,
                 });
             }
@@ -1303,7 +1570,7 @@ mod tests {
         };
 
         for i in 0..5 {
-            store.add_trace(make_trace(&format!("trace {}", i)));
+            store.add_trace(make_trace(&format!("trace {i}")));
         }
 
         assert_eq!(store.len(), 3);
@@ -1317,7 +1584,7 @@ mod tests {
     fn test_audit_store_latest() {
         let mut store = AuditStore::new();
         for i in 0..5 {
-            store.add_trace(make_trace(&format!("trace {}", i)));
+            store.add_trace(make_trace(&format!("trace {i}")));
         }
 
         let latest = store.latest(2);
@@ -1901,6 +2168,6 @@ mod tests {
 
         let id = Uuid::new_v4();
         let err = AuditError::TraceNotFound(id);
-        assert_eq!(err.to_string(), format!("trace not found: {}", id));
+        assert_eq!(err.to_string(), format!("trace not found: {id}"));
     }
 }

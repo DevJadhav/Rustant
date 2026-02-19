@@ -36,10 +36,10 @@ impl MacOsNode {
         let hostname = std::env::var("HOSTNAME")
             .or_else(|_| std::env::var("HOST"))
             .unwrap_or_else(|_| "macos-local".to_string());
-        let node_id = NodeId::new(format!("macos-{}", hostname));
+        let node_id = NodeId::new(format!("macos-{hostname}"));
         let info = NodeInfo {
             node_id: node_id.clone(),
-            name: format!("macOS ({})", hostname),
+            name: format!("macOS ({hostname})"),
             platform: Platform::MacOS,
             hostname,
             registered_at: Utc::now(),

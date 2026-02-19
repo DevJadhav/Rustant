@@ -54,7 +54,7 @@ impl SessionEncryptor {
                 OsRng.fill_bytes(&mut key);
                 let key_b64 = base64_encode(&key);
                 crate::credentials::CredentialStore::store_key(&store, service, &key_b64).map_err(
-                    |e| EncryptionError::KeyringError(format!("Failed to store key: {}", e)),
+                    |e| EncryptionError::KeyringError(format!("Failed to store key: {e}")),
                 )?;
                 Ok(Self::from_key(&key))
             }
@@ -105,7 +105,7 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, EncryptionError> {
     use base64::Engine;
     base64::engine::general_purpose::STANDARD
         .decode(s)
-        .map_err(|e| EncryptionError::DecryptFailed(format!("Base64 decode error: {}", e)))
+        .map_err(|e| EncryptionError::DecryptFailed(format!("Base64 decode error: {e}")))
 }
 
 #[cfg(test)]
@@ -160,7 +160,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             EncryptionError::DataTooShort => {}
-            e => panic!("Expected DataTooShort, got: {:?}", e),
+            e => panic!("Expected DataTooShort, got: {e:?}"),
         }
     }
 

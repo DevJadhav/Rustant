@@ -112,6 +112,20 @@ pub struct AgentConfig {
     /// Optional ArXiv research tool configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arxiv: Option<ArxivConfig>,
+    /// Optional context hydration pipeline configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hydration: Option<crate::hydration::HydrationConfig>,
+    /// Optional verification loop (auto-test/lint/typecheck) configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<crate::verification::VerificationConfig>,
+    /// Optional AI engineer / ML pipeline configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_engineer: Option<AIEngineerConfig>,
+    /// Optional security scanning, code review, and compliance configuration.
+    /// Stored as raw JSON to avoid circular dependency with rustant-security crate.
+    /// The rustant-security crate deserializes this into its `SecurityConfig` type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security: Option<serde_json::Value>,
 }
 
 /// ArXiv research tool configuration.
@@ -147,6 +161,100 @@ fn default_cache_ttl() -> u64 {
 }
 fn default_cache_max() -> usize {
     1000
+}
+
+/// AI Engineer / ML pipeline configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AIEngineerConfig {
+    /// Master enable switch.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Path to the Python interpreter (auto-detected if absent).
+    #[serde(default)]
+    pub python_path: Option<String>,
+    /// Path to a virtual environment for ML dependencies.
+    #[serde(default)]
+    pub venv_path: Option<String>,
+    /// Evaluation sub-config.
+    #[serde(default)]
+    pub evaluation: AiEvalConfig,
+    /// Inference sub-config.
+    #[serde(default)]
+    pub inference: AiInferenceConfig,
+    /// Research sub-config.
+    #[serde(default)]
+    pub research: AiResearchConfig,
+    /// Safety sub-config.
+    #[serde(default)]
+    pub safety: AiSafetyMlConfig,
+    /// RAG sub-config.
+    #[serde(default)]
+    pub rag: AiRagConfig,
+    /// Training sub-config.
+    #[serde(default)]
+    pub training: AiTrainingConfig,
+}
+
+/// AI evaluation sub-configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AiEvalConfig {
+    #[serde(default)]
+    pub max_traces: usize,
+    #[serde(default)]
+    pub judge_model: Option<String>,
+}
+
+/// AI inference sub-configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AiInferenceConfig {
+    #[serde(default)]
+    pub default_backend: Option<String>,
+    #[serde(default = "default_max_concurrent")]
+    pub max_concurrent_requests: usize,
+}
+
+fn default_max_concurrent() -> usize {
+    8
+}
+
+/// AI research sub-configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AiResearchConfig {
+    #[serde(default)]
+    pub papers_cache_dir: Option<String>,
+    #[serde(default)]
+    pub default_source: Option<String>,
+}
+
+/// AI safety ML-specific sub-configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AiSafetyMlConfig {
+    #[serde(default = "default_true")]
+    pub pii_scan_on_ingest: bool,
+    #[serde(default = "default_true")]
+    pub alignment_test_after_finetune: bool,
+}
+
+/// AI RAG sub-configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AiRagConfig {
+    #[serde(default)]
+    pub default_chunk_size: Option<usize>,
+    #[serde(default)]
+    pub default_overlap: Option<usize>,
+    #[serde(default = "default_true")]
+    pub groundedness_check: bool,
+}
+
+/// AI training sub-configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AiTrainingConfig {
+    #[serde(default)]
+    pub default_framework: Option<String>,
+    #[serde(default)]
+    pub max_training_hours: Option<f64>,
+    #[serde(default = "default_true")]
+    pub reproducibility_enforcement: bool,
 }
 
 /// Meeting recording and transcription configuration.
@@ -714,13 +822,13 @@ impl IntelligenceConfig {
 
         // Validate defaults
         for w in self.defaults.validate() {
-            warnings.push(format!("[defaults] {}", w));
+            warnings.push(format!("[defaults] {w}"));
         }
 
         // Validate per-channel overrides
         for (name, cfg) in &self.channels {
             for w in cfg.validate() {
-                warnings.push(format!("[channel:{}] {}", name, w));
+                warnings.push(format!("[channel:{name}] {w}"));
             }
         }
 
@@ -1330,6 +1438,36 @@ pub struct FeatureFlags {
     /// Enable the evaluation framework for trace analysis.
     #[serde(default = "default_feature_true")]
     pub evaluation: bool,
+    /// Enable security scanning tools (rustant-security crate).
+    #[serde(default)]
+    pub security_scanning: bool,
+    /// Enable compliance engine (license, SBOM, policy).
+    #[serde(default)]
+    pub compliance_engine: bool,
+    /// Enable incident response (threat detection, playbooks).
+    #[serde(default)]
+    pub incident_response: bool,
+    /// Enable AI/ML engineering tools (rustant-ml crate).
+    #[serde(default)]
+    pub ai_engineer: bool,
+    /// Enable AI evaluation framework.
+    #[serde(default)]
+    pub ai_eval: bool,
+    /// Enable AI inference serving.
+    #[serde(default)]
+    pub ai_inference: bool,
+    /// Enable AI RAG pipeline.
+    #[serde(default)]
+    pub ai_rag: bool,
+    /// Enable AI training infrastructure.
+    #[serde(default)]
+    pub ai_training: bool,
+    /// Enable AI research tools.
+    #[serde(default)]
+    pub ai_research: bool,
+    /// Enable fullstack development mode (hydration, verification, templates).
+    #[serde(default)]
+    pub fullstack_mode: bool,
 }
 
 fn default_feature_true() -> bool {
@@ -1343,6 +1481,16 @@ impl Default for FeatureFlags {
             semantic_search: true,
             dynamic_personas: false,
             evaluation: true,
+            security_scanning: false,
+            compliance_engine: false,
+            incident_response: false,
+            ai_engineer: false,
+            ai_eval: false,
+            ai_inference: false,
+            ai_rag: false,
+            ai_training: false,
+            ai_research: false,
+            fullstack_mode: false,
         }
     }
 }
@@ -1611,6 +1759,9 @@ mod tests {
         assert_eq!(config.memory.window_size, 20);
         assert!(!config.ui.vim_mode);
         assert!(config.tools.enable_builtins);
+        // Fullstack fields default to None/false
+        assert!(config.hydration.is_none());
+        assert!(config.verification.is_none());
     }
 
     #[test]
@@ -1778,8 +1929,7 @@ allowed_hosts = []
         let warnings = config.validate();
         assert!(
             warnings.is_empty(),
-            "Default LlmConfig should have no warnings, got: {:?}",
-            warnings
+            "Default LlmConfig should have no warnings, got: {warnings:?}"
         );
     }
 
@@ -2133,8 +2283,7 @@ allowed_hosts = []
         let warnings = config.validate();
         assert!(
             warnings.is_empty(),
-            "Default config should have no warnings, got: {:?}",
-            warnings
+            "Default config should have no warnings, got: {warnings:?}"
         );
     }
 
@@ -2177,8 +2326,7 @@ allowed_hosts = []
         let warnings = config.validate();
         assert!(
             warnings.is_empty(),
-            "Default config should have no warnings, got: {:?}",
-            warnings
+            "Default config should have no warnings, got: {warnings:?}"
         );
     }
 

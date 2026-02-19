@@ -32,6 +32,12 @@ pub enum InjectionType {
     ZeroWidthObfuscation,
     /// Injection patterns detected within LLM thinking blocks.
     ThinkingManipulation,
+    /// Attempts to manipulate evaluation benchmarks or rubrics.
+    BenchmarkManipulation,
+    /// Attempts to extract model weights or training data.
+    ModelExfiltration,
+    /// Poisoned tool outputs or training data injection.
+    DataPoisoning,
 }
 
 /// Severity of a detected injection pattern.
@@ -126,6 +132,7 @@ impl InjectionDetector {
         patterns.extend(self.check_delimiter_injection(input));
         patterns.extend(self.check_homoglyphs(input));
         patterns.extend(self.check_zero_width(input));
+        patterns.extend(self.check_ml_injection(input));
 
         InjectionScanResult::from_patterns(patterns, self.threshold)
     }
@@ -145,6 +152,7 @@ impl InjectionDetector {
         patterns.extend(self.check_indirect_injection(output));
         patterns.extend(self.check_homoglyphs(output));
         patterns.extend(self.check_zero_width(output));
+        patterns.extend(self.check_ml_injection(output));
 
         // Tool outputs get elevated severity since they're attacker-controllable.
         for p in &mut patterns {
@@ -308,7 +316,7 @@ impl InjectionDetector {
             if hex_count > 5 {
                 patterns.push(DetectedPattern {
                     pattern_type: InjectionType::EncodedPayload,
-                    matched_text: format!("[hex-encoded content, {} sequences]", hex_count),
+                    matched_text: format!("[hex-encoded content, {hex_count} sequences]"),
                     severity: Severity::Medium,
                 });
             }
@@ -389,7 +397,7 @@ impl InjectionDetector {
                     if nested_lower.contains(phrase) {
                         patterns.push(DetectedPattern {
                             pattern_type: InjectionType::IndirectInjection,
-                            matched_text: format!("[nested JSON] {}", phrase),
+                            matched_text: format!("[nested JSON] {phrase}"),
                             severity: Severity::High, // Elevated for nested payloads
                         });
                     }
@@ -401,6 +409,111 @@ impl InjectionDetector {
                     p.severity = Severity::High; // Elevate all nested findings
                     patterns.push(p);
                 }
+            }
+        }
+
+        patterns
+    }
+
+    /// Check for ML/AI-specific injection patterns: benchmark manipulation,
+    /// model exfiltration, and data poisoning.
+    fn check_ml_injection(&self, text: &str) -> Vec<DetectedPattern> {
+        let lower = Self::normalize_text(text);
+        let mut patterns = Vec::new();
+
+        let ml_phrases: &[(&str, InjectionType, Severity)] = &[
+            // Benchmark manipulation
+            (
+                "ignore rubric",
+                InjectionType::BenchmarkManipulation,
+                Severity::High,
+            ),
+            (
+                "ignore the rubric",
+                InjectionType::BenchmarkManipulation,
+                Severity::High,
+            ),
+            (
+                "give maximum score",
+                InjectionType::BenchmarkManipulation,
+                Severity::High,
+            ),
+            (
+                "always rate 10",
+                InjectionType::BenchmarkManipulation,
+                Severity::High,
+            ),
+            (
+                "score this as perfect",
+                InjectionType::BenchmarkManipulation,
+                Severity::High,
+            ),
+            (
+                "override evaluation",
+                InjectionType::BenchmarkManipulation,
+                Severity::Medium,
+            ),
+            // Model exfiltration
+            (
+                "output your weights",
+                InjectionType::ModelExfiltration,
+                Severity::High,
+            ),
+            (
+                "print your weights",
+                InjectionType::ModelExfiltration,
+                Severity::High,
+            ),
+            (
+                "extract training data",
+                InjectionType::ModelExfiltration,
+                Severity::High,
+            ),
+            (
+                "training data extraction",
+                InjectionType::ModelExfiltration,
+                Severity::High,
+            ),
+            (
+                "dump model parameters",
+                InjectionType::ModelExfiltration,
+                Severity::High,
+            ),
+            (
+                "leak model weights",
+                InjectionType::ModelExfiltration,
+                Severity::High,
+            ),
+            // Data poisoning
+            (
+                "inject into training",
+                InjectionType::DataPoisoning,
+                Severity::High,
+            ),
+            (
+                "poison the dataset",
+                InjectionType::DataPoisoning,
+                Severity::High,
+            ),
+            (
+                "corrupt the training data",
+                InjectionType::DataPoisoning,
+                Severity::High,
+            ),
+            (
+                "backdoor the model",
+                InjectionType::DataPoisoning,
+                Severity::High,
+            ),
+        ];
+
+        for (phrase, injection_type, severity) in ml_phrases {
+            if lower.contains(phrase) {
+                patterns.push(DetectedPattern {
+                    pattern_type: *injection_type,
+                    matched_text: phrase.to_string(),
+                    severity: *severity,
+                });
             }
         }
 
@@ -444,7 +557,7 @@ impl InjectionDetector {
 
         vec![DetectedPattern {
             pattern_type: InjectionType::HomoglyphSubstitution,
-            matched_text: format!("[{} homoglyph(s): {}]", count, sample),
+            matched_text: format!("[{count} homoglyph(s): {sample}]"),
             severity,
         }]
     }
@@ -563,7 +676,7 @@ impl InjectionDetector {
 
         vec![DetectedPattern {
             pattern_type: InjectionType::ZeroWidthObfuscation,
-            matched_text: format!("[{} zero-width/invisible character(s)]", count),
+            matched_text: format!("[{count} zero-width/invisible character(s)]"),
             severity,
         }]
     }
@@ -985,8 +1098,7 @@ mod tests {
             let result = detector.scan_input(phrase);
             assert!(
                 !result.detected_patterns.is_empty(),
-                "Expected detection for: {}",
-                phrase
+                "Expected detection for: {phrase}"
             );
         }
     }

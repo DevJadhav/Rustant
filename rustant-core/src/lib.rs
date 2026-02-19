@@ -5,6 +5,7 @@
 //! safety guardian, configuration, and fundamental types.
 
 pub mod agent;
+pub mod ast;
 pub mod audit;
 pub mod brain;
 pub mod browser;
@@ -21,6 +22,7 @@ pub mod evaluation;
 pub mod explanation;
 pub mod gateway;
 pub mod hooks;
+pub mod hydration;
 pub mod indexer;
 pub mod injection;
 pub mod memory;
@@ -34,7 +36,9 @@ pub mod personas;
 pub mod plan;
 pub mod project_detect;
 pub mod providers;
+pub mod redact;
 pub mod replay;
+pub mod repo_map;
 pub mod safety;
 pub mod sandbox;
 pub mod sanitize;
@@ -46,6 +50,7 @@ pub mod skills;
 pub mod summarizer;
 pub mod types;
 pub mod updater;
+pub mod verification;
 pub mod voice;
 pub mod workflow;
 
@@ -133,6 +138,7 @@ pub use providers::{
     create_council_members, create_provider, create_provider_with_auth, is_ollama_available,
     list_ollama_models, resolve_api_key_by_env,
 };
+pub use redact::{BasicRedactor, OutputRedactor, SharedRedactor, create_basic_redactor};
 pub use safety::{
     AdaptiveTrust, ApprovalContext, ApprovalDecision, BehavioralFingerprint, ContractEnforcer,
     Invariant, PermissionPolicy, Predicate, ResourceBounds, ReversibilityInfo, SafetyContract,

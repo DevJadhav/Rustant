@@ -265,7 +265,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             SandboxError::PathDenied(_) => {}
-            other => panic!("Expected PathDenied, got {:?}", other),
+            other => panic!("Expected PathDenied, got {other:?}"),
         }
     }
 

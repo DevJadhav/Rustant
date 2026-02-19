@@ -10,6 +10,17 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+
+/// Filter for search results.
+#[derive(Debug, Clone, Default)]
+pub struct SearchFilter {
+    /// Only include results from this collection.
+    pub collection: Option<String>,
+    /// Minimum score threshold.
+    pub min_score: Option<f32>,
+    /// Required metadata key-value pairs.
+    pub metadata: HashMap<String, String>,
+}
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
 use tantivy::schema::*;
@@ -212,22 +223,22 @@ impl HybridSearchEngine {
 
         // Create index directory
         std::fs::create_dir_all(&config.index_path).map_err(|e| {
-            SearchError::IndexError(format!("Failed to create index directory: {}", e))
+            SearchError::IndexError(format!("Failed to create index directory: {e}"))
         })?;
 
         let index = Index::create_in_dir(&config.index_path, schema.clone())
             .or_else(|_| Index::open_in_dir(&config.index_path))
-            .map_err(|e| SearchError::IndexError(format!("Failed to open index: {}", e)))?;
+            .map_err(|e| SearchError::IndexError(format!("Failed to open index: {e}")))?;
 
         let reader = index
             .reader_builder()
             .reload_policy(ReloadPolicy::OnCommitWithDelay)
             .try_into()
-            .map_err(|e| SearchError::IndexError(format!("Failed to create reader: {}", e)))?;
+            .map_err(|e| SearchError::IndexError(format!("Failed to create reader: {e}")))?;
 
         let writer = index
             .writer(50_000_000) // 50MB heap
-            .map_err(|e| SearchError::IndexError(format!("Failed to create writer: {}", e)))?;
+            .map_err(|e| SearchError::IndexError(format!("Failed to create writer: {e}")))?;
 
         Ok(Self {
             config,
@@ -250,11 +261,11 @@ impl HybridSearchEngine {
                 self.id_field => fact_id,
                 self.content_field => content,
             ))
-            .map_err(|e| SearchError::IndexError(format!("Failed to add document: {}", e)))?;
+            .map_err(|e| SearchError::IndexError(format!("Failed to add document: {e}")))?;
 
         self.writer
             .commit()
-            .map_err(|e| SearchError::IndexError(format!("Failed to commit: {}", e)))?;
+            .map_err(|e| SearchError::IndexError(format!("Failed to commit: {e}")))?;
 
         // Vector embedding
         let embedding = self.embedder.embed(content);
@@ -269,7 +280,7 @@ impl HybridSearchEngine {
         self.writer.delete_term(term);
         self.writer
             .commit()
-            .map_err(|e| SearchError::IndexError(format!("Failed to commit delete: {}", e)))?;
+            .map_err(|e| SearchError::IndexError(format!("Failed to commit delete: {e}")))?;
 
         self.vectors.remove(fact_id);
         Ok(())
@@ -279,23 +290,23 @@ impl HybridSearchEngine {
     pub fn search_text(&self, query: &str) -> Result<Vec<SearchResult>, SearchError> {
         self.reader
             .reload()
-            .map_err(|e| SearchError::IndexError(format!("Failed to reload reader: {}", e)))?;
+            .map_err(|e| SearchError::IndexError(format!("Failed to reload reader: {e}")))?;
 
         let searcher = self.reader.searcher();
         let query_parser = QueryParser::for_index(&self.index, vec![self.content_field]);
         let parsed = query_parser
             .parse_query(query)
-            .map_err(|e| SearchError::IndexError(format!("Failed to parse query: {}", e)))?;
+            .map_err(|e| SearchError::IndexError(format!("Failed to parse query: {e}")))?;
 
         let top_docs = searcher
             .search(&parsed, &TopDocs::with_limit(self.config.max_results))
-            .map_err(|e| SearchError::IndexError(format!("Search failed: {}", e)))?;
+            .map_err(|e| SearchError::IndexError(format!("Search failed: {e}")))?;
 
         let mut results = Vec::new();
         for (score, doc_address) in top_docs {
             let doc: TantivyDocument = searcher
                 .doc(doc_address)
-                .map_err(|e| SearchError::IndexError(format!("Failed to retrieve doc: {}", e)))?;
+                .map_err(|e| SearchError::IndexError(format!("Failed to retrieve doc: {e}")))?;
 
             let id = doc
                 .get_first(self.id_field)
@@ -414,6 +425,49 @@ impl HybridSearchEngine {
     /// Get the current configuration.
     pub fn config(&self) -> &SearchConfig {
         &self.config
+    }
+
+    /// Index a batch of entries efficiently.
+    pub fn index_batch(
+        &mut self,
+        entries: &[(String, String, HashMap<String, String>)],
+    ) -> Result<usize, SearchError> {
+        let mut indexed = 0;
+        for (id, content, _metadata) in entries {
+            self.index_fact(id, content)?;
+            indexed += 1;
+        }
+        Ok(indexed)
+    }
+
+    /// Search with filters applied.
+    pub fn search_with_filter(
+        &self,
+        query: &str,
+        filter: &SearchFilter,
+    ) -> Result<Vec<SearchResult>, SearchError> {
+        let mut results = self.search(query)?;
+        if let Some(min) = filter.min_score {
+            results.retain(|r| r.combined_score >= min);
+        }
+        if let Some(ref collection) = filter.collection {
+            results.retain(|r| r.fact_id.starts_with(collection));
+        }
+        Ok(results)
+    }
+
+    /// Delete all entries belonging to a collection.
+    pub fn delete_by_collection(&mut self, collection: &str) -> Result<usize, SearchError> {
+        // Collection-based deletion by prefix matching
+        let mut deleted = 0;
+        let results = self.search(collection)?;
+        for result in &results {
+            if result.fact_id.starts_with(collection) {
+                self.remove_fact(&result.fact_id)?;
+                deleted += 1;
+            }
+        }
+        Ok(deleted)
     }
 }
 

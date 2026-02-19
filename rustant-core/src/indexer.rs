@@ -4,6 +4,7 @@
 //! `.gitignore`, extracts file paths, function signatures, and content summaries,
 //! then indexes them into the `HybridSearchEngine` for semantic codebase search.
 
+use crate::ast::AstEngine;
 use crate::project_detect::{ProjectInfo, detect_project};
 use crate::search::{HybridSearchEngine, SearchConfig, SearchResult};
 use ignore::WalkBuilder;
@@ -78,6 +79,7 @@ pub struct ProjectIndexer {
     workspace: PathBuf,
     engine: HybridSearchEngine,
     config: IndexerConfig,
+    ast_engine: AstEngine,
 }
 
 /// Configuration for the indexer.
@@ -91,6 +93,9 @@ pub struct IndexerConfig {
     pub index_content: bool,
     /// Whether to extract and index function signatures.
     pub index_signatures: bool,
+    /// Whether to use the AST engine (tree-sitter) for symbol extraction.
+    /// Falls back to regex when tree-sitter features are not enabled.
+    pub use_ast: bool,
 }
 
 impl Default for IndexerConfig {
@@ -100,6 +105,7 @@ impl Default for IndexerConfig {
             max_files: MAX_FILES,
             index_content: true,
             index_signatures: true,
+            use_ast: true,
         }
     }
 }
@@ -115,6 +121,7 @@ impl ProjectIndexer {
             workspace,
             engine,
             config: IndexerConfig::default(),
+            ast_engine: AstEngine::new(),
         })
     }
 
@@ -129,6 +136,7 @@ impl ProjectIndexer {
             workspace,
             engine,
             config,
+            ast_engine: AstEngine::new(),
         })
     }
 
@@ -193,8 +201,8 @@ impl ProjectIndexer {
                 .to_string();
 
             // Index the file path as an entry
-            let path_entry = format!("file: {}", rel_path);
-            let fact_id = format!("file:{}", rel_path);
+            let path_entry = format!("file: {rel_path}");
+            let fact_id = format!("file:{rel_path}");
             if self.engine.index_fact(&fact_id, &path_entry).is_ok() {
                 entries_indexed += 1;
             }
@@ -206,19 +214,37 @@ impl ProjectIndexer {
                 // Index a content summary (first N lines + function signatures)
                 let summary = self.summarize_file(&rel_path, &content);
                 if !summary.is_empty() {
-                    let content_id = format!("content:{}", rel_path);
+                    let content_id = format!("content:{rel_path}");
                     if self.engine.index_fact(&content_id, &summary).is_ok() {
                         entries_indexed += 1;
                     }
                 }
 
-                // Extract and index function signatures
+                // Extract and index function signatures / symbols
                 if self.config.index_signatures {
-                    let signatures = extract_signatures(&content, &rel_path);
-                    for (i, sig) in signatures.iter().enumerate() {
-                        let sig_id = format!("sig:{}:{}", rel_path, i);
-                        if self.engine.index_fact(&sig_id, sig).is_ok() {
-                            entries_indexed += 1;
+                    if self.config.use_ast {
+                        // Use AST engine (tree-sitter with regex fallback)
+                        let symbols = self
+                            .ast_engine
+                            .extract_symbols(Path::new(&rel_path), &content);
+                        for (i, sym) in symbols.iter().enumerate() {
+                            let sig_id = format!("sig:{rel_path}:{i}");
+                            let sig_text = format!(
+                                "{}:{} [{}] {}",
+                                rel_path, sym.start_line, sym.kind, sym.signature
+                            );
+                            if self.engine.index_fact(&sig_id, &sig_text).is_ok() {
+                                entries_indexed += 1;
+                            }
+                        }
+                    } else {
+                        // Legacy regex-only extraction
+                        let signatures = extract_signatures(&content, &rel_path);
+                        for (i, sig) in signatures.iter().enumerate() {
+                            let sig_id = format!("sig:{rel_path}:{i}");
+                            if self.engine.index_fact(&sig_id, sig).is_ok() {
+                                entries_indexed += 1;
+                            }
                         }
                     }
                 }
@@ -262,10 +288,10 @@ impl ProjectIndexer {
         summary.push_str(&format!("Project type: {:?}\n", info.project_type));
 
         if let Some(ref framework) = info.framework {
-            summary.push_str(&format!("Framework: {}\n", framework));
+            summary.push_str(&format!("Framework: {framework}\n"));
         }
         if let Some(ref pm) = info.package_manager {
-            summary.push_str(&format!("Package manager: {}\n", pm));
+            summary.push_str(&format!("Package manager: {pm}\n"));
         }
 
         if !info.source_dirs.is_empty() {
@@ -287,9 +313,9 @@ impl ProjectIndexer {
                     continue;
                 }
                 if entry.path().is_dir() {
-                    dirs.push(format!("  {}/", name));
+                    dirs.push(format!("  {name}/"));
                 } else {
-                    files.push(format!("  {}", name));
+                    files.push(format!("  {name}"));
                 }
             }
 
@@ -805,6 +831,213 @@ impl FileHashRegistry {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Incremental Indexer (combines ProjectIndexer + FileHashRegistry)
+// ---------------------------------------------------------------------------
+
+/// Wrapper that combines `ProjectIndexer` with `FileHashRegistry` for
+/// incremental re-indexing: only changed/new files are re-processed,
+/// and deleted files are cleaned up.
+pub struct IncrementalIndexer {
+    indexer: ProjectIndexer,
+    hash_registry: FileHashRegistry,
+}
+
+impl IncrementalIndexer {
+    /// Create an incremental indexer for the given workspace.
+    pub fn new(
+        workspace: PathBuf,
+        search_config: SearchConfig,
+    ) -> Result<Self, crate::search::SearchError> {
+        let hash_registry = FileHashRegistry::load(&workspace);
+        let indexer = ProjectIndexer::new(workspace, search_config)?;
+        Ok(Self {
+            indexer,
+            hash_registry,
+        })
+    }
+
+    /// Create with custom config.
+    pub fn with_config(
+        workspace: PathBuf,
+        search_config: SearchConfig,
+        config: IndexerConfig,
+    ) -> Result<Self, crate::search::SearchError> {
+        let hash_registry = FileHashRegistry::load(&workspace);
+        let indexer = ProjectIndexer::with_config(workspace, search_config, config)?;
+        Ok(Self {
+            indexer,
+            hash_registry,
+        })
+    }
+
+    /// Run a full index (ignoring hashes). Delegates to inner indexer.
+    pub fn index_full(&mut self) -> IndexStats {
+        self.indexer.index_workspace()
+    }
+
+    /// Incrementally re-index: only process files that changed since last run.
+    /// Returns stats for this incremental pass.
+    pub fn reindex_changed(&mut self) -> IndexStats {
+        let project_info = detect_project(&self.indexer.workspace);
+        info!(
+            "Incremental re-index: {:?} (type: {:?})",
+            self.indexer.workspace, project_info.project_type
+        );
+
+        let mut files_indexed = 0;
+        let mut entries_indexed = 0;
+        let mut files_skipped = 0;
+
+        let walker = WalkBuilder::new(&self.indexer.workspace)
+            .hidden(true)
+            .git_ignore(true)
+            .git_global(true)
+            .git_exclude(true)
+            .max_depth(Some(10))
+            .build();
+
+        let mut seen_files: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for entry in walker.flatten() {
+            if files_indexed >= self.indexer.config.max_files {
+                break;
+            }
+
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            if let Ok(meta) = path.metadata()
+                && meta.len() > self.indexer.config.max_file_size
+            {
+                files_skipped += 1;
+                continue;
+            }
+            if !is_indexable(path) {
+                files_skipped += 1;
+                continue;
+            }
+
+            let rel_path = path
+                .strip_prefix(&self.indexer.workspace)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .to_string();
+
+            seen_files.insert(rel_path.clone());
+
+            // Read content and check hash
+            if let Ok(content) = std::fs::read_to_string(path) {
+                if !self.hash_registry.is_changed(&rel_path, &content) {
+                    // File unchanged, skip
+                    files_skipped += 1;
+                    continue;
+                }
+
+                // File is new or changed — index it
+                let path_entry = format!("file: {rel_path}");
+                let fact_id = format!("file:{rel_path}");
+                if self
+                    .indexer
+                    .engine
+                    .index_fact(&fact_id, &path_entry)
+                    .is_ok()
+                {
+                    entries_indexed += 1;
+                }
+
+                if self.indexer.config.index_content {
+                    let summary = self.indexer.summarize_file(&rel_path, &content);
+                    if !summary.is_empty() {
+                        let content_id = format!("content:{rel_path}");
+                        if self
+                            .indexer
+                            .engine
+                            .index_fact(&content_id, &summary)
+                            .is_ok()
+                        {
+                            entries_indexed += 1;
+                        }
+                    }
+                }
+
+                if self.indexer.config.index_signatures {
+                    if self.indexer.config.use_ast {
+                        let symbols = self
+                            .indexer
+                            .ast_engine
+                            .extract_symbols(Path::new(&rel_path), &content);
+                        for (i, sym) in symbols.iter().enumerate() {
+                            let sig_id = format!("sig:{rel_path}:{i}");
+                            let sig_text = format!(
+                                "{}:{} [{}] {}",
+                                rel_path, sym.start_line, sym.kind, sym.signature
+                            );
+                            if self.indexer.engine.index_fact(&sig_id, &sig_text).is_ok() {
+                                entries_indexed += 1;
+                            }
+                        }
+                    } else {
+                        let signatures = extract_signatures(&content, &rel_path);
+                        for (i, sig) in signatures.iter().enumerate() {
+                            let sig_id = format!("sig:{rel_path}:{i}");
+                            if self.indexer.engine.index_fact(&sig_id, sig).is_ok() {
+                                entries_indexed += 1;
+                            }
+                        }
+                    }
+                }
+
+                // Record the new hash
+                self.hash_registry.record(&rel_path, &content);
+                files_indexed += 1;
+            }
+        }
+
+        // Remove entries for deleted files
+        let tracked = self.hash_registry.tracked_files();
+        for tracked_file in &tracked {
+            if !seen_files.contains(tracked_file) {
+                self.hash_registry.remove(tracked_file);
+                debug!("Removed deleted file from index: {}", tracked_file);
+            }
+        }
+
+        // Persist hash registry
+        if let Err(e) = self.hash_registry.save() {
+            debug!("Failed to save hash registry: {}", e);
+        }
+
+        info!(
+            "Incremental re-index complete: {} files re-indexed, {} entries, {} skipped/unchanged",
+            files_indexed, entries_indexed, files_skipped
+        );
+
+        IndexStats {
+            files_indexed,
+            entries_indexed,
+            files_skipped,
+            project_info: Some(project_info),
+        }
+    }
+
+    /// Search the indexed codebase.
+    pub fn search(&self, query: &str) -> Result<Vec<SearchResult>, crate::search::SearchError> {
+        self.indexer.search(query)
+    }
+
+    /// Get inner indexer ref.
+    pub fn indexer(&self) -> &ProjectIndexer {
+        &self.indexer
+    }
+
+    /// Get mutable inner indexer ref.
+    pub fn indexer_mut(&mut self) -> &mut ProjectIndexer {
+        &mut self.indexer
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -946,6 +1179,7 @@ mod tests {
         assert_eq!(config.max_files, MAX_FILES);
         assert!(config.index_content);
         assert!(config.index_signatures);
+        assert!(config.use_ast);
     }
 
     #[test]
