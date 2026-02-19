@@ -172,7 +172,7 @@ pub fn render_form_html(spec: &FormSpec) -> String {
 pub fn render_diagram_mermaid(spec: &DiagramSpec) -> String {
     let mut output = String::new();
     if let Some(title) = &spec.title {
-        output.push_str(&format!("---\ntitle: {}\n---\n", title));
+        output.push_str(&format!("---\ntitle: {title}\n---\n"));
     }
     output.push_str(&spec.source);
     output

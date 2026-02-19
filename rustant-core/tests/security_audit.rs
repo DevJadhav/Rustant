@@ -252,7 +252,7 @@ fn test_injection_multiple_patterns() {
 fn test_merkle_chain_integrity() {
     let mut chain = MerkleChain::new();
     for i in 0..50 {
-        chain.append(format!("event_{}", i).as_bytes());
+        chain.append(format!("event_{i}").as_bytes());
     }
     let result = chain.verify_chain();
     assert!(result.is_valid, "Unmodified chain should be valid");

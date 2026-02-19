@@ -282,7 +282,7 @@ mod tests {
         let mut mac = HmacSha256::new_from_slice(secret).unwrap();
         mac.update(challenge.nonce.as_bytes());
         let hmac_result = mac.finalize().into_bytes();
-        let response_hmac: String = hmac_result.iter().map(|b| format!("{:02x}", b)).collect();
+        let response_hmac: String = hmac_result.iter().map(|b| format!("{b:02x}")).collect();
 
         let device_id = Uuid::new_v4();
         let pair_resp = PairingResponse {
@@ -323,7 +323,7 @@ mod tests {
         let mut mac = HmacSha256::new_from_slice(secret).unwrap();
         mac.update(challenge.nonce.as_bytes());
         let hmac_result = mac.finalize().into_bytes();
-        let response_hmac: String = hmac_result.iter().map(|b| format!("{:02x}", b)).collect();
+        let response_hmac: String = hmac_result.iter().map(|b| format!("{b:02x}")).collect();
 
         let device_id = Uuid::new_v4();
         let pair_resp = PairingResponse {

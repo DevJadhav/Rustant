@@ -106,9 +106,9 @@ impl CronJob {
 fn parse_cron_expression(expr: &str) -> Result<Schedule, SchedulerError> {
     let fields = expr.split_whitespace().count();
     let normalized = match fields {
-        5 => format!("0 {} *", expr), // Add seconds=0 prefix and year=* suffix
-        6 => format!("{} *", expr),   // Add year=* suffix
-        _ => expr.to_string(),        // Already 7-field or let cron crate validate
+        5 => format!("0 {expr} *"), // Add seconds=0 prefix and year=* suffix
+        6 => format!("{expr} *"),   // Add year=* suffix
+        _ => expr.to_string(),      // Already 7-field or let cron crate validate
     };
     Schedule::from_str(&normalized).map_err(|e| SchedulerError::InvalidCronExpression {
         expression: expr.to_string(),

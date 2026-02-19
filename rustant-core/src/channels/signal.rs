@@ -184,7 +184,7 @@ impl SignalCliBridge for RealSignalCliBridge {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("signal-cli send failed: {}", stderr));
+            return Err(format!("signal-cli send failed: {stderr}"));
         }
 
         Ok(())

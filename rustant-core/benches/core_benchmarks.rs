@@ -50,7 +50,7 @@ fn bench_memory_system(c: &mut Criterion) {
         b.iter(|| {
             let mut stm = ShortTermMemory::new(10);
             for i in 0..20 {
-                stm.add(Message::user(format!("Message number {}", i)));
+                stm.add(Message::user(format!("Message number {i}")));
             }
             stm.compress(black_box("Summary of messages".into()))
         })
@@ -60,7 +60,7 @@ fn bench_memory_system(c: &mut Criterion) {
         let mut ltm = LongTermMemory::new();
         for i in 0..100 {
             ltm.add_fact(Fact::new(
-                format!("The user prefers dark mode for application {}", i),
+                format!("The user prefers dark mode for application {i}"),
                 "observation",
             ));
         }
@@ -81,8 +81,8 @@ fn bench_memory_system(c: &mut Criterion) {
     c.bench_function("memory_system_context_messages", |b| {
         let mut ms = MemorySystem::new(50);
         for i in 0..40 {
-            ms.add_message(Message::user(format!("Question {}", i)));
-            ms.add_message(Message::assistant(format!("Answer {}", i)));
+            ms.add_message(Message::user(format!("Question {i}")));
+            ms.add_message(Message::assistant(format!("Answer {i}")));
         }
         b.iter(|| ms.context_messages())
     });
@@ -99,7 +99,7 @@ fn bench_merkle_chain(c: &mut Criterion) {
     c.bench_function("merkle_verify_chain_100", |b| {
         let mut chain = MerkleChain::new();
         for i in 0..100 {
-            chain.append(format!("event_{}", i).as_bytes());
+            chain.append(format!("event_{i}").as_bytes());
         }
         b.iter(|| chain.verify_chain())
     });
@@ -107,7 +107,7 @@ fn bench_merkle_chain(c: &mut Criterion) {
     c.bench_function("merkle_verify_chain_1000", |b| {
         let mut chain = MerkleChain::new();
         for i in 0..1000 {
-            chain.append(format!("event_{}", i).as_bytes());
+            chain.append(format!("event_{i}").as_bytes());
         }
         b.iter(|| chain.verify_chain())
     });

@@ -175,7 +175,7 @@ impl RealTelegramHttp {
     pub fn new(bot_token: &str) -> Self {
         Self {
             client: reqwest::Client::new(),
-            base_url: format!("https://api.telegram.org/bot{}", bot_token),
+            base_url: format!("https://api.telegram.org/bot{bot_token}"),
         }
     }
 }
@@ -203,7 +203,7 @@ impl TelegramHttpClient for RealTelegramHttp {
 
         if !body["ok"].as_bool().unwrap_or(false) {
             let desc = body["description"].as_str().unwrap_or("unknown error");
-            return Err(format!("Telegram API error ({}): {}", status, desc));
+            return Err(format!("Telegram API error ({status}): {desc}"));
         }
 
         let message_id = body["result"]["message_id"]
@@ -229,7 +229,7 @@ impl TelegramHttpClient for RealTelegramHttp {
 
         if !body["ok"].as_bool().unwrap_or(false) {
             let desc = body["description"].as_str().unwrap_or("unknown error");
-            return Err(format!("Telegram API error: {}", desc));
+            return Err(format!("Telegram API error: {desc}"));
         }
 
         let updates = body["result"]

@@ -228,10 +228,9 @@ impl IMessageBridge for RealIMessageBridge {
         let script = format!(
             "tell application \"Messages\"\n\
              \tset targetService to 1st service whose service type = iMessage\n\
-             \tset targetBuddy to buddy \"{}\" of targetService\n\
-             \tsend \"{}\" to targetBuddy\n\
+             \tset targetBuddy to buddy \"{escaped_recipient}\" of targetService\n\
+             \tsend \"{escaped_text}\" to targetBuddy\n\
              end tell",
-            escaped_recipient, escaped_text,
         );
 
         let output = tokio::process::Command::new("osascript")
@@ -242,7 +241,7 @@ impl IMessageBridge for RealIMessageBridge {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("osascript failed: {}", stderr));
+            return Err(format!("osascript failed: {stderr}"));
         }
 
         Ok(())
@@ -250,7 +249,7 @@ impl IMessageBridge for RealIMessageBridge {
 
     async fn receive_messages(&self) -> Result<Vec<IMessageIncoming>, String> {
         let home = std::env::var("HOME").map_err(|_| "HOME not set".to_string())?;
-        let db_path = format!("{}/Library/Messages/chat.db", home);
+        let db_path = format!("{home}/Library/Messages/chat.db");
 
         let output = tokio::process::Command::new("sqlite3")
             .args([
@@ -308,7 +307,7 @@ impl IMessageBridge for RealIMessageBridge {
         let escaped_query = query.replace('"', "\\\"");
         let script = format!(
             r#"tell application "Contacts"
-    set matchingPeople to every person whose name contains "{query}"
+    set matchingPeople to every person whose name contains "{escaped_query}"
     set output to ""
     repeat with p in matchingPeople
         set pName to name of p
@@ -323,8 +322,7 @@ impl IMessageBridge for RealIMessageBridge {
         set output to output & pName & "||" & pPhone & "||" & pEmail & "%%"
     end repeat
     return output
-end tell"#,
-            query = escaped_query
+end tell"#
         );
 
         let output = tokio::process::Command::new("osascript")
@@ -335,7 +333,7 @@ end tell"#,
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Contacts lookup failed: {}", stderr));
+            return Err(format!("Contacts lookup failed: {stderr}"));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -410,7 +408,7 @@ mod tests {
         async fn resolve_contact(&self, query: &str) -> Result<Vec<ResolvedContact>, String> {
             // Return a fake contact for testing
             Ok(vec![ResolvedContact {
-                name: format!("Mock {}", query),
+                name: format!("Mock {query}"),
                 phone: Some("+1234567890".to_string()),
                 email: Some("mock@example.com".to_string()),
             }])

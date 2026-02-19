@@ -23,7 +23,7 @@ impl TaskHandler for EchoTaskHandler {
         description: &str,
         _args: &HashMap<String, String>,
     ) -> Result<String, String> {
-        Ok(format!("Agent reply: {}", description))
+        Ok(format!("Agent reply: {description}"))
     }
 }
 
@@ -84,7 +84,7 @@ async fn test_e2e_slack_message_through_agent_and_back() {
             assert!(success);
             assert_eq!(output, "Agent reply: What is the weather today?");
         }
-        other => panic!("Expected TaskResult, got {:?}", other),
+        other => panic!("Expected TaskResult, got {other:?}"),
     }
 
     // 8. Convert response back to channel message
@@ -235,7 +235,7 @@ async fn test_e2e_email_message_through_agent_and_back() {
             assert!(success);
             assert_eq!(output, "Agent reply: Please schedule a meeting");
         }
-        other => panic!("Expected TaskResult, got {:?}", other),
+        other => panic!("Expected TaskResult, got {other:?}"),
     }
 
     let reply =
@@ -296,7 +296,7 @@ async fn test_e2e_imessage_message_through_agent_and_back() {
             assert!(success);
             assert_eq!(output, "Agent reply: Hi! What can you do?");
         }
-        other => panic!("Expected TaskResult, got {:?}", other),
+        other => panic!("Expected TaskResult, got {other:?}"),
     }
 
     let reply =
@@ -392,7 +392,7 @@ async fn test_e2e_pairing_gates_bridge_routing() {
     let mut mac = HmacSha256::new_from_slice(secret).unwrap();
     mac.update(challenge.nonce.as_bytes());
     let hmac_bytes = mac.finalize().into_bytes();
-    let response_hmac: String = hmac_bytes.iter().map(|b| format!("{:02x}", b)).collect();
+    let response_hmac: String = hmac_bytes.iter().map(|b| format!("{b:02x}")).collect();
 
     let device_id = uuid::Uuid::new_v4();
     let pair_resp = PairingResponse {
@@ -449,7 +449,7 @@ async fn test_e2e_pairing_gates_bridge_routing() {
             assert!(success);
             assert_eq!(output, "Agent reply: Hello from paired device!");
         }
-        other => panic!("Expected TaskResult, got {:?}", other),
+        other => panic!("Expected TaskResult, got {other:?}"),
     }
 }
 
@@ -468,7 +468,7 @@ fn test_e2e_pairing_revoke_blocks_routing() {
     let mut mac = HmacSha256::new_from_slice(secret).unwrap();
     mac.update(challenge.nonce.as_bytes());
     let hmac_bytes = mac.finalize().into_bytes();
-    let response_hmac: String = hmac_bytes.iter().map(|b| format!("{:02x}", b)).collect();
+    let response_hmac: String = hmac_bytes.iter().map(|b| format!("{b:02x}")).collect();
 
     let device_id = uuid::Uuid::new_v4();
     let pair_resp = PairingResponse {
@@ -534,9 +534,9 @@ fn test_e2e_envelope_conversion_all_channel_types() {
         match &envelope.payload {
             AgentPayload::TaskRequest { description, args } => {
                 assert_eq!(description, "test message");
-                assert_eq!(args.get("channel_type").unwrap(), &format!("{:?}", ch_type));
+                assert_eq!(args.get("channel_type").unwrap(), &format!("{ch_type:?}"));
             }
-            _ => panic!("Expected TaskRequest for {:?}", ch_type),
+            _ => panic!("Expected TaskRequest for {ch_type:?}"),
         }
 
         // envelope → channel (TaskResult)
@@ -545,7 +545,7 @@ fn test_e2e_envelope_conversion_all_channel_types() {
             from,
             AgentPayload::TaskResult {
                 success: true,
-                output: format!("reply for {:?}", ch_type),
+                output: format!("reply for {ch_type:?}"),
             },
         );
         let reply =
@@ -553,7 +553,7 @@ fn test_e2e_envelope_conversion_all_channel_types() {
         assert_eq!(reply.channel_type, *ch_type);
         assert_eq!(
             reply.content.as_text().unwrap(),
-            &format!("reply for {:?}", ch_type)
+            &format!("reply for {ch_type:?}")
         );
     }
 }

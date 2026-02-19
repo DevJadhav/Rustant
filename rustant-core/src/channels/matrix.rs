@@ -205,7 +205,7 @@ impl MatrixHttpClient for RealMatrixHttp {
 
         if !status.is_success() {
             let err = body["error"].as_str().unwrap_or("unknown error");
-            return Err(format!("Matrix API error ({}): {}", status, err));
+            return Err(format!("Matrix API error ({status}): {err}"));
         }
 
         let event_id = body["event_id"].as_str().unwrap_or("").to_string();
@@ -218,7 +218,7 @@ impl MatrixHttpClient for RealMatrixHttp {
             self.homeserver_url
         );
         if let Some(since) = since {
-            url.push_str(&format!("&since={}", since));
+            url.push_str(&format!("&since={since}"));
         }
         let resp = self
             .client
@@ -275,7 +275,7 @@ impl MatrixHttpClient for RealMatrixHttp {
 
         if !status.is_success() {
             let err = body["error"].as_str().unwrap_or("unauthorized");
-            return Err(format!("Matrix auth failed ({}): {}", status, err));
+            return Err(format!("Matrix auth failed ({status}): {err}"));
         }
 
         let user_id = body["user_id"].as_str().unwrap_or("").to_string();

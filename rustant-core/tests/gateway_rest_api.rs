@@ -223,7 +223,7 @@ async fn test_api_approval_decision_approve() {
 
     let app = gateway_router(gw.clone());
     let req = make_post_request(
-        &format!("/api/approval/{}", approval_id),
+        &format!("/api/approval/{approval_id}"),
         serde_json::json!({"approved": true}),
     );
     let resp = ServiceExt::<axum::http::Request<Body>>::oneshot(app, req)
@@ -243,7 +243,7 @@ async fn test_api_approval_decision_not_found() {
 
     let app = gateway_router(gw);
     let req = make_post_request(
-        &format!("/api/approval/{}", fake_id),
+        &format!("/api/approval/{fake_id}"),
         serde_json::json!({"approved": false}),
     );
     let resp = ServiceExt::<axum::http::Request<Body>>::oneshot(app, req)

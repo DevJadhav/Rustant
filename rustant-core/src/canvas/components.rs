@@ -172,7 +172,7 @@ mod tests {
             "polarArea",
         ] {
             let c = ChartSpec::simple(t, vec![], vec![]);
-            assert!(c.is_valid_type(), "Expected {} to be valid", t);
+            assert!(c.is_valid_type(), "Expected {t} to be valid");
         }
         let invalid = ChartSpec::simple("unknown", vec![], vec![]);
         assert!(!invalid.is_valid_type());

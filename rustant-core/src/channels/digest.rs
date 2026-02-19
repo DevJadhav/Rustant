@@ -205,7 +205,7 @@ impl DigestCollector {
                 format!("/{} {}", command, args.join(" "))
             }
             super::types::MessageContent::File { filename, .. } => {
-                format!("[File: {}]", filename)
+                format!("[File: {filename}]")
             }
             _ => "[media]".to_string(),
         };

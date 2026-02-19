@@ -509,27 +509,27 @@ impl RealSlackHttp {
             .header("Authorization", self.auth_header())
             .send()
             .await
-            .map_err(|e| format!("HTTP request failed: {}", e))?;
+            .map_err(|e| format!("HTTP request failed: {e}"))?;
 
         let status = resp.status();
         let body = resp
             .text()
             .await
-            .map_err(|e| format!("Failed to read response: {}", e))?;
+            .map_err(|e| format!("Failed to read response: {e}"))?;
 
         if !status.is_success() {
-            return Err(format!("HTTP {}: {}", status, body));
+            return Err(format!("HTTP {status}: {body}"));
         }
 
         let json: serde_json::Value =
-            serde_json::from_str(&body).map_err(|e| format!("Invalid JSON: {}", e))?;
+            serde_json::from_str(&body).map_err(|e| format!("Invalid JSON: {e}"))?;
 
         if json.get("ok") != Some(&serde_json::Value::Bool(true)) {
             let error = json
                 .get("error")
                 .and_then(|e| e.as_str())
                 .unwrap_or("unknown_error");
-            return Err(format!("Slack API error: {}", error));
+            return Err(format!("Slack API error: {error}"));
         }
 
         Ok(json)
@@ -549,27 +549,27 @@ impl RealSlackHttp {
             .json(body)
             .send()
             .await
-            .map_err(|e| format!("HTTP request failed: {}", e))?;
+            .map_err(|e| format!("HTTP request failed: {e}"))?;
 
         let status = resp.status();
         let body_text = resp
             .text()
             .await
-            .map_err(|e| format!("Failed to read response: {}", e))?;
+            .map_err(|e| format!("Failed to read response: {e}"))?;
 
         if !status.is_success() {
-            return Err(format!("HTTP {}: {}", status, body_text));
+            return Err(format!("HTTP {status}: {body_text}"));
         }
 
         let json: serde_json::Value =
-            serde_json::from_str(&body_text).map_err(|e| format!("Invalid JSON: {}", e))?;
+            serde_json::from_str(&body_text).map_err(|e| format!("Invalid JSON: {e}"))?;
 
         if json.get("ok") != Some(&serde_json::Value::Bool(true)) {
             let error = json
                 .get("error")
                 .and_then(|e| e.as_str())
                 .unwrap_or("unknown_error");
-            return Err(format!("Slack API error: {}", error));
+            return Err(format!("Slack API error: {error}"));
         }
 
         Ok(json)
@@ -610,10 +610,8 @@ impl SlackHttpClient for RealSlackHttp {
         channel: &str,
         limit: usize,
     ) -> Result<Vec<SlackMessage>, String> {
-        let url = format!(
-            "https://slack.com/api/conversations.history?channel={}&limit={}",
-            channel, limit
-        );
+        let url =
+            format!("https://slack.com/api/conversations.history?channel={channel}&limit={limit}");
         let json = self.slack_get(&url).await?;
 
         let messages = json
@@ -668,8 +666,7 @@ impl SlackHttpClient for RealSlackHttp {
         limit: usize,
     ) -> Result<Vec<SlackChannelInfo>, String> {
         let url = format!(
-            "https://slack.com/api/conversations.list?types={}&limit={}&exclude_archived=true",
-            types, limit
+            "https://slack.com/api/conversations.list?types={types}&limit={limit}&exclude_archived=true"
         );
         let json = self.slack_get(&url).await?;
 
@@ -723,10 +720,7 @@ impl SlackHttpClient for RealSlackHttp {
     }
 
     async fn conversations_info(&self, channel_id: &str) -> Result<SlackChannelInfo, String> {
-        let url = format!(
-            "https://slack.com/api/conversations.info?channel={}",
-            channel_id
-        );
+        let url = format!("https://slack.com/api/conversations.info?channel={channel_id}");
         let json = self.slack_get(&url).await?;
 
         let ch = json.get("channel").ok_or("Missing 'channel' in response")?;
@@ -766,7 +760,7 @@ impl SlackHttpClient for RealSlackHttp {
     }
 
     async fn users_list(&self, limit: usize) -> Result<Vec<SlackUserInfo>, String> {
-        let url = format!("https://slack.com/api/users.list?limit={}", limit);
+        let url = format!("https://slack.com/api/users.list?limit={limit}");
         let json = self.slack_get(&url).await?;
 
         let users = json
@@ -819,7 +813,7 @@ impl SlackHttpClient for RealSlackHttp {
     }
 
     async fn users_info(&self, user_id: &str) -> Result<SlackUserInfo, String> {
-        let url = format!("https://slack.com/api/users.info?user={}", user_id);
+        let url = format!("https://slack.com/api/users.info?user={user_id}");
         let json = self.slack_get(&url).await?;
 
         let u = json.get("user").ok_or("Missing 'user' in response")?;
@@ -883,8 +877,7 @@ impl SlackHttpClient for RealSlackHttp {
         timestamp: &str,
     ) -> Result<Vec<SlackReaction>, String> {
         let url = format!(
-            "https://slack.com/api/reactions.get?channel={}&timestamp={}&full=true",
-            channel, timestamp
+            "https://slack.com/api/reactions.get?channel={channel}&timestamp={timestamp}&full=true"
         );
         let json = self.slack_get(&url).await?;
 
@@ -921,9 +914,9 @@ impl SlackHttpClient for RealSlackHttp {
         channel: Option<&str>,
         limit: usize,
     ) -> Result<Vec<SlackFile>, String> {
-        let mut url = format!("https://slack.com/api/files.list?count={}", limit);
+        let mut url = format!("https://slack.com/api/files.list?count={limit}");
         if let Some(ch) = channel {
-            url.push_str(&format!("&channel={}", ch));
+            url.push_str(&format!("&channel={ch}"));
         }
 
         let json = self.slack_get(&url).await?;

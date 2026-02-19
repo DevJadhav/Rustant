@@ -28,16 +28,16 @@ impl BrowserSecurityGuard {
     /// 2. If allowed_domains is non-empty and the URL's host does NOT match, it is blocked.
     /// 3. Otherwise, the URL is allowed.
     pub fn check_url(&self, url_str: &str) -> Result<(), String> {
-        let url = Url::parse(url_str).map_err(|e| format!("Invalid URL: {}", e))?;
+        let url = Url::parse(url_str).map_err(|e| format!("Invalid URL: {e}"))?;
         let host = url.host_str().unwrap_or("");
 
         // Check blocklist first
         if self
             .blocked_domains
             .iter()
-            .any(|d| host == d.as_str() || host.ends_with(&format!(".{}", d)))
+            .any(|d| host == d.as_str() || host.ends_with(&format!(".{d}")))
         {
-            return Err(format!("URL blocked by security policy: {}", url_str));
+            return Err(format!("URL blocked by security policy: {url_str}"));
         }
 
         // Check allowlist (if non-empty, URL must match)
@@ -45,9 +45,9 @@ impl BrowserSecurityGuard {
             && !self
                 .allowed_domains
                 .iter()
-                .any(|d| host == d.as_str() || host.ends_with(&format!(".{}", d)))
+                .any(|d| host == d.as_str() || host.ends_with(&format!(".{d}")))
         {
-            return Err(format!("URL not in allowlist: {}", url_str));
+            return Err(format!("URL not in allowlist: {url_str}"));
         }
 
         Ok(())
@@ -76,11 +76,7 @@ impl BrowserSecurityGuard {
 
         for key in &sensitive_keys {
             // Match key=value patterns (url-encoded or plain)
-            let patterns = [
-                format!("{}=", key),
-                format!("{}%3D", key),
-                format!("{}%3d", key),
-            ];
+            let patterns = [format!("{key}="), format!("{key}%3D"), format!("{key}%3d")];
             for pattern in &patterns {
                 if let Some(start) = result.to_lowercase().find(&pattern.to_lowercase()) {
                     let value_start = start + pattern.len();

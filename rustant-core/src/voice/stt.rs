@@ -140,7 +140,7 @@ impl SttProvider for OpenAiSttProvider {
             .file_name("audio.wav")
             .mime_str("audio/wav")
             .map_err(|e| VoiceError::TranscriptionFailed {
-                message: format!("MIME error: {}", e),
+                message: format!("MIME error: {e}"),
             })?;
 
         let form = reqwest::multipart::Form::new()
@@ -159,14 +159,14 @@ impl SttProvider for OpenAiSttProvider {
             .send()
             .await
             .map_err(|e| VoiceError::TranscriptionFailed {
-                message: format!("HTTP request failed: {}", e),
+                message: format!("HTTP request failed: {e}"),
             })?;
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
             return Err(VoiceError::TranscriptionFailed {
-                message: format!("API returned {}: {}", status, body),
+                message: format!("API returned {status}: {body}"),
             });
         }
 
@@ -175,7 +175,7 @@ impl SttProvider for OpenAiSttProvider {
                 .json()
                 .await
                 .map_err(|e| VoiceError::TranscriptionFailed {
-                    message: format!("JSON parse error: {}", e),
+                    message: format!("JSON parse error: {e}"),
                 })?;
 
         let text = json["text"].as_str().unwrap_or("").to_string();

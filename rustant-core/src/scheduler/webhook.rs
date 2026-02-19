@@ -94,13 +94,13 @@ impl WebhookEndpoint {
 
                 let expected_bytes = hex::decode(hex_sig).map_err(|e| {
                     SchedulerError::WebhookVerificationFailed {
-                        message: format!("Invalid hex signature: {}", e),
+                        message: format!("Invalid hex signature: {e}"),
                     }
                 })?;
 
                 let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).map_err(|e| {
                     SchedulerError::WebhookVerificationFailed {
-                        message: format!("HMAC error: {}", e),
+                        message: format!("HMAC error: {e}"),
                     }
                 })?;
                 mac.update(body);
@@ -149,18 +149,18 @@ pub fn compute_hmac_signature(secret: &str, body: &[u8]) -> String {
 /// Simple hex encoding (no external crate needed beyond what we have).
 mod hex {
     pub fn encode(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{:02x}", b)).collect()
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
     }
 
     pub fn decode(s: &str) -> Result<Vec<u8>, String> {
-        if !s.len().is_multiple_of(2) {
+        if s.len() % 2 != 0 {
             return Err("Odd-length hex string".to_string());
         }
         (0..s.len())
             .step_by(2)
             .map(|i| {
                 u8::from_str_radix(&s[i..i + 2], 16)
-                    .map_err(|e| format!("Invalid hex at position {}: {}", i, e))
+                    .map_err(|e| format!("Invalid hex at position {i}: {e}"))
             })
             .collect()
     }
@@ -193,7 +193,7 @@ mod tests {
         let body = b"test body content";
         let sig = compute_hmac_signature("my-secret-key", body);
         let result = endpoint
-            .verify_signature(body, Some(&format!("sha256={}", sig)))
+            .verify_signature(body, Some(&format!("sha256={sig}")))
             .unwrap();
         assert!(result);
     }
@@ -234,7 +234,7 @@ mod tests {
         let request = WebhookRequest {
             path: "/webhooks/test".to_string(),
             body: body.to_vec(),
-            signature: Some(format!("sha256={}", sig)),
+            signature: Some(format!("sha256={sig}")),
             event_type: Some("push".to_string()),
         };
 
@@ -255,7 +255,7 @@ mod tests {
         let request = WebhookRequest {
             path: "/webhooks/test".to_string(),
             body: body.to_vec(),
-            signature: Some(format!("sha256={}", sig)),
+            signature: Some(format!("sha256={sig}")),
             event_type: Some("pull_request".to_string()),
         };
 

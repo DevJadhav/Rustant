@@ -121,9 +121,7 @@ fn test_audio_convert_wav_roundtrip() {
     for (a, b) in original.samples.iter().zip(decoded.samples.iter()) {
         assert!(
             (a - b).abs() < 0.001,
-            "sample mismatch: expected {}, got {}",
-            a,
-            b
+            "sample mismatch: expected {a}, got {b}"
         );
     }
 }

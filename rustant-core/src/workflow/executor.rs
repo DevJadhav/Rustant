@@ -282,7 +282,7 @@ impl WorkflowExecutor {
                     Some(ErrorAction::Skip) => {
                         state
                             .step_outputs
-                            .insert(step.id.clone(), Value::String(format!("skipped: {}", err)));
+                            .insert(step.id.clone(), Value::String(format!("skipped: {err}")));
                         state.current_step_index += 1;
                         state.updated_at = chrono::Utc::now();
                     }
@@ -372,7 +372,7 @@ impl WorkflowExecutor {
         base_path: &std::path::Path,
         run_id: Uuid,
     ) -> Result<WorkflowState, WorkflowError> {
-        let file_path = base_path.join(format!("{}.json", run_id));
+        let file_path = base_path.join(format!("{run_id}.json"));
         let json = tokio::fs::read_to_string(file_path)
             .await
             .map_err(|_| WorkflowError::RunNotFound { run_id })?;
@@ -401,7 +401,7 @@ mod tests {
 
         fn succeeding(count: usize) -> Self {
             let responses: Vec<_> = (0..count)
-                .map(|i| Ok(Value::String(format!("output_{}", i))))
+                .map(|i| Ok(Value::String(format!("output_{i}"))))
                 .collect();
             Self::new(responses)
         }

@@ -100,7 +100,7 @@ impl CommunicationStyleTracker {
         // Generate facts at threshold
         let mut facts = Vec::new();
         if profile.message_count > 0
-            && profile.message_count.is_multiple_of(self.fact_threshold)
+            && profile.message_count % self.fact_threshold == 0
             && self.fact_threshold > 0
         {
             facts.push(format!(

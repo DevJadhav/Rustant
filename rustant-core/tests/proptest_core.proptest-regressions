@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc 530ffb3817c1fded1bc7e5aa003e080c540267cecd0f3a64be90a1352648dff3 # shrinks to messages = ["", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""], window = 5
 cc 60b2559bdb7133f9e582aef03ed94c9dcc325338191255b5d634e88cf51ab587 # shrinks to messages = ["¡", "¡", "¡", "0", "¡", " ", "\0", " ", "\u{b}", "A", "0", "a", "0", "0", "¡", "\u{b}", "\0", "\0", " ", "0"], window = 11
+cc 9f1a68d5dc86a9ddec005e8b1fa5cb8539c2287569e9cb749b3fa8ca11a6c5ba # shrinks to allowed = "____", other = "____"

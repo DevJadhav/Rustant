@@ -33,7 +33,7 @@ pub fn render_string(template: &str, ctx: &TemplateContext) -> Result<String, Wo
         let end = after_open
             .find("}}")
             .ok_or_else(|| WorkflowError::TemplateError {
-                message: format!("Unclosed template expression in: {}", template),
+                message: format!("Unclosed template expression in: {template}"),
             })?;
         let expr = after_open[..end].trim();
         let value = resolve_expression(expr, ctx)?;
@@ -103,29 +103,29 @@ fn resolve_expression(expr: &str, ctx: &TemplateContext) -> Result<Value, Workfl
     match parts.first() {
         Some(&"inputs") => {
             let key = parts.get(1).ok_or_else(|| WorkflowError::TemplateError {
-                message: format!("Invalid input reference: {}", expr),
+                message: format!("Invalid input reference: {expr}"),
             })?;
             ctx.inputs
                 .get(*key)
                 .cloned()
                 .ok_or_else(|| WorkflowError::TemplateError {
-                    message: format!("Input '{}' not found", key),
+                    message: format!("Input '{key}' not found"),
                 })
         }
         Some(&"steps") => {
             let step_id = parts.get(1).ok_or_else(|| WorkflowError::TemplateError {
-                message: format!("Invalid step reference: {}", expr),
+                message: format!("Invalid step reference: {expr}"),
             })?;
             // Accept both `steps.id.output` and just `steps.id`
             ctx.step_outputs
                 .get(*step_id)
                 .cloned()
                 .ok_or_else(|| WorkflowError::TemplateError {
-                    message: format!("Step output '{}' not found", step_id),
+                    message: format!("Step output '{step_id}' not found"),
                 })
         }
         _ => Err(WorkflowError::TemplateError {
-            message: format!("Unknown template variable: {}", expr),
+            message: format!("Unknown template variable: {expr}"),
         }),
     }
 }

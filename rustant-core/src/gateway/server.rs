@@ -540,7 +540,7 @@ async fn handle_socket(mut socket: WebSocket, gw: SharedGateway) {
                 let err = ServerMessage::Event {
                     event: GatewayEvent::Error {
                         code: "PARSE_ERROR".to_string(),
-                        message: format!("Invalid message: {}", e),
+                        message: format!("Invalid message: {e}"),
                     },
                 };
                 if let Ok(json) = serde_json::to_string(&err) {
@@ -757,7 +757,7 @@ pub async fn run(gw: SharedGateway) -> Result<(), std::io::Error> {
         (gw.config().host.clone(), gw.config().port)
     };
     let app = router(gw);
-    let addr = format!("{}:{}", host, port);
+    let addr = format!("{host}:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;
     Ok(())
@@ -898,7 +898,7 @@ mod tests {
             ServerMessage::Authenticated { connection_id } => {
                 assert_eq!(connection_id, conn_id);
             }
-            _ => panic!("Expected Authenticated, got {:?}", resp),
+            _ => panic!("Expected Authenticated, got {resp:?}"),
         }
         assert!(server.connections().is_authenticated(&conn_id));
     }
@@ -922,7 +922,7 @@ mod tests {
             ServerMessage::AuthFailed { reason } => {
                 assert!(reason.contains("Invalid"));
             }
-            _ => panic!("Expected AuthFailed, got {:?}", resp),
+            _ => panic!("Expected AuthFailed, got {resp:?}"),
         }
         assert!(!server.connections().is_authenticated(&conn_id));
     }

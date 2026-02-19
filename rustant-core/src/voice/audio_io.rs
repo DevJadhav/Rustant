@@ -77,7 +77,7 @@ pub mod audio_convert {
         {
             let mut writer = hound::WavWriter::new(&mut cursor, spec).map_err(|e| {
                 VoiceError::UnsupportedFormat {
-                    format: format!("WAV write error: {}", e),
+                    format: format!("WAV write error: {e}"),
                 }
             })?;
             let i16_samples = f32_to_i16(&chunk.samples);
@@ -85,13 +85,13 @@ pub mod audio_convert {
                 writer
                     .write_sample(*sample)
                     .map_err(|e| VoiceError::UnsupportedFormat {
-                        format: format!("WAV sample write error: {}", e),
+                        format: format!("WAV sample write error: {e}"),
                     })?;
             }
             writer
                 .finalize()
                 .map_err(|e| VoiceError::UnsupportedFormat {
-                    format: format!("WAV finalize error: {}", e),
+                    format: format!("WAV finalize error: {e}"),
                 })?;
         }
         Ok(cursor.into_inner())
@@ -115,12 +115,12 @@ pub mod audio_convert {
                 let cursor = std::io::Cursor::new(&fixed);
                 let mut reader =
                     hound::WavReader::new(cursor).map_err(|e| VoiceError::UnsupportedFormat {
-                        format: format!("WAV read error after fix: {}", e),
+                        format: format!("WAV read error after fix: {e}"),
                     })?;
                 decode_wav_reader(&mut reader)
             }
             Err(e) => Err(VoiceError::UnsupportedFormat {
-                format: format!("WAV read error: {}", e),
+                format: format!("WAV read error: {e}"),
             }),
         }
     }
@@ -240,7 +240,7 @@ pub mod audio_convert {
             }
 
             pos += 8 + chunk_size;
-            if !chunk_size.is_multiple_of(2) {
+            if chunk_size % 2 != 0 {
                 pos += 1;
             }
         }
@@ -258,7 +258,7 @@ pub async fn play_audio(chunk: &AudioChunk) -> Result<(), VoiceError> {
     let wav_bytes = audio_convert::encode_wav(chunk)?;
     let tmp_path = std::env::temp_dir().join("rustant_playback.wav");
     std::fs::write(&tmp_path, &wav_bytes).map_err(|e| VoiceError::AudioError {
-        message: format!("Failed to write temp WAV: {}", e),
+        message: format!("Failed to write temp WAV: {e}"),
     })?;
 
     let cmd = if cfg!(target_os = "macos") {
@@ -271,7 +271,7 @@ pub async fn play_audio(chunk: &AudioChunk) -> Result<(), VoiceError> {
         .status()
         .await
         .map_err(|e| VoiceError::AudioError {
-            message: format!("{} failed: {}", cmd, e),
+            message: format!("{cmd} failed: {e}"),
         })?;
 
     // Clean up temp file
@@ -279,7 +279,7 @@ pub async fn play_audio(chunk: &AudioChunk) -> Result<(), VoiceError> {
 
     if !status.success() {
         return Err(VoiceError::AudioError {
-            message: format!("{} exited with status {}", cmd, status),
+            message: format!("{cmd} exited with status {status}"),
         });
     }
     Ok(())
@@ -303,7 +303,7 @@ pub async fn record_audio_chunk(
         let status = tokio::process::Command::new("afrecord")
             .args([
                 "-d",
-                &format!("{:.1}", duration_secs),
+                &format!("{duration_secs:.1}"),
                 "-f",
                 "WAVE",
                 "-c",
@@ -315,7 +315,7 @@ pub async fn record_audio_chunk(
             .status()
             .await
             .map_err(|e| VoiceError::AudioError {
-                message: format!("afrecord failed: {}", e),
+                message: format!("afrecord failed: {e}"),
             })?;
 
         if !status.success() {
@@ -353,7 +353,7 @@ pub async fn record_audio_chunk(
     }
 
     let data = std::fs::read(&tmp_path).map_err(|e| VoiceError::AudioError {
-        message: format!("Failed to read recorded audio: {}", e),
+        message: format!("Failed to read recorded audio: {e}"),
     })?;
     let _ = std::fs::remove_file(&tmp_path);
 
@@ -435,7 +435,7 @@ mod tests {
         let i16s = f32_to_i16(&original);
         let restored = i16_to_f32(&i16s);
         for (a, b) in original.iter().zip(restored.iter()) {
-            assert!((a - b).abs() < 0.001, "expected {}, got {}", a, b);
+            assert!((a - b).abs() < 0.001, "expected {a}, got {b}");
         }
     }
 
@@ -489,7 +489,7 @@ mod tests {
         assert_eq!(decoded.samples.len(), original.samples.len());
         // Check samples are close (i16 quantization introduces small errors)
         for (a, b) in original.samples.iter().zip(decoded.samples.iter()) {
-            assert!((a - b).abs() < 0.001, "expected {}, got {}", a, b);
+            assert!((a - b).abs() < 0.001, "expected {a}, got {b}");
         }
     }
 }

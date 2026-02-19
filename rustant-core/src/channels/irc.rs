@@ -216,7 +216,7 @@ impl IrcConnection for RealIrcConnection {
 
         // Join channels
         for ch in &self.channels {
-            let join_cmd = format!("JOIN {}\r\n", ch);
+            let join_cmd = format!("JOIN {ch}\r\n");
             writer
                 .write_all(join_cmd.as_bytes())
                 .await
@@ -258,7 +258,7 @@ impl IrcConnection for RealIrcConnection {
         let mut guard = self.writer.lock().await;
         let writer = guard.as_mut().ok_or_else(|| "Not connected".to_string())?;
 
-        let cmd = format!("PRIVMSG {} :{}\r\n", target, text);
+        let cmd = format!("PRIVMSG {target} :{text}\r\n");
         writer
             .write_all(cmd.as_bytes())
             .await

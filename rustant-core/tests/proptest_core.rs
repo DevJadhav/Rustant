@@ -21,7 +21,7 @@ proptest! {
         minor in 0u32..100,
         patch in 0u32..100,
     ) {
-        let v = format!("{}.{}.{}", major, minor, patch);
+        let v = format!("{major}.{minor}.{patch}");
         prop_assert!(!is_newer_version(&v, &v));
     }
 
@@ -31,7 +31,7 @@ proptest! {
         minor in 0u32..100,
         patch in 0u32..100,
     ) {
-        let newer = format!("{}.{}.{}", major, minor, patch);
+        let newer = format!("{major}.{minor}.{patch}");
         let older = format!("{}.{}.{}", major - 1, minor, patch);
         prop_assert!(is_newer_version(&newer, &older));
         prop_assert!(!is_newer_version(&older, &newer));
@@ -43,7 +43,7 @@ proptest! {
         minor in 1u32..100,
         patch in 0u32..100,
     ) {
-        let newer = format!("{}.{}.{}", major, minor, patch);
+        let newer = format!("{major}.{minor}.{patch}");
         let older = format!("{}.{}.{}", major, minor - 1, patch);
         prop_assert!(is_newer_version(&newer, &older));
     }
@@ -54,7 +54,7 @@ proptest! {
         minor in 0u32..100,
         patch in 1u32..100,
     ) {
-        let newer = format!("{}.{}.{}", major, minor, patch);
+        let newer = format!("{major}.{minor}.{patch}");
         let older = format!("{}.{}.{}", major, minor, patch - 1);
         prop_assert!(is_newer_version(&newer, &older));
     }
@@ -104,7 +104,7 @@ proptest! {
     fn merkle_chain_length_matches_appends(count in 0usize..100) {
         let mut chain = MerkleChain::new();
         for i in 0..count {
-            chain.append(format!("event_{}", i).as_bytes());
+            chain.append(format!("event_{i}").as_bytes());
         }
         prop_assert_eq!(chain.len(), count);
     }
@@ -119,7 +119,7 @@ proptest! {
     ) {
         let mut stm = ShortTermMemory::new(50);
         for i in 0..count {
-            stm.add(Message::user(format!("msg {}", i)));
+            stm.add(Message::user(format!("msg {i}")));
         }
         // The memory should hold all added messages (no auto-eviction)
         prop_assert_eq!(stm.len(), count);
@@ -134,12 +134,12 @@ proptest! {
 
         // Add noise facts
         for i in 0..noise_count {
-            ltm.add_fact(Fact::new(format!("Irrelevant noise fact number {}", i), "test"));
+            ltm.add_fact(Fact::new(format!("Irrelevant noise fact number {i}"), "test"));
         }
 
         // Add a fact containing the query word
         ltm.add_fact(Fact::new(
-            format!("This fact contains the word {}", query_word),
+            format!("This fact contains the word {query_word}"),
             "test",
         ));
 
@@ -188,8 +188,7 @@ proptest! {
         description in "[a-zA-Z ]{5,50}",
     ) {
         let content = format!(
-            "---\nname: {}\nversion: \"{}\"\ndescription: {}\n---\n\n### test_tool\n\nA test tool.\n",
-            name, version, description
+            "---\nname: {name}\nversion: \"{version}\"\ndescription: {description}\n---\n\n### test_tool\n\nA test tool.\n"
         );
         let result = parse_skill_md(&content);
         prop_assert!(result.is_ok(), "Valid frontmatter should parse: {:?}", result.err());
@@ -209,7 +208,7 @@ proptest! {
         hour in 0u32..24,
     ) {
         // Build a valid 7-field cron expression: sec min hour day month weekday year
-        let expr = format!("{} {} {} * * * *", second, minute, hour);
+        let expr = format!("{second} {minute} {hour} * * * *");
         let config = CronJobConfig::new("prop-test", &expr, "test task");
         if let Ok(job) = CronJob::new(config)
             && let Some(next_run) = job.next_run {
@@ -234,8 +233,8 @@ proptest! {
 
         // Add N jobs
         for i in 0..job_count {
-            let name = format!("job_{}", i);
-            let config = CronJobConfig::new(&name, "0 0 9 * * * *", format!("task {}", i));
+            let name = format!("job_{i}");
+            let config = CronJobConfig::new(&name, "0 0 9 * * * *", format!("task {i}"));
             scheduler.add_job(config).unwrap();
             names.push(name);
         }
@@ -255,9 +254,9 @@ proptest! {
         let mut scheduler = CronScheduler::new();
         for i in 0..job_count {
             let config = CronJobConfig::new(
-                format!("job_{}", i),
+                format!("job_{i}"),
                 "0 0 9 * * * *",
-                format!("task {}", i),
+                format!("task {i}"),
             );
             scheduler.add_job(config).unwrap();
         }
@@ -281,7 +280,7 @@ proptest! {
         let mut stm = ShortTermMemory::new(10); // Window of 10
 
         for i in 0..total_msgs {
-            stm.add(Message::user(format!("message_{}", i)));
+            stm.add(Message::user(format!("message_{i}")));
         }
 
         // Pin a message
@@ -291,7 +290,7 @@ proptest! {
         let output = stm.to_messages();
 
         // The pinned message text should appear in the output
-        let pin_text = format!("message_{}", pin_idx);
+        let pin_text = format!("message_{pin_idx}");
         let found = output.iter().any(|m| {
             if let Some(text) = m.content.as_text() {
                 text.contains(&pin_text)
@@ -556,9 +555,9 @@ proptest! {
         use rustant_core::{Content, GroundingResult};
         let results: Vec<GroundingResult> = (0..count)
             .map(|i| GroundingResult {
-                title: format!("Result {}", i),
-                url: format!("https://example.com/{}", i),
-                snippet: format!("Snippet for result {}", i),
+                title: format!("Result {i}"),
+                url: format!("https://example.com/{i}"),
+                snippet: format!("Snippet for result {i}"),
             })
             .collect();
         let content = Content::SearchResult { query, results };
@@ -736,10 +735,11 @@ proptest! {
 
     #[test]
     fn prop_permission_policy_allowlist_restricts(
-        allowed in "[a-z_]{3,10}",
-        other in "[A-Z_]{3,10}",
+        allowed in "[a-z]{3,10}",
+        other in "[A-Z]{3,10}",
     ) {
         use rustant_core::PermissionPolicy;
+        prop_assume!(allowed != other);
         let policy = PermissionPolicy {
             tool_allowlist: Some(vec![allowed.clone()]),
             ..Default::default()

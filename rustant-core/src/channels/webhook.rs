@@ -180,7 +180,7 @@ impl WebhookHttpClient for RealWebhookHttp {
         let body = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
 
         if !status.is_success() {
-            return Err(format!("Webhook POST failed ({}): {}", status, body));
+            return Err(format!("Webhook POST failed ({status}): {body}"));
         }
 
         Ok(body)

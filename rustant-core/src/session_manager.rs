@@ -57,25 +57,25 @@ impl SessionIndex {
         }
         let json =
             std::fs::read_to_string(&index_path).map_err(|e| MemoryError::PersistenceError {
-                message: format!("Failed to read session index: {}", e),
+                message: format!("Failed to read session index: {e}"),
             })?;
         serde_json::from_str(&json).map_err(|e| MemoryError::PersistenceError {
-            message: format!("Failed to parse session index: {}", e),
+            message: format!("Failed to parse session index: {e}"),
         })
     }
 
     /// Save the session index to a directory.
     pub fn save(&self, sessions_dir: &Path) -> Result<(), MemoryError> {
         std::fs::create_dir_all(sessions_dir).map_err(|e| MemoryError::PersistenceError {
-            message: format!("Failed to create sessions directory: {}", e),
+            message: format!("Failed to create sessions directory: {e}"),
         })?;
         let index_path = sessions_dir.join("index.json");
         let json =
             serde_json::to_string_pretty(self).map_err(|e| MemoryError::PersistenceError {
-                message: format!("Failed to serialize session index: {}", e),
+                message: format!("Failed to serialize session index: {e}"),
             })?;
         std::fs::write(&index_path, json).map_err(|e| MemoryError::PersistenceError {
-            message: format!("Failed to write session index: {}", e),
+            message: format!("Failed to write session index: {e}"),
         })
     }
 
@@ -161,7 +161,7 @@ impl SessionManager {
         let name = name
             .map(|n| n.to_string())
             .unwrap_or_else(|| now.format("%Y-%m-%d_%H%M%S").to_string());
-        let file_name = format!("{}.json", id);
+        let file_name = format!("{id}.json");
 
         let entry = SessionEntry {
             id,
@@ -220,21 +220,21 @@ impl SessionManager {
         if let Some(ref encryptor) = self.encryptor {
             let plaintext =
                 std::fs::read(&session_path).map_err(|e| MemoryError::PersistenceError {
-                    message: format!("Failed to read session for encryption: {}", e),
+                    message: format!("Failed to read session for encryption: {e}"),
                 })?;
             let encrypted =
                 encryptor
                     .encrypt(&plaintext)
                     .map_err(|e| MemoryError::PersistenceError {
-                        message: format!("Failed to encrypt session: {}", e),
+                        message: format!("Failed to encrypt session: {e}"),
                     })?;
             let tmp_path = session_path.with_extension("json.enc.tmp");
             std::fs::write(&tmp_path, &encrypted).map_err(|e| MemoryError::PersistenceError {
-                message: format!("Failed to write encrypted session: {}", e),
+                message: format!("Failed to write encrypted session: {e}"),
             })?;
             std::fs::rename(&tmp_path, &session_path).map_err(|e| {
                 MemoryError::PersistenceError {
-                    message: format!("Failed to finalize encrypted session: {}", e),
+                    message: format!("Failed to finalize encrypted session: {e}"),
                 }
             })?;
         }
@@ -264,12 +264,12 @@ impl SessionManager {
                 .find_by_id(id)
                 .cloned()
                 .ok_or_else(|| MemoryError::SessionLoadFailed {
-                    message: format!("No session found with ID: {}", id),
+                    message: format!("No session found with ID: {id}"),
                 })?
         } else {
             self.index.find_by_name(query).cloned().ok_or_else(|| {
                 MemoryError::SessionLoadFailed {
-                    message: format!("No session found matching: '{}'", query),
+                    message: format!("No session found matching: '{query}'"),
                 }
             })?
         };
@@ -280,18 +280,18 @@ impl SessionManager {
         let memory = if let Some(ref encryptor) = self.encryptor {
             let encrypted =
                 std::fs::read(&session_path).map_err(|e| MemoryError::SessionLoadFailed {
-                    message: format!("Failed to read encrypted session: {}", e),
+                    message: format!("Failed to read encrypted session: {e}"),
                 })?;
             let plaintext =
                 encryptor
                     .decrypt(&encrypted)
                     .map_err(|e| MemoryError::SessionLoadFailed {
-                        message: format!("Failed to decrypt session: {}", e),
+                        message: format!("Failed to decrypt session: {e}"),
                     })?;
             // Write decrypted data to a temp file for loading
             let tmp_path = session_path.with_extension("json.dec.tmp");
             std::fs::write(&tmp_path, &plaintext).map_err(|e| MemoryError::SessionLoadFailed {
-                message: format!("Failed to write decrypted session: {}", e),
+                message: format!("Failed to write decrypted session: {e}"),
             })?;
             let result = MemorySystem::load_session(&tmp_path);
             let _ = std::fs::remove_file(&tmp_path); // Clean up temp file
@@ -304,10 +304,10 @@ impl SessionManager {
         let mut continuation =
             String::from("You are resuming a previous session. Here is what was accomplished:\n");
         if let Some(ref goal) = entry.last_goal {
-            continuation.push_str(&format!("- Last goal: {}\n", goal));
+            continuation.push_str(&format!("- Last goal: {goal}\n"));
         }
         if let Some(ref summary) = entry.summary {
-            continuation.push_str(&format!("- Summary: {}\n", summary));
+            continuation.push_str(&format!("- Summary: {summary}\n"));
         }
         continuation.push_str(&format!("- Messages exchanged: {}\n", entry.message_count));
         continuation.push_str(&format!(
@@ -362,7 +362,7 @@ impl SessionManager {
                 self.index.save(&self.sessions_dir)
             }
             None => Err(MemoryError::SessionLoadFailed {
-                message: format!("No session found matching: '{}'", query),
+                message: format!("No session found matching: '{query}'"),
             }),
         }
     }
@@ -387,7 +387,7 @@ impl SessionManager {
                 Some((i, e)) => (i, e.file_name.clone(), e.name.clone()),
                 None => {
                     return Err(MemoryError::SessionLoadFailed {
-                        message: format!("No session found matching: '{}'", query),
+                        message: format!("No session found matching: '{query}'"),
                     });
                 }
             }
@@ -497,7 +497,7 @@ impl SessionManager {
                 self.index.save(&self.sessions_dir)
             }
             None => Err(MemoryError::SessionLoadFailed {
-                message: format!("No session found matching: '{}'", query),
+                message: format!("No session found matching: '{query}'"),
             }),
         }
     }
@@ -627,7 +627,7 @@ mod tests {
         let mut mgr = create_test_manager(dir.path());
 
         for i in 0..5 {
-            mgr.start_session(Some(&format!("session-{}", i)));
+            mgr.start_session(Some(&format!("session-{i}")));
             let mut mem = MemorySystem::new(10);
             mem.add_message(Message::user("test"));
             mgr.save_checkpoint(&mem, 100).unwrap();
@@ -787,7 +787,7 @@ mod tests {
             message_count: 1,
             total_tokens: 100,
             completed: false,
-            file_name: format!("{}.json", name),
+            file_name: format!("{name}.json"),
             tags: tags.into_iter().map(|s| s.to_string()).collect(),
             project_type: None,
         };
@@ -852,7 +852,7 @@ mod tests {
             message_count: 1,
             total_tokens: 100,
             completed: false,
-            file_name: format!("{}.json", name),
+            file_name: format!("{name}.json"),
             tags: tags.into_iter().map(|s| s.to_string()).collect(),
             project_type: None,
         };
@@ -904,7 +904,7 @@ mod tests {
             message_count: 1,
             total_tokens: 100,
             completed: false,
-            file_name: format!("{}.json", name),
+            file_name: format!("{name}.json"),
             tags: vec![],
             project_type: None,
         };
@@ -932,7 +932,7 @@ mod tests {
             message_count: 1,
             total_tokens: 100,
             completed: false,
-            file_name: format!("{}.json", name),
+            file_name: format!("{name}.json"),
             tags: tags.into_iter().map(|s| s.to_string()).collect(),
             project_type: None,
         };

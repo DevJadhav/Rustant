@@ -205,7 +205,7 @@ impl AutoReplyEngine {
     fn truncate_draft(&self, draft: &str) -> String {
         if draft.chars().count() > self.max_reply_length {
             let truncated: String = draft.chars().take(self.max_reply_length).collect();
-            format!("{}...", truncated)
+            format!("{truncated}...")
         } else {
             draft.to_string()
         }
@@ -263,7 +263,7 @@ impl AutoReplyEngine {
             super::types::MessageContent::Text { text } => {
                 if text.chars().count() > 100 {
                     let truncated: String = text.chars().take(100).collect();
-                    format!("{}...", truncated)
+                    format!("{truncated}...")
                 } else {
                     text.clone()
                 }

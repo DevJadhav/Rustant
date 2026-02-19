@@ -41,7 +41,7 @@ fn register_echo_tool(agent: &mut Agent) {
         executor: Box::new(|args: serde_json::Value| {
             Box::pin(async move {
                 let text = args["text"].as_str().unwrap_or("no text");
-                Ok(ToolOutput::text(format!("Echo: {}", text)))
+                Ok(ToolOutput::text(format!("Echo: {text}")))
             })
         }),
     });
@@ -306,7 +306,7 @@ async fn test_max_iterations_in_integration() {
         RustantError::Agent(AgentError::MaxIterationsReached { max }) => {
             assert_eq!(max, 50); // default config
         }
-        e => panic!("Expected MaxIterationsReached, got: {:?}", e),
+        e => panic!("Expected MaxIterationsReached, got: {e:?}"),
     }
 }
 

@@ -156,14 +156,14 @@ impl TtsProvider for OpenAiTtsProvider {
             .send()
             .await
             .map_err(|e| VoiceError::SynthesisFailed {
-                message: format!("HTTP request failed: {}", e),
+                message: format!("HTTP request failed: {e}"),
             })?;
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
             return Err(VoiceError::SynthesisFailed {
-                message: format!("API returned {}: {}", status, body),
+                message: format!("API returned {status}: {body}"),
             });
         }
 
@@ -171,7 +171,7 @@ impl TtsProvider for OpenAiTtsProvider {
             .bytes()
             .await
             .map_err(|e| VoiceError::SynthesisFailed {
-                message: format!("Failed to read response: {}", e),
+                message: format!("Failed to read response: {e}"),
             })?;
 
         // Decode the WAV response

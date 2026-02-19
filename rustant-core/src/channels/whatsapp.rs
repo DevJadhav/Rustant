@@ -199,7 +199,7 @@ impl WhatsAppHttpClient for RealWhatsAppHttp {
 
         if !status.is_success() {
             let err = body["error"]["message"].as_str().unwrap_or("unknown error");
-            return Err(format!("WhatsApp API error ({}): {}", status, err));
+            return Err(format!("WhatsApp API error ({status}): {err}"));
         }
 
         let wamid = body["messages"][0]["id"]

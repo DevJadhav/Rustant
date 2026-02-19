@@ -90,8 +90,7 @@ fn check_template_refs(
                 if !known_steps.contains(name.as_str()) {
                     return Err(WorkflowError::ValidationFailed {
                         message: format!(
-                            "Step '{}' references unknown step '{}' (steps must reference earlier steps)",
-                            context_step, name
+                            "Step '{context_step}' references unknown step '{name}' (steps must reference earlier steps)"
                         ),
                     });
                 }
@@ -99,18 +98,14 @@ fn check_template_refs(
             "inputs" => {
                 if !known_inputs.contains(name.as_str()) {
                     return Err(WorkflowError::ValidationFailed {
-                        message: format!(
-                            "Step '{}' references unknown input '{}'",
-                            context_step, name
-                        ),
+                        message: format!("Step '{context_step}' references unknown input '{name}'"),
                     });
                 }
             }
             _ => {
                 return Err(WorkflowError::ValidationFailed {
                     message: format!(
-                        "Step '{}' has unknown template namespace '{}'",
-                        context_step, namespace
+                        "Step '{context_step}' has unknown template namespace '{namespace}'"
                     ),
                 });
             }
@@ -248,7 +243,7 @@ steps:
         assert!(result.is_err());
         match result.unwrap_err() {
             WorkflowError::ParseError { .. } => {}
-            other => panic!("Expected ParseError, got: {:?}", other),
+            other => panic!("Expected ParseError, got: {other:?}"),
         }
     }
 

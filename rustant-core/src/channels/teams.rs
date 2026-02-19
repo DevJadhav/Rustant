@@ -206,7 +206,7 @@ impl TeamsHttpClient for RealTeamsHttp {
         let resp = self
             .client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", token))
+            .header("Authorization", format!("Bearer {token}"))
             .json(&serde_json::json!({
                 "body": {
                     "content": text,
@@ -225,7 +225,7 @@ impl TeamsHttpClient for RealTeamsHttp {
 
         if !status.is_success() {
             let err = body["error"]["message"].as_str().unwrap_or("unknown error");
-            return Err(format!("Teams API error ({}): {}", status, err));
+            return Err(format!("Teams API error ({status}): {err}"));
         }
 
         let id = body["id"].as_str().unwrap_or("").to_string();
@@ -241,7 +241,7 @@ impl TeamsHttpClient for RealTeamsHttp {
         let resp = self
             .client
             .get(&url)
-            .header("Authorization", format!("Bearer {}", token))
+            .header("Authorization", format!("Bearer {token}"))
             .send()
             .await
             .map_err(|e| format!("HTTP error: {e}"))?;
@@ -298,7 +298,7 @@ impl TeamsHttpClient for RealTeamsHttp {
 
         if !status.is_success() {
             let err = body["error_description"].as_str().unwrap_or("auth failed");
-            return Err(format!("Teams OAuth error ({}): {}", status, err));
+            return Err(format!("Teams OAuth error ({status}): {err}"));
         }
 
         let token = body["access_token"]

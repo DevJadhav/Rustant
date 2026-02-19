@@ -244,7 +244,7 @@ fn test_gateway_list_channels_nodes_integration() {
             assert!(names.contains(&"discord"));
             assert!(names.contains(&"telegram"));
         }
-        other => panic!("Expected ChannelStatus, got {:?}", other),
+        other => panic!("Expected ChannelStatus, got {other:?}"),
     }
 
     // List nodes
@@ -255,7 +255,7 @@ fn test_gateway_list_channels_nodes_integration() {
             assert_eq!(nodes[0].0, "macos-local");
             assert_eq!(nodes[0].1, "Healthy");
         }
-        other => panic!("Expected NodeStatus, got {:?}", other),
+        other => panic!("Expected NodeStatus, got {other:?}"),
     }
 }
 
@@ -279,7 +279,7 @@ async fn test_orchestrator_full_lifecycle() {
             description: &str,
             _args: &HashMap<String, String>,
         ) -> Result<String, String> {
-            Ok(format!("Echoed: {}", description))
+            Ok(format!("Echoed: {description}"))
         }
     }
 
@@ -316,7 +316,7 @@ async fn test_orchestrator_full_lifecycle() {
             assert!(success);
             assert!(output.contains("Echoed: Hello from integration test"));
         }
-        other => panic!("Expected TaskResult, got {:?}", other),
+        other => panic!("Expected TaskResult, got {other:?}"),
     }
 }
 
@@ -366,7 +366,7 @@ async fn test_orchestrator_resource_limit_enforcement() {
             sender_id,
             agent_id,
             AgentPayload::TaskRequest {
-                description: format!("task {}", i),
+                description: format!("task {i}"),
                 args: HashMap::new(),
             },
         );

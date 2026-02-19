@@ -44,13 +44,13 @@ impl CdcState {
     /// Persist state to disk (atomic write).
     pub fn save(&self, workspace: &Path) -> Result<(), String> {
         let dir = workspace.join(".rustant").join("cdc");
-        std::fs::create_dir_all(&dir).map_err(|e| format!("Create CDC dir: {}", e))?;
+        std::fs::create_dir_all(&dir).map_err(|e| format!("Create CDC dir: {e}"))?;
         let path = dir.join("state.json");
         let tmp = path.with_extension("json.tmp");
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| format!("Serialize CDC state: {}", e))?;
-        std::fs::write(&tmp, &json).map_err(|e| format!("Write CDC state: {}", e))?;
-        std::fs::rename(&tmp, &path).map_err(|e| format!("Rename CDC state: {}", e))?;
+        let json =
+            serde_json::to_string_pretty(self).map_err(|e| format!("Serialize CDC state: {e}"))?;
+        std::fs::write(&tmp, &json).map_err(|e| format!("Write CDC state: {e}"))?;
+        std::fs::rename(&tmp, &path).map_err(|e| format!("Rename CDC state: {e}"))?;
         Ok(())
     }
 
@@ -269,7 +269,7 @@ impl CdcProcessor {
             self.state.cursors.len()
         ));
         for (ch, cursor) in &self.state.cursors {
-            output.push_str(&format!("    {} -> {}\n", ch, cursor));
+            output.push_str(&format!("    {ch} -> {cursor}\n"));
         }
         output.push_str(&format!(
             "  Style profiles tracked: {}\n",

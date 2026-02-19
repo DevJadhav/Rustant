@@ -199,10 +199,7 @@ impl RealDiscordHttp {
 #[async_trait]
 impl DiscordHttpClient for RealDiscordHttp {
     async fn send_message(&self, channel_id: &str, text: &str) -> Result<String, String> {
-        let url = format!(
-            "https://discord.com/api/v10/channels/{}/messages",
-            channel_id
-        );
+        let url = format!("https://discord.com/api/v10/channels/{channel_id}/messages");
         let resp = self
             .client
             .post(&url)
@@ -220,7 +217,7 @@ impl DiscordHttpClient for RealDiscordHttp {
 
         if !status.is_success() {
             let msg = body["message"].as_str().unwrap_or("unknown error");
-            return Err(format!("Discord API error ({}): {}", status, msg));
+            return Err(format!("Discord API error ({status}): {msg}"));
         }
 
         let id = body["id"].as_str().unwrap_or("0").to_string();
@@ -232,10 +229,8 @@ impl DiscordHttpClient for RealDiscordHttp {
         channel_id: &str,
         limit: usize,
     ) -> Result<Vec<DiscordMessage>, String> {
-        let url = format!(
-            "https://discord.com/api/v10/channels/{}/messages?limit={}",
-            channel_id, limit
-        );
+        let url =
+            format!("https://discord.com/api/v10/channels/{channel_id}/messages?limit={limit}");
         let resp = self
             .client
             .get(&url)
@@ -252,7 +247,7 @@ impl DiscordHttpClient for RealDiscordHttp {
 
         if !status.is_success() {
             let msg = body["message"].as_str().unwrap_or("unknown error");
-            return Err(format!("Discord API error ({}): {}", status, msg));
+            return Err(format!("Discord API error ({status}): {msg}"));
         }
 
         let messages = body

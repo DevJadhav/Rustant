@@ -12,7 +12,7 @@ pub fn save_state(
     state_dir: &Path,
 ) -> Result<(), SchedulerError> {
     std::fs::create_dir_all(state_dir).map_err(|e| SchedulerError::PersistenceError {
-        message: format!("Failed to create state directory: {}", e),
+        message: format!("Failed to create state directory: {e}"),
     })?;
 
     // Save cron state
@@ -20,10 +20,10 @@ pub fn save_state(
     let cron_path = state_dir.join("cron_state.json");
     let cron_tmp = state_dir.join("cron_state.json.tmp");
     std::fs::write(&cron_tmp, &cron_json).map_err(|e| SchedulerError::PersistenceError {
-        message: format!("Failed to write cron state: {}", e),
+        message: format!("Failed to write cron state: {e}"),
     })?;
     std::fs::rename(&cron_tmp, &cron_path).map_err(|e| SchedulerError::PersistenceError {
-        message: format!("Failed to rename cron state file: {}", e),
+        message: format!("Failed to rename cron state file: {e}"),
     })?;
 
     // Save job state
@@ -31,10 +31,10 @@ pub fn save_state(
     let job_path = state_dir.join("jobs_state.json");
     let job_tmp = state_dir.join("jobs_state.json.tmp");
     std::fs::write(&job_tmp, &job_json).map_err(|e| SchedulerError::PersistenceError {
-        message: format!("Failed to write job state: {}", e),
+        message: format!("Failed to write job state: {e}"),
     })?;
     std::fs::rename(&job_tmp, &job_path).map_err(|e| SchedulerError::PersistenceError {
-        message: format!("Failed to rename job state file: {}", e),
+        message: format!("Failed to rename job state file: {e}"),
     })?;
 
     info!("Scheduler state saved to {:?}", state_dir);

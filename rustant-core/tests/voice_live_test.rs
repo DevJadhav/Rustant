@@ -130,8 +130,7 @@ async fn voice_live_test_tts_different_voices() {
         let result = tts.synthesize(&request).await.unwrap();
         assert!(
             !result.audio.is_empty(),
-            "Voice '{}' should produce audio",
-            voice
+            "Voice '{voice}' should produce audio"
         );
         println!(
             "Voice '{}': {} samples, {:.2}s",

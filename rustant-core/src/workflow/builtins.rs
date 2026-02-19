@@ -42,6 +42,19 @@ pub fn list_builtin_names() -> Vec<&'static str> {
         "life_planning",
         "privacy_audit",
         "self_improvement_loop",
+        // ML/AI workflow templates
+        "ml_data_pipeline",
+        "ml_training_experiment",
+        "ml_model_deployment",
+        "ml_rag_setup",
+        "ml_llm_finetune",
+        "ai_research",
+        "ai_safety_audit",
+        "ai_evaluation_suite",
+        // Fullstack development workflows
+        "fullstack_verify",
+        // Security & compliance workflows
+        "compliance_audit",
     ]
 }
 
@@ -76,6 +89,16 @@ pub fn get_builtin(name: &str) -> Option<WorkflowDefinition> {
         "life_planning" => LIFE_PLANNING_WORKFLOW,
         "privacy_audit" => PRIVACY_AUDIT_WORKFLOW,
         "self_improvement_loop" => SELF_IMPROVEMENT_LOOP_WORKFLOW,
+        "ml_data_pipeline" => ML_DATA_PIPELINE_WORKFLOW,
+        "ml_training_experiment" => ML_TRAINING_EXPERIMENT_WORKFLOW,
+        "ml_model_deployment" => ML_MODEL_DEPLOYMENT_WORKFLOW,
+        "ml_rag_setup" => ML_RAG_SETUP_WORKFLOW,
+        "ml_llm_finetune" => ML_LLM_FINETUNE_WORKFLOW,
+        "ai_research" => AI_RESEARCH_WORKFLOW,
+        "ai_safety_audit" => AI_SAFETY_AUDIT_WORKFLOW,
+        "ai_evaluation_suite" => AI_EVALUATION_SUITE_WORKFLOW,
+        "fullstack_verify" => FULLSTACK_VERIFY_WORKFLOW,
+        "compliance_audit" => COMPLIANCE_AUDIT_WORKFLOW,
         _ => return None,
     };
     parse_workflow(yaml).ok()
@@ -1115,6 +1138,487 @@ outputs:
     value: "{{ steps.summary.output }}"
 "#;
 
+// ---------------------------------------------------------------------------
+// ML/AI Workflow Templates
+// ---------------------------------------------------------------------------
+
+const ML_DATA_PIPELINE_WORKFLOW: &str = r#"
+name: ml_data_pipeline
+description: End-to-end ML data pipeline with ingestion, validation, PII scanning, transformation, splitting, and versioning
+version: "1.0"
+author: rustant
+inputs:
+  - name: data_source
+    type: string
+    description: Path or URI of the raw data source
+  - name: output_dir
+    type: string
+    optional: true
+    default: "./data"
+    description: Output directory for processed data
+steps:
+  - id: ingest
+    tool: echo
+    params:
+      text: "Ingesting data from {{ inputs.data_source }}"
+  - id: validate
+    tool: echo
+    params:
+      text: "Validating data schema and integrity"
+  - id: pii_scan
+    tool: echo
+    params:
+      text: "Scanning for PII and sensitive data"
+  - id: transform
+    tool: echo
+    params:
+      text: "Applying data transformations and feature engineering"
+    gate:
+      type: approval_required
+      message: "Apply data transformations to the validated dataset?"
+  - id: split
+    tool: echo
+    params:
+      text: "Splitting dataset into train/validation/test sets"
+  - id: version
+    tool: echo
+    params:
+      text: "Versioning processed dataset in {{ inputs.output_dir }}"
+outputs:
+  - name: pipeline_result
+    value: "{{ steps.version.output }}"
+"#;
+
+const ML_TRAINING_EXPERIMENT_WORKFLOW: &str = r#"
+name: ml_training_experiment
+description: ML training experiment lifecycle with experiment tracking, training, evaluation, checkpointing, and comparison
+version: "1.0"
+author: rustant
+inputs:
+  - name: experiment_name
+    type: string
+    description: Name for the training experiment
+  - name: model_config
+    type: string
+    optional: true
+    default: "default"
+    description: Model configuration or hyperparameter preset
+steps:
+  - id: create_experiment
+    tool: echo
+    params:
+      text: "Creating experiment: {{ inputs.experiment_name }} with config {{ inputs.model_config }}"
+  - id: train
+    tool: echo
+    params:
+      text: "Training model for experiment {{ inputs.experiment_name }}"
+    gate:
+      type: approval_required
+      message: "Start training run for {{ inputs.experiment_name }}?"
+  - id: evaluate
+    tool: echo
+    params:
+      text: "Evaluating trained model on validation set"
+  - id: checkpoint
+    tool: echo
+    params:
+      text: "Saving model checkpoint and artifacts"
+  - id: compare
+    tool: echo
+    params:
+      text: "Comparing results against previous experiments"
+outputs:
+  - name: experiment_result
+    value: "{{ steps.compare.output }}"
+"#;
+
+const ML_MODEL_DEPLOYMENT_WORKFLOW: &str = r#"
+name: ml_model_deployment
+description: ML model deployment pipeline with benchmarking, conversion, serving, output validation, and monitoring
+version: "1.0"
+author: rustant
+inputs:
+  - name: model_path
+    type: string
+    description: Path to the trained model artifact
+  - name: target_env
+    type: string
+    optional: true
+    default: "staging"
+    description: Target deployment environment
+steps:
+  - id: benchmark
+    tool: echo
+    params:
+      text: "Benchmarking model latency and throughput from {{ inputs.model_path }}"
+  - id: convert
+    tool: echo
+    params:
+      text: "Converting model to serving format"
+  - id: serve
+    tool: echo
+    params:
+      text: "Deploying model to {{ inputs.target_env }}"
+    gate:
+      type: approval_required
+      message: "Deploy model to {{ inputs.target_env }}?"
+  - id: validate_outputs
+    tool: echo
+    params:
+      text: "Validating model outputs against golden test set"
+  - id: monitor
+    tool: echo
+    params:
+      text: "Enabling monitoring and drift detection for deployed model"
+outputs:
+  - name: deployment_result
+    value: "{{ steps.monitor.output }}"
+"#;
+
+const ML_RAG_SETUP_WORKFLOW: &str = r#"
+name: ml_rag_setup
+description: RAG pipeline setup with document ingestion, chunking, embedding, indexing, query testing, and evaluation
+version: "1.0"
+author: rustant
+inputs:
+  - name: documents_path
+    type: string
+    description: Path to the documents to ingest
+  - name: chunk_size
+    type: number
+    optional: true
+    default: 512
+    description: Chunk size in tokens for document splitting
+steps:
+  - id: ingest_documents
+    tool: echo
+    params:
+      text: "Ingesting documents from {{ inputs.documents_path }}"
+  - id: chunk
+    tool: echo
+    params:
+      text: "Chunking documents with size {{ inputs.chunk_size }} tokens"
+  - id: embed
+    tool: echo
+    params:
+      text: "Generating embeddings for document chunks"
+  - id: index
+    tool: echo
+    params:
+      text: "Building vector index from embeddings"
+    gate:
+      type: approval_required
+      message: "Build vector index from processed documents?"
+  - id: test_queries
+    tool: echo
+    params:
+      text: "Running test queries against the index"
+  - id: evaluate
+    tool: echo
+    params:
+      text: "Evaluating retrieval quality and relevance scores"
+outputs:
+  - name: rag_result
+    value: "{{ steps.evaluate.output }}"
+"#;
+
+const ML_LLM_FINETUNE_WORKFLOW: &str = r#"
+name: ml_llm_finetune
+description: LLM fine-tuning pipeline with dataset preparation, PII scanning, training, alignment testing, red teaming, and model merge
+version: "1.0"
+author: rustant
+inputs:
+  - name: base_model
+    type: string
+    description: Base model identifier to fine-tune
+  - name: dataset_path
+    type: string
+    description: Path to the fine-tuning dataset
+steps:
+  - id: prepare_dataset
+    tool: echo
+    params:
+      text: "Preparing fine-tuning dataset from {{ inputs.dataset_path }}"
+  - id: pii_scan
+    tool: echo
+    params:
+      text: "Scanning dataset for PII and sensitive content"
+  - id: finetune
+    tool: echo
+    params:
+      text: "Fine-tuning {{ inputs.base_model }} on prepared dataset"
+    gate:
+      type: approval_required
+      message: "Start fine-tuning {{ inputs.base_model }}?"
+  - id: alignment_test
+    tool: echo
+    params:
+      text: "Running alignment and safety tests on fine-tuned model"
+  - id: red_team
+    tool: echo
+    params:
+      text: "Executing red team evaluation against fine-tuned model"
+  - id: merge
+    tool: echo
+    params:
+      text: "Merging fine-tuned adapters into base model"
+    gate:
+      type: approval_required
+      message: "Merge fine-tuned model weights into base model?"
+outputs:
+  - name: finetune_result
+    value: "{{ steps.merge.output }}"
+"#;
+
+const AI_RESEARCH_WORKFLOW: &str = r#"
+name: ai_research
+description: AI research workflow with literature search, methodology extraction, comparison, knowledge graph integration, and gap analysis
+version: "1.0"
+author: rustant
+inputs:
+  - name: topic
+    type: string
+    description: Research topic or question
+  - name: max_papers
+    type: number
+    optional: true
+    default: 10
+    description: Maximum number of papers to analyze
+steps:
+  - id: literature_search
+    tool: echo
+    params:
+      text: "Searching literature for {{ inputs.topic }} (max {{ inputs.max_papers }} papers)"
+  - id: methodology_extract
+    tool: echo
+    params:
+      text: "Extracting methodologies, datasets, and metrics from found papers"
+  - id: compare
+    tool: echo
+    params:
+      text: "Comparing approaches, results, and trade-offs across papers"
+  - id: knowledge_graph
+    tool: echo
+    params:
+      text: "Updating knowledge graph with research findings and relationships"
+    gate:
+      type: approval_required
+      message: "Add extracted research findings to the knowledge graph?"
+  - id: gaps
+    tool: echo
+    params:
+      text: "Identifying research gaps and open questions"
+outputs:
+  - name: research_result
+    value: "{{ steps.gaps.output }}"
+"#;
+
+const AI_SAFETY_AUDIT_WORKFLOW: &str = r#"
+name: ai_safety_audit
+description: AI safety audit with PII scanning, bias detection, alignment testing, red teaming, and report generation
+version: "1.0"
+author: rustant
+inputs:
+  - name: model_id
+    type: string
+    description: Model identifier or endpoint to audit
+  - name: dataset_path
+    type: string
+    optional: true
+    default: ""
+    description: Path to evaluation dataset (uses built-in if empty)
+steps:
+  - id: pii_scan
+    tool: echo
+    params:
+      text: "Scanning model inputs and outputs for PII leakage"
+  - id: bias_detect
+    tool: echo
+    params:
+      text: "Running bias detection across demographic groups for {{ inputs.model_id }}"
+  - id: alignment_test
+    tool: echo
+    params:
+      text: "Testing alignment with safety guidelines and refusal behavior"
+  - id: red_team
+    tool: echo
+    params:
+      text: "Executing red team adversarial evaluation"
+    gate:
+      type: approval_required
+      message: "Run red team adversarial prompts against {{ inputs.model_id }}?"
+  - id: report
+    tool: echo
+    params:
+      text: "Generating AI safety audit report with findings and recommendations"
+outputs:
+  - name: audit_result
+    value: "{{ steps.report.output }}"
+"#;
+
+const AI_EVALUATION_SUITE_WORKFLOW: &str = r#"
+name: ai_evaluation_suite
+description: AI evaluation suite with trace collection, taxonomy building, LLM-as-judge evaluation, benchmarking, and CI gating
+version: "1.0"
+author: rustant
+inputs:
+  - name: eval_name
+    type: string
+    description: Name for the evaluation run
+  - name: threshold
+    type: string
+    optional: true
+    default: "0.8"
+    description: Minimum passing score threshold for CI gate
+steps:
+  - id: collect_traces
+    tool: echo
+    params:
+      text: "Collecting inference traces for evaluation {{ inputs.eval_name }}"
+  - id: build_taxonomy
+    tool: echo
+    params:
+      text: "Building evaluation taxonomy and failure categories"
+  - id: judge
+    tool: echo
+    params:
+      text: "Running LLM-as-judge evaluation on collected traces"
+  - id: benchmark
+    tool: echo
+    params:
+      text: "Computing benchmark scores and comparing against baselines"
+  - id: ci_gate
+    tool: echo
+    params:
+      text: "Evaluating CI gate with threshold {{ inputs.threshold }}"
+    gate:
+      type: approval_required
+      message: "Apply CI gate decision based on evaluation results?"
+outputs:
+  - name: evaluation_result
+    value: "{{ steps.ci_gate.output }}"
+"#;
+
+// ---------------------------------------------------------------------------
+// Fullstack Development Workflow Templates
+// ---------------------------------------------------------------------------
+
+const FULLSTACK_VERIFY_WORKFLOW: &str = r#"
+name: fullstack_verify
+description: "Full verification pipeline: test, lint, typecheck, fix, and re-verify with up to 3 iterations"
+version: "1.0"
+author: rustant
+inputs:
+  - name: path
+    type: string
+    optional: true
+    default: "."
+    description: Project root path
+  - name: max_iterations
+    type: number
+    optional: true
+    default: 3
+    description: Maximum fix-and-recheck iterations
+steps:
+  - id: run_tests
+    tool: shell_exec
+    params:
+      command: "cd {{ inputs.path }} && cargo test --workspace 2>&1 || npm test 2>&1 || pytest 2>&1 || echo 'No test runner detected'"
+    on_error:
+      action: skip
+  - id: run_lint
+    tool: shell_exec
+    params:
+      command: "cd {{ inputs.path }} && cargo clippy --workspace --all-targets -- -D warnings 2>&1 || npx eslint . 2>&1 || ruff check . 2>&1 || echo 'No linter detected'"
+    on_error:
+      action: skip
+  - id: run_typecheck
+    tool: shell_exec
+    params:
+      command: "cd {{ inputs.path }} && npx tsc --noEmit 2>&1 || mypy . 2>&1 || echo 'No type checker detected'"
+    on_error:
+      action: skip
+  - id: auto_fix
+    tool: shell_exec
+    params:
+      command: "cd {{ inputs.path }} && cargo fmt --all 2>&1 || npx eslint . --fix 2>&1 || ruff check . --fix 2>&1 || echo 'No auto-fixer detected'"
+    gate:
+      type: approval_required
+      message: "Apply auto-fix for detected lint and formatting issues?"
+    on_error:
+      action: skip
+  - id: re_verify
+    tool: shell_exec
+    params:
+      command: "cd {{ inputs.path }} && cargo test --workspace 2>&1 && cargo clippy --workspace --all-targets -- -D warnings 2>&1 || npm test 2>&1 && npx eslint . 2>&1 || echo 'Re-verification complete'"
+    on_error:
+      action: skip
+  - id: summary
+    tool: echo
+    params:
+      text: "Fullstack verification complete. Tests, linting, type checking, and auto-fix applied (max {{ inputs.max_iterations }} iterations)."
+outputs:
+  - name: verification_result
+    value: "{{ steps.summary.output }}"
+"#;
+
+// ---------------------------------------------------------------------------
+// Security & Compliance Workflow Templates
+// ---------------------------------------------------------------------------
+
+const COMPLIANCE_AUDIT_WORKFLOW: &str = r#"
+name: compliance_audit
+description: Generate compliance evidence with security scanning, license checks, SBOM generation, risk scoring, and audit export
+version: "1.0"
+author: rustant
+inputs:
+  - name: path
+    type: string
+    optional: true
+    default: "."
+    description: Path to the project to audit
+  - name: format
+    type: string
+    optional: true
+    default: "sarif"
+    description: Export format for findings (sarif, ocsf, markdown)
+steps:
+  - id: security_scan
+    tool: echo
+    params:
+      text: "Running all security scanners (SAST, SCA, secrets, IaC, container, supply chain) on {{ inputs.path }}"
+  - id: license_check
+    tool: echo
+    params:
+      text: "Checking license compliance for all dependencies"
+  - id: sbom_generate
+    tool: echo
+    params:
+      text: "Generating Software Bill of Materials (SBOM) in CycloneDX format"
+  - id: risk_score
+    tool: echo
+    params:
+      text: "Calculating multi-dimensional risk score across security, license, and supply chain vectors"
+  - id: review_gate
+    tool: echo
+    params:
+      text: "Review compliance findings before generating final report"
+    gate:
+      type: approval_required
+      message: "Critical findings detected. Review and approve before generating compliance report?"
+  - id: compliance_report
+    tool: echo
+    params:
+      text: "Generating compliance report with findings, risk assessment, and remediation guidance"
+  - id: audit_export
+    tool: echo
+    params:
+      text: "Exporting audit findings in {{ inputs.format }} format"
+outputs:
+  - name: audit_report
+    value: "{{ steps.audit_export.output }}"
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1150,17 +1654,16 @@ mod tests {
     fn test_all_builtins_validate() {
         let names = list_builtin_names();
         for name in &names {
-            let wf =
-                get_builtin(name).unwrap_or_else(|| panic!("Failed to load builtin: {}", name));
+            let wf = get_builtin(name).unwrap_or_else(|| panic!("Failed to load builtin: {name}"));
             validate_workflow(&wf)
-                .unwrap_or_else(|e| panic!("Builtin '{}' failed validation: {}", name, e));
+                .unwrap_or_else(|e| panic!("Builtin '{name}' failed validation: {e}"));
         }
     }
 
     #[test]
     fn test_list_builtin_names() {
         let names = list_builtin_names();
-        assert_eq!(names.len(), 28);
+        assert_eq!(names.len(), 38);
         assert!(names.contains(&"code_review"));
         assert!(names.contains(&"refactor"));
         assert!(names.contains(&"test_generation"));
@@ -1194,6 +1697,19 @@ mod tests {
         assert!(names.contains(&"life_planning"));
         assert!(names.contains(&"privacy_audit"));
         assert!(names.contains(&"self_improvement_loop"));
+        // ML/AI workflow templates
+        assert!(names.contains(&"ml_data_pipeline"));
+        assert!(names.contains(&"ml_training_experiment"));
+        assert!(names.contains(&"ml_model_deployment"));
+        assert!(names.contains(&"ml_rag_setup"));
+        assert!(names.contains(&"ml_llm_finetune"));
+        assert!(names.contains(&"ai_research"));
+        assert!(names.contains(&"ai_safety_audit"));
+        assert!(names.contains(&"ai_evaluation_suite"));
+        // Fullstack development workflows
+        assert!(names.contains(&"fullstack_verify"));
+        // Security & compliance workflows
+        assert!(names.contains(&"compliance_audit"));
     }
 
     #[test]

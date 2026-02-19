@@ -180,7 +180,7 @@ impl SmsHttpClient for RealSmsHttp {
         let resp = self
             .client
             .post(&url)
-            .header("Authorization", format!("Basic {}", auth))
+            .header("Authorization", format!("Basic {auth}"))
             .form(&[("To", to), ("From", &self.from_number), ("Body", body)])
             .send()
             .await
@@ -194,7 +194,7 @@ impl SmsHttpClient for RealSmsHttp {
 
         if !status.is_success() {
             let msg = body["message"].as_str().unwrap_or("unknown error");
-            return Err(format!("Twilio API error ({}): {}", status, msg));
+            return Err(format!("Twilio API error ({status}): {msg}"));
         }
 
         let sid = body["sid"].as_str().unwrap_or("unknown").to_string();
@@ -213,7 +213,7 @@ impl SmsHttpClient for RealSmsHttp {
         let resp = self
             .client
             .get(&url)
-            .header("Authorization", format!("Basic {}", auth))
+            .header("Authorization", format!("Basic {auth}"))
             .send()
             .await
             .map_err(|e| format!("HTTP error: {e}"))?;
