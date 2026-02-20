@@ -163,8 +163,9 @@ impl AnthropicProvider {
         //   Full precision → non-deferred (in prompt)
         //   Half/Quarter precision → deferred (discovered via tool search)
         if let Some(tools) = &request.tools {
-            let use_tool_search = tools.len() > 20;
-            let has_precision_hints = !request.tool_precision_hints.is_empty();
+            let model_ok = Self::model_supports_tool_search(model);
+            let use_tool_search = model_ok && tools.len() > 20;
+            let has_precision_hints = model_ok && !request.tool_precision_hints.is_empty();
 
             let mut tools_json: Vec<Value> = if has_precision_hints {
                 // Hybrid MoE + Tool Search: use precision hints to decide defer_loading
@@ -198,7 +199,7 @@ impl AnthropicProvider {
                         0,
                         serde_json::json!({
                             "type": "tool_search_tool_bm25_20251119",
-                            "name": "tool_search"
+                            "name": "tool_search_tool_bm25"
                         }),
                     );
                 }
@@ -517,6 +518,34 @@ impl AnthropicProvider {
         let has_many_tools = request.tools.as_ref().is_some_and(|t| t.len() > 20);
         let has_precision_hints = !request.tool_precision_hints.is_empty();
         has_many_tools || has_precision_hints
+    }
+
+    /// Check if the configured model supports tool search (deferred loading).
+    ///
+    /// Tool search requires Claude Sonnet 4.5+, Sonnet 4.6, Opus 4.5+, or Opus 4.6.
+    /// The original Claude Sonnet 4 (claude-sonnet-4-20250514) does NOT support it.
+    fn model_supports_tool_search(model: &str) -> bool {
+        // Latest aliases always support it
+        if model == "claude-sonnet-4-6"
+            || model == "claude-opus-4-6"
+            || model.starts_with("claude-sonnet-4-5")
+            || model.starts_with("claude-opus-4-5")
+        {
+            return true;
+        }
+        // Dated snapshots: 4.5+ models (September 2025+) support it
+        // claude-sonnet-4-20250514 does NOT (original Sonnet 4)
+        if let Some(date_str) = model.strip_prefix("claude-sonnet-4-") {
+            if let Ok(date) = date_str.parse::<u32>() {
+                return date >= 20250929; // Sonnet 4.5 onward
+            }
+        }
+        if let Some(date_str) = model.strip_prefix("claude-opus-4-") {
+            if let Ok(date) = date_str.parse::<u32>() {
+                return date >= 20250929;
+            }
+        }
+        false
     }
 
     /// Fix Anthropic message turn ordering issues.
@@ -978,7 +1007,9 @@ impl LlmProvider for AnthropicProvider {
     /// Perform a full (non-streaming) completion via the Anthropic Messages API.
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, LlmError> {
         let caching_enabled = request.cache_hint.enable_prompt_cache;
-        let tool_search_enabled = Self::should_use_tool_search(&request);
+        let model = request.model.as_deref().unwrap_or(&self.model);
+        let tool_search_enabled =
+            Self::model_supports_tool_search(model) && Self::should_use_tool_search(&request);
         let body = self.build_request_body(&request, false);
         let url = format!("{}/messages", self.base_url);
 
@@ -1048,7 +1079,9 @@ impl LlmProvider for AnthropicProvider {
         tx: mpsc::Sender<StreamEvent>,
     ) -> Result<(), LlmError> {
         let caching_enabled = request.cache_hint.enable_prompt_cache;
-        let tool_search_enabled = Self::should_use_tool_search(&request);
+        let model = request.model.as_deref().unwrap_or(&self.model);
+        let tool_search_enabled =
+            Self::model_supports_tool_search(model) && Self::should_use_tool_search(&request);
         let body = self.build_request_body(&request, true);
         let url = format!("{}/messages", self.base_url);
 
@@ -2393,7 +2426,11 @@ mod tests {
 
     #[test]
     fn test_build_request_body_injects_tool_search_entry() {
-        let provider = make_provider();
+        // Use a model that supports tool search (Sonnet 4.6)
+        unsafe { std::env::set_var("ANTHROPIC_TEST_KEY_SEARCH", "sk-ant-test-key-12345") };
+        let mut config = test_config("ANTHROPIC_TEST_KEY_SEARCH");
+        config.model = "claude-sonnet-4-6".to_string();
+        let provider = AnthropicProvider::new(&config).expect("Provider creation should succeed");
         let mut hints = std::collections::HashMap::new();
         hints.insert("security_scan".to_string(), crate::moe::ToolPrecision::Half);
         hints.insert("file_read".to_string(), crate::moe::ToolPrecision::Full);
@@ -2421,7 +2458,7 @@ mod tests {
 
         // First entry should be the tool_search_tool (BM25 variant)
         assert_eq!(tools[0]["type"], "tool_search_tool_bm25_20251119");
-        assert_eq!(tools[0]["name"], "tool_search");
+        assert_eq!(tools[0]["name"], "tool_search_tool_bm25");
 
         // file_read (core tool) should NOT be deferred
         let file_read = tools.iter().find(|t| t["name"] == "file_read").unwrap();
@@ -2430,6 +2467,34 @@ mod tests {
         // security_scan (Half precision) should be deferred
         let sec_scan = tools.iter().find(|t| t["name"] == "security_scan").unwrap();
         assert_eq!(sec_scan["defer_loading"], true);
+    }
+
+    #[test]
+    fn test_model_supports_tool_search() {
+        // Latest aliases
+        assert!(AnthropicProvider::model_supports_tool_search(
+            "claude-sonnet-4-6"
+        ));
+        assert!(AnthropicProvider::model_supports_tool_search(
+            "claude-opus-4-6"
+        ));
+        // 4.5 models
+        assert!(AnthropicProvider::model_supports_tool_search(
+            "claude-sonnet-4-5-20250929"
+        ));
+        assert!(AnthropicProvider::model_supports_tool_search(
+            "claude-opus-4-5-20250929"
+        ));
+        // Original Sonnet 4 — does NOT support tool search
+        assert!(!AnthropicProvider::model_supports_tool_search(
+            "claude-sonnet-4-20250514"
+        ));
+        // Haiku — does NOT support tool search
+        assert!(!AnthropicProvider::model_supports_tool_search(
+            "claude-haiku-4-5-20251001"
+        ));
+        // Unknown model
+        assert!(!AnthropicProvider::model_supports_tool_search("gpt-4o"));
     }
 
     #[test]

@@ -2053,6 +2053,10 @@ impl Agent {
                             method: "GET".to_string(),
                         }
                     }
+                    "paper_to_visual" => ActionDetails::NetworkRequest {
+                        host: "generativelanguage.googleapis.com".to_string(),
+                        method: "POST".to_string(),
+                    },
                     _ => ActionDetails::NetworkRequest {
                         host: "export.arxiv.org".to_string(),
                         method: "GET".to_string(),
@@ -3011,7 +3015,7 @@ impl Agent {
                 "For this task, call the appropriate iMessage tool: 'imessage_read', 'imessage_send', or 'imessage_contacts'."
             }
             TaskClassification::ArxivResearch => {
-                "For this task, call the 'arxiv_research' tool. Actions: search, fetch, analyze, compare, trending, save/library/remove, export_bibtex, collections, digest_config, paper_to_code, paper_to_notebook, implement, setup_env, verify, implementation_status, semantic_search, summarize, citation_graph, blueprint, reindex. Do NOT use macos_safari, shell_exec, or curl."
+                "For this task, call the 'arxiv_research' tool. Actions: search, fetch, analyze, compare, trending, save/library/remove, export_bibtex, collections, digest_config, paper_to_code, paper_to_notebook, implement, setup_env, verify, implementation_status, semantic_search, summarize, citation_graph, blueprint, reindex, paper_to_visual. When the user says 'generate a visual', 'create an illustration', or 'visualize this paper', use the paper_to_visual action. Do NOT use macos_safari, shell_exec, or curl."
             }
             TaskClassification::KnowledgeGraph => {
                 "For this task, call the 'knowledge_graph' tool. Actions: add_node, get_node, update_node, remove_node, add_edge, remove_edge, neighbors, search, list, path, stats, import_arxiv, export_dot."
@@ -3128,7 +3132,7 @@ impl Agent {
                 "For this task, call the 'slack' tool with the appropriate action (send_message, read_messages, list_channels, reply_thread, list_users, add_reaction). Do NOT use shell_exec to interact with Slack."
             }
             TaskClassification::ArxivResearch => {
-                "For this task, call the 'arxiv_research' tool. Actions: search, fetch, analyze, compare, trending, save/library/remove, export_bibtex, collections, digest_config, paper_to_code, paper_to_notebook, implement, setup_env, verify, implementation_status, semantic_search, summarize, citation_graph, blueprint, reindex. Do NOT use shell_exec or curl."
+                "For this task, call the 'arxiv_research' tool. Actions: search, fetch, analyze, compare, trending, save/library/remove, export_bibtex, collections, digest_config, paper_to_code, paper_to_notebook, implement, setup_env, verify, implementation_status, semantic_search, summarize, citation_graph, blueprint, reindex, paper_to_visual. When the user says 'generate a visual', 'create an illustration', or 'visualize this paper', use the paper_to_visual action. Do NOT use shell_exec or curl."
             }
             TaskClassification::KnowledgeGraph => {
                 "For this task, call the 'knowledge_graph' tool. Actions: add_node, get_node, update_node, remove_node, add_edge, remove_edge, neighbors, search, list, path, stats, import_arxiv, export_dot."
@@ -3163,7 +3167,7 @@ impl Agent {
             _ => return None,
         };
 
-        Some(format!("TOOL ROUTING: {}", tool_hint))
+        Some(format!("TOOL ROUTING: {tool_hint}"))
     }
 
     /// Auto-correct a tool call when the LLM is stuck calling the wrong tool.

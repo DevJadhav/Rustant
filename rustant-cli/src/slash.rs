@@ -703,7 +703,7 @@ impl CommandRegistry {
             aliases: &["/paper"],
             description: "Search and manage arXiv research papers",
             usage:
-                "/arxiv search <query> | fetch <id> | trending [category] | library | analyze <id>",
+                "/arxiv search <query> | fetch <id> | trending [category] | library | analyze <id> | paper_to_visual <id>",
             category: CommandCategory::Agent,
 
             detailed_help: Some(
@@ -721,11 +721,13 @@ impl CommandRegistry {
                  /arxiv summarize <id>          — Multi-level summary\n  \
                  /arxiv citation_graph <id>     — Citation network analysis\n  \
                  /arxiv blueprint <id>          — Implementation blueprint\n  \
-                 /arxiv reindex                 — Rebuild search index\n\n\
+                 /arxiv reindex                 — Rebuild search index\n  \
+                 /arxiv paper_to_visual <id>    — Generate visual illustrations (PaperBanana)\n\n\
                  Examples:\n  /arxiv search transformer fine-tuning\n  \
                  /arxiv fetch 1706.03762\n  \
                  /arxiv summarize 1706.03762\n  \
-                 /arxiv citation_graph 1706.03762\n\n\
+                 /arxiv citation_graph 1706.03762\n  \
+                 /arxiv paper_to_visual 1706.03762\n\n\
                  Papers stored in .rustant/arxiv/library.json.\n\
                  Uses arXiv, Semantic Scholar, and OpenAlex APIs.",
             ),
@@ -2161,6 +2163,405 @@ impl CommandRegistry {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Natural Language → Slash Command Auto-Routing
+// ---------------------------------------------------------------------------
+
+/// Confidence level for a detected slash command intent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntentConfidence {
+    /// Safe to auto-route immediately — strong keyword match.
+    High,
+    /// Likely correct — show `[auto-routing to ...]` hint.
+    Medium,
+}
+
+/// A detected intent mapping natural language to a slash command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlashIntent {
+    /// The primary command including the slash, e.g., "/cost".
+    pub command: &'static str,
+    /// Optional subcommand, e.g., "status" for "/daemon status".
+    pub subcommand: Option<&'static str>,
+    /// How confident the match is.
+    pub confidence: IntentConfidence,
+}
+
+impl SlashIntent {
+    fn high(command: &'static str) -> Self {
+        Self {
+            command,
+            subcommand: None,
+            confidence: IntentConfidence::High,
+        }
+    }
+
+    fn high_sub(command: &'static str, sub: &'static str) -> Self {
+        Self {
+            command,
+            subcommand: Some(sub),
+            confidence: IntentConfidence::High,
+        }
+    }
+
+    fn medium(command: &'static str) -> Self {
+        Self {
+            command,
+            subcommand: None,
+            confidence: IntentConfidence::Medium,
+        }
+    }
+
+    fn medium_sub(command: &'static str, sub: &'static str) -> Self {
+        Self {
+            command,
+            subcommand: Some(sub),
+            confidence: IntentConfidence::Medium,
+        }
+    }
+
+    /// Format as the effective slash command string.
+    pub fn to_command_string(&self) -> String {
+        match self.subcommand {
+            Some(sub) => format!("{} {}", self.command, sub),
+            None => self.command.to_string(),
+        }
+    }
+}
+
+/// Returns `true` if the input looks like an agent task (action-oriented)
+/// rather than a system introspection query. Used as a guard to prevent
+/// false positives — if this returns `true`, `detect_slash_intent()` bails out.
+fn is_agent_task_likely(lower: &str) -> bool {
+    const ACTION_PREFIXES: &[&str] = &[
+        "create a ",
+        "create an ",
+        "write a ",
+        "write an ",
+        "build a ",
+        "build an ",
+        "implement ",
+        "fix ",
+        "fix the ",
+        "deploy ",
+        "deploy the ",
+        "send ",
+        "send a ",
+        "send an ",
+        "make a ",
+        "make an ",
+        "add a ",
+        "add an ",
+        "remove ",
+        "remove the ",
+        "delete ",
+        "delete the ",
+        "update the ",
+        "refactor ",
+        "refactor the ",
+        "install ",
+        "configure ",
+        "set up ",
+        "generate ",
+        "generate a ",
+        "run the ",
+        "execute ",
+        "test the ",
+        "debug ",
+        "analyze the ",
+        "design a ",
+        "design an ",
+        "open ",
+        "read the ",
+        "read my ",
+        "edit ",
+        "edit the ",
+        "search for ",
+        "find the ",
+        "find a ",
+        "explain ",
+        "explain the ",
+        "summarize ",
+        "translate ",
+        "convert ",
+    ];
+
+    for prefix in ACTION_PREFIXES {
+        if lower.starts_with(prefix) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Detect whether natural language input maps to a known slash command.
+///
+/// Returns `Some(SlashIntent)` if a high-confidence mapping is found,
+/// `None` otherwise (input proceeds to the agent loop).
+///
+/// Precision is critical: false positives disrupt user intent, while misses
+/// simply fall through to the normal agent loop at no cost.
+pub fn detect_slash_intent(input: &str) -> Option<SlashIntent> {
+    let lower = input.to_lowercase();
+    let lower = lower.trim();
+
+    // Very short ambiguous queries — skip
+    if lower.len() < 4 {
+        return None;
+    }
+
+    // Guard: action-oriented inputs go to agent, not slash commands
+    if is_agent_task_likely(lower) {
+        return None;
+    }
+
+    // --- Cost / Token Usage ---
+    if (lower.contains("cost") || lower.contains("spent") || lower.contains("spending"))
+        && (lower.contains("token")
+            || lower.contains("how much")
+            || lower.contains("usage")
+            || lower.contains("price")
+            || lower.contains("billing"))
+    {
+        return Some(SlashIntent::high("/cost"));
+    }
+    if lower == "token usage" || lower == "show costs" || lower == "show cost" {
+        return Some(SlashIntent::high("/cost"));
+    }
+
+    // --- Daemon ---
+    if lower.contains("daemon") && !lower.contains("build") && !lower.contains("implement") {
+        if lower.contains("start") {
+            return Some(SlashIntent::high_sub("/daemon", "start"));
+        }
+        if lower.contains("stop") || lower.contains("kill") {
+            return Some(SlashIntent::high_sub("/daemon", "stop"));
+        }
+        if lower.contains("status") || lower.contains("running") {
+            return Some(SlashIntent::high_sub("/daemon", "status"));
+        }
+        return Some(SlashIntent::medium_sub("/daemon", "status"));
+    }
+    if lower.contains("running in background")
+        || lower.contains("running in the background")
+        || lower == "is rustant running"
+    {
+        return Some(SlashIntent::high_sub("/daemon", "status"));
+    }
+
+    // --- Tools ---
+    if (lower.contains("list") || lower.contains("show") || lower.contains("what"))
+        && lower.contains("tool")
+        && (lower.contains("available")
+            || lower.contains("have")
+            || lower.contains("are there")
+            || lower.ends_with("tools")
+            || lower.ends_with("tools?"))
+    {
+        return Some(SlashIntent::high("/tools"));
+    }
+
+    // --- Safety ---
+    if (lower.contains("safety") || lower.contains("approval"))
+        && (lower.contains("mode")
+            || lower.contains("status")
+            || lower.contains("level")
+            || lower.contains("what"))
+        && !lower.contains("change")
+        && !lower.contains("set")
+    {
+        return Some(SlashIntent::medium("/safety"));
+    }
+
+    // --- Memory ---
+    if (lower.contains("memory")
+        && (lower.contains("stats")
+            || lower.contains("status")
+            || lower.contains("show")
+            || lower.contains("usage")))
+        && !lower.contains("ram")
+        && !lower.contains("system")
+        && !lower.contains("file")
+    {
+        return Some(SlashIntent::high("/memory"));
+    }
+
+    // --- Doctor / Diagnostics ---
+    if lower == "diagnostics"
+        || lower == "health check"
+        || lower == "run diagnostics"
+        || lower.contains("doctor") && !lower.contains("appointment") && !lower.contains("schedule")
+    {
+        return Some(SlashIntent::high("/doctor"));
+    }
+
+    // --- MoE ---
+    if (lower.contains("moe")
+        || lower.contains("mixture of experts")
+        || lower.contains("expert routing"))
+        && !lower.contains("implement")
+        && !lower.contains("build")
+    {
+        if lower.contains("stats") || lower.contains("statistics") {
+            return Some(SlashIntent::high_sub("/moe", "stats"));
+        }
+        return Some(SlashIntent::medium_sub("/moe", "status"));
+    }
+
+    // --- Workflows ---
+    if (lower.contains("list")
+        || lower.contains("show")
+        || lower.contains("what")
+        || lower.contains("available"))
+        && lower.contains("workflow")
+    {
+        return Some(SlashIntent::high("/workflows"));
+    }
+
+    // --- Decisions ---
+    if (lower.contains("decision")
+        && (lower.contains("log")
+            || lower.contains("recent")
+            || lower.contains("show")
+            || lower.contains("list")))
+        || lower == "recent decisions"
+    {
+        return Some(SlashIntent::high("/decisions"));
+    }
+
+    // --- Data Flow ---
+    if lower.contains("data flow")
+        || (lower.contains("data") && lower.contains("shared") && !lower.contains("create"))
+    {
+        return Some(SlashIntent::high("/dataflow"));
+    }
+
+    // --- Audit ---
+    if (lower.contains("audit")
+        && (lower.contains("trail")
+            || lower.contains("chain")
+            || lower.contains("verify")
+            || lower.contains("log")))
+        && !lower.contains("security")
+        && !lower.contains("dependency")
+        && !lower.contains("compliance")
+    {
+        if lower.contains("verify") {
+            return Some(SlashIntent::high_sub("/audit", "verify"));
+        }
+        return Some(SlashIntent::medium_sub("/audit", "show"));
+    }
+
+    // --- Consent ---
+    if lower.contains("consent")
+        && (lower.contains("status") || lower.contains("show") || lower.contains("what"))
+    {
+        return Some(SlashIntent::high_sub("/consent", "status"));
+    }
+
+    // --- Context ---
+    if (lower.contains("context")
+        && (lower.contains("window")
+            || lower.contains("remaining")
+            || lower.contains("left")
+            || lower.contains("usage")))
+        || lower == "how much context"
+        || lower == "context left"
+    {
+        return Some(SlashIntent::high("/context"));
+    }
+
+    // --- Compact ---
+    if lower == "compress context"
+        || lower == "compact context"
+        || lower.contains("compress") && lower.contains("context")
+        || lower.contains("compact") && lower.contains("context")
+    {
+        return Some(SlashIntent::high("/compact"));
+    }
+
+    // --- Status ---
+    if (lower == "agent status" || lower == "rustant status" || lower == "status")
+        || (lower.contains("agent") && lower.contains("status") && !lower.contains("deploy"))
+    {
+        return Some(SlashIntent::medium("/status"));
+    }
+
+    // --- Trust ---
+    if lower.contains("trust")
+        && (lower.contains("dashboard")
+            || lower.contains("stats")
+            || lower.contains("level")
+            || lower.contains("status"))
+        && !lower.contains("implement")
+    {
+        return Some(SlashIntent::medium("/trust"));
+    }
+
+    // --- Cache ---
+    if lower.contains("cache")
+        && (lower.contains("status")
+            || lower.contains("hit")
+            || lower.contains("rate")
+            || lower.contains("stats"))
+        && !lower.contains("clear")
+        && !lower.contains("invalidate")
+        && !lower.contains("implement")
+    {
+        return Some(SlashIntent::medium("/cache"));
+    }
+
+    // --- Capabilities ---
+    if lower.contains("capabilities")
+        || (lower.contains("provider") && (lower.contains("support") || lower.contains("feature")))
+        || (lower.contains("support")
+            && (lower.contains("vision") || lower.contains("image") || lower.contains("streaming")))
+    {
+        return Some(SlashIntent::medium("/capabilities"));
+    }
+
+    // --- Persona ---
+    if lower.contains("persona")
+        && (lower.contains("status")
+            || lower.contains("list")
+            || lower.contains("current")
+            || lower.contains("which")
+            || lower.contains("what"))
+        && !lower.contains("create")
+        && !lower.contains("switch")
+        && !lower.contains("set")
+    {
+        return Some(SlashIntent::high_sub("/persona", "status"));
+    }
+
+    // --- Siri ---
+    if lower.contains("siri") && !lower.contains("implement") && !lower.contains("build") {
+        if lower.contains("shortcut") {
+            return Some(SlashIntent::high_sub("/siri", "shortcuts"));
+        }
+        if lower.contains("setup") || lower.contains("set up") || lower.contains("install") {
+            return Some(SlashIntent::high_sub("/siri", "setup"));
+        }
+        if lower.contains("status") || lower.contains("active") {
+            return Some(SlashIntent::high_sub("/siri", "status"));
+        }
+        return Some(SlashIntent::medium_sub("/siri", "status"));
+    }
+
+    // --- Help ---
+    if lower == "help"
+        || lower == "what commands are available"
+        || lower == "what commands are available?"
+        || lower == "show commands"
+        || lower == "list commands"
+        || lower == "available commands"
+    {
+        return Some(SlashIntent::high("/help"));
+    }
+
+    None
+}
+
 /// Simple Levenshtein edit distance for command suggestions.
 fn edit_distance(a: &str, b: &str) -> usize {
     let a_bytes = a.as_bytes();
@@ -2415,5 +2816,249 @@ mod tests {
             !help.contains("(TUI)"),
             "Help text should not contain (TUI) markers since TUI was removed"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Natural Language → Slash Command Auto-Routing Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_intent_cost_how_much_spent() {
+        let intent = detect_slash_intent("how much have I spent on tokens?").unwrap();
+        assert_eq!(intent.command, "/cost");
+        assert_eq!(intent.confidence, IntentConfidence::High);
+    }
+
+    #[test]
+    fn test_intent_cost_token_usage() {
+        let intent = detect_slash_intent("token usage").unwrap();
+        assert_eq!(intent.command, "/cost");
+    }
+
+    #[test]
+    fn test_intent_cost_show_costs() {
+        let intent = detect_slash_intent("show costs").unwrap();
+        assert_eq!(intent.command, "/cost");
+    }
+
+    #[test]
+    fn test_intent_daemon_status() {
+        let intent = detect_slash_intent("what is the daemon status?").unwrap();
+        assert_eq!(intent.command, "/daemon");
+        assert_eq!(intent.subcommand, Some("status"));
+    }
+
+    #[test]
+    fn test_intent_daemon_running_background() {
+        let intent = detect_slash_intent("is rustant running in the background?").unwrap();
+        assert_eq!(intent.command, "/daemon");
+        assert_eq!(intent.subcommand, Some("status"));
+    }
+
+    #[test]
+    fn test_intent_daemon_start() {
+        let intent = detect_slash_intent("start the daemon").unwrap();
+        assert_eq!(intent.command, "/daemon");
+        assert_eq!(intent.subcommand, Some("start"));
+    }
+
+    #[test]
+    fn test_intent_tools_list() {
+        let intent = detect_slash_intent("what tools are available?").unwrap();
+        assert_eq!(intent.command, "/tools");
+    }
+
+    #[test]
+    fn test_intent_tools_show() {
+        let intent = detect_slash_intent("show available tools").unwrap();
+        assert_eq!(intent.command, "/tools");
+    }
+
+    #[test]
+    fn test_intent_safety_mode() {
+        let intent = detect_slash_intent("what's my safety mode?").unwrap();
+        assert_eq!(intent.command, "/safety");
+    }
+
+    #[test]
+    fn test_intent_memory_stats() {
+        let intent = detect_slash_intent("show memory stats").unwrap();
+        assert_eq!(intent.command, "/memory");
+    }
+
+    #[test]
+    fn test_intent_doctor() {
+        let intent = detect_slash_intent("run diagnostics").unwrap();
+        assert_eq!(intent.command, "/doctor");
+    }
+
+    #[test]
+    fn test_intent_doctor_health_check() {
+        let intent = detect_slash_intent("health check").unwrap();
+        assert_eq!(intent.command, "/doctor");
+    }
+
+    #[test]
+    fn test_intent_moe_stats() {
+        let intent = detect_slash_intent("moe statistics").unwrap();
+        assert_eq!(intent.command, "/moe");
+        assert_eq!(intent.subcommand, Some("stats"));
+    }
+
+    #[test]
+    fn test_intent_workflows_list() {
+        let intent = detect_slash_intent("list available workflows").unwrap();
+        assert_eq!(intent.command, "/workflows");
+    }
+
+    #[test]
+    fn test_intent_decisions_log() {
+        let intent = detect_slash_intent("show recent decisions").unwrap();
+        assert_eq!(intent.command, "/decisions");
+    }
+
+    #[test]
+    fn test_intent_dataflow() {
+        let intent = detect_slash_intent("what data has been shared?").unwrap();
+        assert_eq!(intent.command, "/dataflow");
+    }
+
+    #[test]
+    fn test_intent_audit_verify() {
+        let intent = detect_slash_intent("verify the audit chain").unwrap();
+        assert_eq!(intent.command, "/audit");
+        assert_eq!(intent.subcommand, Some("verify"));
+    }
+
+    #[test]
+    fn test_intent_context_window() {
+        let intent = detect_slash_intent("how much context window is remaining?").unwrap();
+        assert_eq!(intent.command, "/context");
+    }
+
+    #[test]
+    fn test_intent_compact() {
+        let intent = detect_slash_intent("compress context").unwrap();
+        assert_eq!(intent.command, "/compact");
+    }
+
+    #[test]
+    fn test_intent_persona_status() {
+        let intent = detect_slash_intent("what persona is active?").unwrap();
+        assert_eq!(intent.command, "/persona");
+        assert_eq!(intent.subcommand, Some("status"));
+    }
+
+    #[test]
+    fn test_intent_siri_shortcuts() {
+        let intent = detect_slash_intent("show siri shortcuts").unwrap();
+        assert_eq!(intent.command, "/siri");
+        assert_eq!(intent.subcommand, Some("shortcuts"));
+    }
+
+    #[test]
+    fn test_intent_help() {
+        let intent = detect_slash_intent("help").unwrap();
+        assert_eq!(intent.command, "/help");
+    }
+
+    #[test]
+    fn test_intent_help_commands_available() {
+        let intent = detect_slash_intent("what commands are available?").unwrap();
+        assert_eq!(intent.command, "/help");
+    }
+
+    #[test]
+    fn test_intent_consent_status() {
+        let intent = detect_slash_intent("show consent status").unwrap();
+        assert_eq!(intent.command, "/consent");
+        assert_eq!(intent.subcommand, Some("status"));
+    }
+
+    // --- False positive prevention tests ---
+
+    #[test]
+    fn test_no_intent_build_daemon() {
+        // "build a daemon" is an agent task, not a status query
+        assert!(detect_slash_intent("build a daemon process in rust").is_none());
+    }
+
+    #[test]
+    fn test_no_intent_create_cost_calculator() {
+        assert!(detect_slash_intent("create a cost calculator").is_none());
+    }
+
+    #[test]
+    fn test_no_intent_read_memory_file() {
+        assert!(detect_slash_intent("read the memory.rs file").is_none());
+    }
+
+    #[test]
+    fn test_no_intent_general_question() {
+        assert!(detect_slash_intent("what is the capital of France?").is_none());
+    }
+
+    #[test]
+    fn test_no_intent_implement_moe() {
+        assert!(detect_slash_intent("implement a mixture of experts router").is_none());
+    }
+
+    #[test]
+    fn test_no_intent_write_tool() {
+        assert!(detect_slash_intent("write a new tool for file search").is_none());
+    }
+
+    #[test]
+    fn test_no_intent_deploy_app() {
+        assert!(detect_slash_intent("deploy the application to production").is_none());
+    }
+
+    #[test]
+    fn test_no_intent_short_input() {
+        assert!(detect_slash_intent("hi").is_none());
+        assert!(detect_slash_intent("ok").is_none());
+    }
+
+    #[test]
+    fn test_no_intent_security_audit() {
+        // "security audit" should NOT route to /audit (that's for the merkle audit trail)
+        assert!(detect_slash_intent("run a security audit on this repo").is_none());
+    }
+
+    #[test]
+    fn test_no_intent_fix_memory_leak() {
+        assert!(detect_slash_intent("fix the memory leak in the server").is_none());
+    }
+
+    #[test]
+    fn test_intent_to_command_string() {
+        let intent = SlashIntent::high_sub("/daemon", "status");
+        assert_eq!(intent.to_command_string(), "/daemon status");
+
+        let intent = SlashIntent::high("/cost");
+        assert_eq!(intent.to_command_string(), "/cost");
+    }
+
+    #[test]
+    fn test_intent_agent_task_guard() {
+        // All these should be filtered by is_agent_task_likely
+        let agent_tasks = vec![
+            "create a new REST API",
+            "write a function to sort arrays",
+            "build an authentication system",
+            "implement the feature",
+            "fix the bug in login",
+            "send a message to the team",
+            "add a new endpoint",
+            "remove the deprecated code",
+            "generate a report",
+            "explain the algorithm",
+        ];
+        for task in agent_tasks {
+            assert!(
+                detect_slash_intent(task).is_none(),
+                "Should not match agent task: {task}"
+            );
+        }
     }
 }

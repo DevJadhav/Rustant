@@ -1,6 +1,7 @@
 //! ArXiv research tool — search, fetch, analyze, and manage academic papers.
 
 use async_trait::async_trait;
+use base64::Engine as _;
 use chrono::Utc;
 use rustant_core::error::ToolError;
 use rustant_core::types::{RiskLevel, ToolOutput};
@@ -11,7 +12,7 @@ use std::time::Duration;
 use crate::arxiv_api::{
     AnalysisDepth, ArxivClient, ArxivLibraryState, ArxivSearchParams, ArxivSortBy, DigestConfig,
     ImplementationMode, ImplementationRecord, ImplementationStatus, LibraryEntry, ProjectScaffold,
-    ScaffoldFile, generate_bibtex, language_config,
+    ScaffoldFile, VisualRecord, VisualStyle, generate_bibtex, language_config,
 };
 use crate::paper_sources::{CitationGraph, OpenAlexClient, SemanticScholarClient};
 use crate::registry::Tool;
@@ -878,6 +879,22 @@ impl ArxivResearchTool {
             ));
         }
 
+        // Embed existing visuals if available
+        let visuals = self.find_paper_visuals(arxiv_id);
+        if !visuals.is_empty() {
+            output.push_str("\n\n--- GENERATED VISUALS ---\n");
+            output.push_str(
+                "Include these visuals in the project README.md under an ## Architecture section:\n",
+            );
+            for v in &visuals {
+                output.push_str(&format!("  ![{}]({})\n", v.style, v.output_path));
+            }
+        } else {
+            output.push_str(
+                "\n\nTip: Run `paper_to_visual` action to generate architecture diagrams for this paper.\n",
+            );
+        }
+
         Ok(ToolOutput::text(output))
     }
 
@@ -930,6 +947,22 @@ impl ArxivResearchTool {
             paper.pdf_url,
             paper.summary,
         );
+
+        // Embed existing visuals if available
+        let visuals = self.find_paper_visuals(arxiv_id);
+        if !visuals.is_empty() {
+            output.push_str("\n\n--- PAPER VISUALS ---\n");
+            output.push_str(
+                "Insert a markdown cell near the top of the notebook with these visuals:\n",
+            );
+            for v in &visuals {
+                output.push_str(&format!("  ![{}]({})\n", v.style, v.output_path));
+            }
+        } else {
+            output.push_str(
+                "\n\nTip: Run `/arxiv paper_to_visual` to generate architecture diagrams for this paper.\n",
+            );
+        }
 
         output.push_str("\n\n--- GENERATED NOTEBOOK JSON ---\n");
         output.push_str(
@@ -1899,6 +1932,342 @@ impl ArxivResearchTool {
         Ok(ToolOutput::text(output))
     }
 
+    // ── Phase 6: Paper-to-Visual (PaperBanana) ───────────────
+
+    /// Valid Gemini image generation model IDs.
+    const VISUAL_MODELS: &'static [&'static str] = &[
+        "gemini-3-pro-image-preview",
+        "imagen-4.0-generate-001",
+        "imagen-4.0-ultra-generate-001",
+    ];
+
+    fn find_paper_visuals(&self, arxiv_id: &str) -> Vec<VisualRecord> {
+        let state = self.load_state();
+        state
+            .visuals
+            .iter()
+            .filter(|v| v.arxiv_id == arxiv_id)
+            .cloned()
+            .collect()
+    }
+
+    async fn handle_paper_to_visual(&self, args: &Value) -> Result<ToolOutput, ToolError> {
+        let arxiv_id = args
+            .get("arxiv_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArguments {
+                name: "arxiv_research".to_string(),
+                reason: "Missing required parameter 'arxiv_id' for paper_to_visual action"
+                    .to_string(),
+            })?;
+
+        let style = args
+            .get("style")
+            .and_then(|v| v.as_str())
+            .map(VisualStyle::from_str_loose)
+            .unwrap_or(VisualStyle::Conceptual);
+
+        let model = args
+            .get("visual_model")
+            .and_then(|v| v.as_str())
+            .unwrap_or("gemini-3-pro-image-preview");
+
+        if !Self::VISUAL_MODELS.contains(&model) {
+            return Err(ToolError::InvalidArguments {
+                name: "arxiv_research".to_string(),
+                reason: format!(
+                    "Unknown visual_model '{}'. Valid models: {}",
+                    model,
+                    Self::VISUAL_MODELS.join(", ")
+                ),
+            });
+        }
+
+        // Confirmation gate: require confirm=true to proceed
+        let confirmed = args
+            .get("confirm")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !confirmed {
+            return Ok(ToolOutput::text(format!(
+                "PAPER-TO-VISUAL CONFIRMATION REQUIRED:\n\n\
+                 This action will generate a visual illustration for paper '{arxiv_id}' \
+                 using Google Gemini ({model}).\n\n\
+                 Style: {style}\n\
+                 Model: {model}\n\n\
+                 Available styles: architecture, pipeline, comparison, conceptual, results\n\
+                 Available models: {models}\n\n\
+                 Please confirm with the user that they want to proceed, \
+                 then re-call with confirm: true. You may also change the style or visual_model \
+                 based on user preference.",
+                style = style.as_str(),
+                models = Self::VISUAL_MODELS.join(", "),
+            )));
+        }
+
+        // Resolve GEMINI_API_KEY: keychain first, then env var fallback
+        let api_key = match rustant_core::providers::resolve_api_key_by_env("GEMINI_API_KEY") {
+            Ok(key) => key,
+            Err(_) => {
+                return Ok(ToolOutput::text(
+                    "ERROR: GEMINI_API_KEY not found.\n\n\
+                     To use paper_to_visual, set a Google Gemini API key:\n\
+                     1. Store via keychain (recommended): rustant auth login --service gemini\n\
+                     2. Or export: export GEMINI_API_KEY=your_key_here\n\n\
+                     Get a key at https://aistudio.google.com/apikey"
+                        .to_string(),
+                ));
+            }
+        };
+
+        // Fetch paper metadata
+        let client = self.make_client()?;
+        let paper = client
+            .fetch_paper(arxiv_id)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                name: "arxiv_research".to_string(),
+                message: e,
+            })?;
+
+        // Build prompt following PaperBanana methodology
+        let prompt = format!(
+            "You are an expert academic illustrator. Based on the following research paper, \
+             generate {style_hint}.\n\n\
+             Paper: {title}\n\
+             Authors: {authors}\n\
+             Abstract: {abstract_text}\n\n\
+             Requirements:\n\
+             - The illustration should be publication-ready and clearly labeled\n\
+             - Use clean lines, readable text, and a professional color palette\n\
+             - Include relevant component names from the paper\n\
+             - The visual should help readers quickly understand the paper's core contribution\n\
+             - Style: {style_name}",
+            style_hint = style.prompt_hint(),
+            title = paper.title,
+            authors = paper.authors.join(", "),
+            abstract_text = paper.summary,
+            style_name = style.as_str(),
+        );
+
+        // Determine if this is Imagen or Gemini model (different API shapes)
+        let is_imagen = model.starts_with("imagen");
+
+        let request_body = if is_imagen {
+            json!({
+                "instances": [{"prompt": prompt}],
+                "parameters": {
+                    "sampleCount": 1
+                }
+            })
+        } else {
+            json!({
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "responseModalities": ["TEXT", "IMAGE"]
+                }
+            })
+        };
+
+        let api_url = if is_imagen {
+            format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:predict")
+        } else {
+            format!(
+                "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+            )
+        };
+
+        let http_client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(120))
+            .connect_timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|e| ToolError::ExecutionFailed {
+                name: "arxiv_research".to_string(),
+                message: format!("Failed to create HTTP client: {e}"),
+            })?;
+
+        let response = http_client
+            .post(&api_url)
+            .header("Content-Type", "application/json")
+            .header("X-Goog-Api-Key", api_key.as_str())
+            .json(&request_body)
+            .send()
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                name: "arxiv_research".to_string(),
+                message: format!("Gemini API request failed: {e}"),
+            })?;
+
+        let status = response.status();
+        let body_text = response
+            .text()
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                name: "arxiv_research".to_string(),
+                message: format!("Failed to read Gemini response: {e}"),
+            })?;
+
+        if !status.is_success() {
+            return Ok(ToolOutput::text(format!(
+                "Gemini API error (HTTP {status}):\n{body_text}\n\n\
+                 Tip: Ensure your API key has access to the '{model}' model."
+            )));
+        }
+
+        let resp_json: Value =
+            serde_json::from_str(&body_text).map_err(|e| ToolError::ExecutionFailed {
+                name: "arxiv_research".to_string(),
+                message: format!("Failed to parse Gemini response: {e}"),
+            })?;
+
+        // Extract base64 image data from response
+        let mut images: Vec<(String, Vec<u8>)> = Vec::new();
+
+        if is_imagen {
+            // Imagen response: predictions[].bytesBase64Encoded
+            if let Some(predictions) = resp_json.get("predictions").and_then(|v| v.as_array()) {
+                for pred in predictions {
+                    if let Some(b64) = pred.get("bytesBase64Encoded").and_then(|v| v.as_str()) {
+                        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) {
+                            images.push(("image/png".to_string(), bytes));
+                        }
+                    }
+                }
+            }
+        } else {
+            // Gemini response: candidates[0].content.parts[].inlineData
+            if let Some(parts) = resp_json
+                .pointer("/candidates/0/content/parts")
+                .and_then(|v| v.as_array())
+            {
+                for part in parts {
+                    if let Some(inline) = part.get("inlineData") {
+                        let mime = inline
+                            .get("mimeType")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("image/png");
+                        if let Some(b64) = inline.get("data").and_then(|v| v.as_str()) {
+                            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64)
+                            {
+                                images.push((mime.to_string(), bytes));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if images.is_empty() {
+            // Check if there's text-only response (model may have returned text instead)
+            let text_parts: Vec<&str> = if is_imagen {
+                Vec::new()
+            } else {
+                resp_json
+                    .pointer("/candidates/0/content/parts")
+                    .and_then(|v| v.as_array())
+                    .map(|parts| {
+                        parts
+                            .iter()
+                            .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+
+            if text_parts.is_empty() {
+                return Ok(ToolOutput::text(
+                    "Gemini returned no image data. The model may not support image generation \
+                     for this request. Try a different style or model."
+                        .to_string(),
+                ));
+            } else {
+                return Ok(ToolOutput::text(format!(
+                    "Gemini returned text instead of an image:\n\n{}\n\n\
+                     The model could not generate a visual for this request. \
+                     Try adjusting the style parameter.",
+                    text_parts.join("\n")
+                )));
+            }
+        }
+
+        // Save images to disk
+        let visuals_dir = self
+            .workspace
+            .join(".rustant")
+            .join("arxiv")
+            .join("visuals");
+        std::fs::create_dir_all(&visuals_dir).map_err(|e| ToolError::ExecutionFailed {
+            name: "arxiv_research".to_string(),
+            message: format!("Failed to create visuals directory: {e}"),
+        })?;
+
+        let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
+        let clean_id = arxiv_id.replace('/', "_");
+        let mut saved_paths = Vec::new();
+
+        for (i, (mime, bytes)) in images.iter().enumerate() {
+            let ext = if mime.contains("png") {
+                "png"
+            } else if mime.contains("jpeg") || mime.contains("jpg") {
+                "jpg"
+            } else if mime.contains("webp") {
+                "webp"
+            } else {
+                "png"
+            };
+            let suffix = if images.len() > 1 {
+                format!("_{}", i + 1)
+            } else {
+                String::new()
+            };
+            let filename = format!(
+                "{clean_id}_{style}_{timestamp}{suffix}.{ext}",
+                style = style.as_str()
+            );
+            let path = visuals_dir.join(&filename);
+            std::fs::write(&path, bytes).map_err(|e| ToolError::ExecutionFailed {
+                name: "arxiv_research".to_string(),
+                message: format!("Failed to write image: {e}"),
+            })?;
+            saved_paths.push(path.display().to_string());
+        }
+
+        // Record in state
+        let mut state = self.load_state();
+        for path in &saved_paths {
+            state.visuals.push(VisualRecord {
+                arxiv_id: arxiv_id.to_string(),
+                style: style.as_str().to_string(),
+                prompt_used: prompt.clone(),
+                output_path: path.clone(),
+                model_used: model.to_string(),
+                created_at: Utc::now(),
+            });
+        }
+        self.save_state(&state)?;
+
+        let paths_list = saved_paths
+            .iter()
+            .enumerate()
+            .map(|(i, p)| format!("  {}. {}", i + 1, p))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        Ok(ToolOutput::text(format!(
+            "Visual generated successfully!\n\n\
+             Paper: {}\n\
+             Style: {}\n\
+             Model: {}\n\
+             Images saved ({} total):\n{}\n\n\
+             You can reference these images in code scaffolds or notebooks.",
+            paper.title,
+            style.as_str(),
+            model,
+            saved_paths.len(),
+            paths_list,
+        )))
+    }
+
     /// Enrich a paper with external metadata from Semantic Scholar and OpenAlex.
     /// Fails gracefully — returns original paper if enrichment APIs are unavailable.
     #[allow(dead_code)]
@@ -2265,7 +2634,10 @@ impl Tool for ArxivResearchTool {
          export_bibtex, collections, digest_config, paper_to_code, paper_to_notebook, implement \
          (full TDD scaffold), setup_env, verify, implementation_status, semantic_search (keyword \
          search over library), summarize (multi-level LLM summary), citation_graph (build/pagerank/\
-         similar/path), blueprint (implementation planning), reindex. \
+         similar/path), blueprint (implementation planning), reindex, \
+         paper_to_visual (generate illustrations using Gemini image models aka PaperBanana). \
+         When user says 'generate a visual', 'create an illustration', 'visualize this paper', \
+         or similar — use paper_to_visual action. \
          IMPORTANT workflow: after 'search', present numbered results and ask user to select. \
          For implement/paper_to_code/paper_to_notebook, ask language and mode. Python uses venv."
     }
@@ -2281,7 +2653,8 @@ impl Tool for ArxivResearchTool {
                         "save", "library", "remove", "export_bibtex",
                         "collections", "digest_config", "paper_to_code", "paper_to_notebook",
                         "implement", "setup_env", "verify", "implementation_status",
-                        "semantic_search", "summarize", "citation_graph", "blueprint", "reindex"
+                        "semantic_search", "summarize", "citation_graph", "blueprint", "reindex",
+                        "paper_to_visual"
                     ],
                     "description": "Action to perform"
                 },
@@ -2399,6 +2772,20 @@ impl Tool for ArxivResearchTool {
                     "type": "string",
                     "enum": ["full", "model_only", "training", "inference"],
                     "description": "Blueprint focus area (default: full)"
+                },
+                "style": {
+                    "type": "string",
+                    "enum": ["architecture", "pipeline", "comparison", "conceptual", "results"],
+                    "description": "Visual style for paper_to_visual (default: conceptual)"
+                },
+                "confirm": {
+                    "type": "boolean",
+                    "description": "Confirm visual generation (paper_to_visual asks first, then re-call with confirm: true)"
+                },
+                "visual_model": {
+                    "type": "string",
+                    "enum": ["gemini-3-pro-image-preview", "imagen-4.0-generate-001", "imagen-4.0-ultra-generate-001"],
+                    "description": "Gemini image model for paper_to_visual (default: gemini-3-pro-image-preview)"
                 }
             },
             "required": ["action"]
@@ -2444,10 +2831,11 @@ impl Tool for ArxivResearchTool {
             "citation_graph" => self.handle_citation_graph(&args).await,
             "blueprint" => self.handle_blueprint(&args).await,
             "reindex" => self.handle_reindex(&args),
+            "paper_to_visual" => self.handle_paper_to_visual(&args).await,
             _ => Err(ToolError::InvalidArguments {
                 name: "arxiv_research".to_string(),
                 reason: format!(
-                    "Unknown action '{action}'. Valid actions: search, fetch, analyze, compare, trending, save, library, remove, export_bibtex, collections, digest_config, paper_to_code, paper_to_notebook, implement, setup_env, verify, implementation_status, semantic_search, summarize, citation_graph, blueprint, reindex"
+                    "Unknown action '{action}'. Valid actions: search, fetch, analyze, compare, trending, save, library, remove, export_bibtex, collections, digest_config, paper_to_code, paper_to_notebook, implement, setup_env, verify, implementation_status, semantic_search, summarize, citation_graph, blueprint, reindex, paper_to_visual"
                 ),
             }),
         }
@@ -2496,7 +2884,7 @@ mod tests {
         let schema = tool.parameters_schema();
         let actions = schema["properties"]["action"]["enum"].as_array().unwrap();
         let action_strs: Vec<&str> = actions.iter().filter_map(|v| v.as_str()).collect();
-        assert_eq!(action_strs.len(), 22);
+        assert_eq!(action_strs.len(), 23);
         assert!(action_strs.contains(&"search"));
         assert!(action_strs.contains(&"fetch"));
         assert!(action_strs.contains(&"analyze"));
@@ -2519,6 +2907,7 @@ mod tests {
         assert!(action_strs.contains(&"citation_graph"));
         assert!(action_strs.contains(&"blueprint"));
         assert!(action_strs.contains(&"reindex"));
+        assert!(action_strs.contains(&"paper_to_visual"));
     }
 
     #[tokio::test]
@@ -2620,6 +3009,7 @@ mod tests {
             summaries: Vec::new(),
             citation_graph: None,
             blueprints: Vec::new(),
+            visuals: Vec::new(),
         };
 
         tool.save_state(&state).unwrap();
@@ -2909,6 +3299,7 @@ mod tests {
             }],
             citation_graph: None,
             blueprints: Vec::new(),
+            visuals: Vec::new(),
         };
 
         tool.save_state(&state).unwrap();
@@ -2963,5 +3354,114 @@ mod tests {
         let meta = client.fetch_by_arxiv_id("1706.03762").await.unwrap();
         // OpenAlex may or may not find the paper; just check no crash
         assert!(meta.citation_count.is_some() || meta.openalex_id.is_none());
+    }
+
+    // ── Tests for paper_to_visual ──
+
+    #[tokio::test]
+    async fn test_paper_to_visual_missing_confirm() {
+        let dir = TempDir::new().unwrap();
+        let tool = ArxivResearchTool::new(dir.path().to_path_buf());
+        // Without confirm=true, should return confirmation prompt (not an error)
+        let result = tool
+            .execute(json!({
+                "action": "paper_to_visual",
+                "arxiv_id": "2301.12345"
+            }))
+            .await
+            .unwrap();
+        assert!(result.content.contains("CONFIRMATION REQUIRED"));
+        assert!(result.content.contains("confirm"));
+    }
+
+    #[tokio::test]
+    async fn test_paper_to_visual_missing_api_key() {
+        let dir = TempDir::new().unwrap();
+        let tool = ArxivResearchTool::new(dir.path().to_path_buf());
+        // Ensure GEMINI_API_KEY is not set for this test
+        // SAFETY: Test is not multi-threaded, no other thread reads this env var concurrently.
+        unsafe { std::env::remove_var("GEMINI_API_KEY") };
+        let result = tool
+            .execute(json!({
+                "action": "paper_to_visual",
+                "arxiv_id": "2301.12345",
+                "confirm": true
+            }))
+            .await;
+        // If keychain has a key, this will try to fetch the paper (network call) and may fail differently.
+        // If no key in keychain either, should return helpful error message.
+        match result {
+            Ok(output) => {
+                // No key found → shows guidance
+                assert!(
+                    output.content.contains("GEMINI_API_KEY") || output.content.contains("Gemini")
+                );
+            }
+            Err(_) => {
+                // Keychain had a key but paper fetch failed (network) — that's fine for this test
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_paper_to_visual_invalid_model() {
+        let dir = TempDir::new().unwrap();
+        let tool = ArxivResearchTool::new(dir.path().to_path_buf());
+        let result = tool
+            .execute(json!({
+                "action": "paper_to_visual",
+                "arxiv_id": "2301.12345",
+                "visual_model": "nonexistent-model",
+                "confirm": true
+            }))
+            .await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ToolError::InvalidArguments { reason, .. } => {
+                assert!(reason.contains("nonexistent-model"));
+            }
+            other => panic!("Expected InvalidArguments, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_find_paper_visuals_empty() {
+        let dir = TempDir::new().unwrap();
+        let tool = ArxivResearchTool::new(dir.path().to_path_buf());
+        let visuals = tool.find_paper_visuals("2301.12345");
+        assert!(visuals.is_empty());
+    }
+
+    #[test]
+    fn test_visual_style_from_str() {
+        use crate::arxiv_api::VisualStyle;
+        assert!(matches!(
+            VisualStyle::from_str_loose("architecture"),
+            VisualStyle::Architecture
+        ));
+        assert!(matches!(
+            VisualStyle::from_str_loose("arch"),
+            VisualStyle::Architecture
+        ));
+        assert!(matches!(
+            VisualStyle::from_str_loose("pipeline"),
+            VisualStyle::Pipeline
+        ));
+        assert!(matches!(
+            VisualStyle::from_str_loose("flow"),
+            VisualStyle::Pipeline
+        ));
+        assert!(matches!(
+            VisualStyle::from_str_loose("comparison"),
+            VisualStyle::Comparison
+        ));
+        assert!(matches!(
+            VisualStyle::from_str_loose("results"),
+            VisualStyle::Results
+        ));
+        assert!(matches!(
+            VisualStyle::from_str_loose("anything_else"),
+            VisualStyle::Conceptual
+        ));
     }
 }

@@ -1,6 +1,6 @@
 # Research Tools
 
-Rustant provides a comprehensive ArXiv research tool (`arxiv_research`) with 22 actions for searching, managing, analyzing, and implementing academic papers. The tool integrates with multiple paper sources and supports code generation from research papers.
+Rustant provides a comprehensive ArXiv research tool (`arxiv_research`) with 23 actions for searching, managing, analyzing, implementing, and visualizing academic papers. The tool integrates with multiple paper sources and supports code generation and visual illustration from research papers.
 
 ## Overview
 
@@ -16,7 +16,7 @@ Rustant provides a comprehensive ArXiv research tool (`arxiv_research`) with 22 
 
 ## Actions
 
-The tool supports 22 actions organized into search, library management, analysis, implementation, and citation graph operations.
+The tool supports 23 actions organized into search, library management, analysis, implementation, visual generation, and citation graph operations.
 
 ### Search & Fetch (5 actions)
 
@@ -123,6 +123,38 @@ Each language gets an isolated environment for implementation. The `setup_env` a
 }
 ```
 
+### Visual Generation (1 action)
+
+| Action | Description |
+|--------|-------------|
+| `paper_to_visual` | Generate visual illustrations from paper using PaperBanana methodology |
+
+Uses Google Gemini image generation models to create publication-ready diagrams from paper abstracts.
+
+**paper_to_visual parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `arxiv_id` | string | Paper to visualize |
+| `style` | string | `architecture`, `pipeline`, `comparison`, `conceptual`, or `results` (default: conceptual) |
+| `visual_model` | string | `gemini-3-pro-image-preview` (default), `imagen-4.0-generate-001`, or `imagen-4.0-ultra-generate-001` |
+| `confirm` | boolean | Must be `true` to proceed (confirmation gate) |
+
+**Example:**
+```json
+{
+  "action": "paper_to_visual",
+  "arxiv_id": "1706.03762",
+  "style": "architecture",
+  "visual_model": "gemini-3-pro-image-preview",
+  "confirm": true
+}
+```
+
+Requires `GEMINI_API_KEY` environment variable. Generated images are saved to `.rustant/arxiv/visuals/`.
+
+When visuals exist for a paper, `paper_to_code` and `paper_to_notebook` automatically embed them in generated output.
+
 ### Implementation Tracking (2 actions)
 
 | Action | Description |
@@ -197,7 +229,7 @@ The library state is persisted to `.rustant/arxiv/library.json` using the atomic
 |---------|---------|-------------|
 | `/arxiv` | `/research`, `/paper` | Access arXiv research tool |
 
-The `/arxiv` slash command supports all 22 actions via subcommands:
+The `/arxiv` slash command supports all 23 actions via subcommands:
 
 ```
 /arxiv search transformer attention mechanisms
@@ -206,6 +238,7 @@ The `/arxiv` slash command supports all 22 actions via subcommands:
 /arxiv library
 /arxiv citation_graph 1706.03762 --analysis pagerank
 /arxiv blueprint 2301.12345 --language python
+/arxiv paper_to_visual 1706.03762
 ```
 
 ## Related Workflow Template
@@ -215,5 +248,6 @@ The `arxiv_research` workflow template provides a guided research workflow:
 2. Save relevant papers to library
 3. Summarize key papers
 4. Build citation graph
-5. Generate implementation blueprint
-6. Implement and verify
+5. Generate visual illustrations (optional)
+6. Generate implementation blueprint
+7. Implement and verify

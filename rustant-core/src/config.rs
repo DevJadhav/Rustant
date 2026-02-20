@@ -1029,6 +1029,11 @@ pub struct FallbackProviderConfig {
     /// Optional base URL override.
     #[serde(default)]
     pub base_url: Option<String>,
+    /// Optional credential store key override for keychain resolution.
+    /// When set, the fallback provider uses this key to look up the API key in
+    /// the OS keychain instead of inheriting the primary provider's key.
+    #[serde(default)]
+    pub credential_store_key: Option<String>,
 }
 
 impl Default for LlmConfig {

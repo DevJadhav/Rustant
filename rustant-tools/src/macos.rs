@@ -161,21 +161,30 @@ impl Tool for MacosCalendarTool {
                 let days = args["days_ahead"].as_u64().unwrap_or(7);
                 debug!(days = days, "Listing upcoming calendar events");
                 let script = format!(
-                    r#"tell application "Calendar"
-    set output to ""
-    set today to current date
-    set endDate to today + ({days} * days)
-    repeat with cal in calendars
-        set calEvents to (every event of cal whose start date >= today and start date <= endDate)
-        repeat with evt in calEvents
-            set output to output & (summary of evt) & " | " & (start date of evt as string) & " | " & (name of cal) & linefeed
+                    r#"with timeout of 85 seconds
+    tell application "Calendar"
+        set output to ""
+        set today to current date
+        set time of today to 0
+        set endDate to today + ({days} * days)
+        -- Skip system calendars that are slow to query (Birthdays, Siri Suggestions, etc.)
+        set skipNames to {{"Birthdays", "Siri Suggestions", "Scheduled Reminders"}}
+        repeat with cal in calendars
+            if (name of cal) is not in skipNames then
+                try
+                    set calEvents to (every event of cal whose start date ≥ today and start date ≤ endDate)
+                    repeat with evt in calEvents
+                        set output to output & (summary of evt) & " | " & (start date of evt as string) & " | " & (name of cal) & linefeed
+                    end repeat
+                end try
+            end if
         end repeat
-    end repeat
-    if output is "" then
-        return "No upcoming events in the next {days} days."
-    end if
-    return output
-end tell"#
+        if output is "" then
+            return "No upcoming events in the next {days} days."
+        end if
+        return output
+    end tell
+end timeout"#
                 );
                 let result =
                     run_osascript(&script)
@@ -196,13 +205,15 @@ end tell"#
 
                 debug!(title = %title, start = %start, "Creating calendar event");
                 let script = format!(
-                    r#"tell application "Calendar"
-    set targetCal to first calendar whose name is "{cal}"
-    set startDate to date "{start}"
-    set endDate to date "{end}"
-    make new event at end of events of targetCal with properties {{summary:"{title}", start date:startDate, end date:endDate}}
-    return "Event '{title}' created successfully."
-end tell"#
+                    r#"with timeout of 85 seconds
+    tell application "Calendar"
+        set targetCal to first calendar whose name is "{cal}"
+        set startDate to date "{start}"
+        set endDate to date "{end}"
+        make new event at end of events of targetCal with properties {{summary:"{title}", start date:startDate, end date:endDate}}
+        return "Event '{title}' created successfully."
+    end tell
+end timeout"#
                 );
                 let result =
                     run_osascript(&script)
@@ -218,19 +229,26 @@ end tell"#
                     sanitize_applescript_string(require_str(&args, "title", "macos_calendar")?);
                 debug!(query = %query, "Searching calendar events");
                 let script = format!(
-                    r#"tell application "Calendar"
-    set output to ""
-    repeat with cal in calendars
-        set matchingEvents to (every event of cal whose summary contains "{query}")
-        repeat with evt in matchingEvents
-            set output to output & (summary of evt) & " | " & (start date of evt as string) & " | " & (name of cal) & linefeed
+                    r#"with timeout of 85 seconds
+    tell application "Calendar"
+        set output to ""
+        set skipNames to {{"Birthdays", "Siri Suggestions", "Scheduled Reminders"}}
+        repeat with cal in calendars
+            if (name of cal) is not in skipNames then
+                try
+                    set matchingEvents to (every event of cal whose summary contains "{query}")
+                    repeat with evt in matchingEvents
+                        set output to output & (summary of evt) & " | " & (start date of evt as string) & " | " & (name of cal) & linefeed
+                    end repeat
+                end try
+            end if
         end repeat
-    end repeat
-    if output is "" then
-        return "No events found matching '{query}'."
-    end if
-    return output
-end tell"#
+        if output is "" then
+            return "No events found matching '{query}'."
+        end if
+        return output
+    end tell
+end timeout"#
                 );
                 let result =
                     run_osascript(&script)
@@ -246,21 +264,28 @@ end tell"#
                     sanitize_applescript_string(require_str(&args, "title", "macos_calendar")?);
                 debug!(title = %title, "Deleting calendar event");
                 let script = format!(
-                    r#"tell application "Calendar"
-    set found to false
-    repeat with cal in calendars
-        set matchingEvents to (every event of cal whose summary is "{title}")
-        repeat with evt in matchingEvents
-            delete evt
-            set found to true
+                    r#"with timeout of 85 seconds
+    tell application "Calendar"
+        set found to false
+        set skipNames to {{"Birthdays", "Siri Suggestions", "Scheduled Reminders"}}
+        repeat with cal in calendars
+            if (name of cal) is not in skipNames then
+                try
+                    set matchingEvents to (every event of cal whose summary is "{title}")
+                    repeat with evt in matchingEvents
+                        delete evt
+                        set found to true
+                    end repeat
+                end try
+            end if
         end repeat
-    end repeat
-    if found then
-        return "Event '{title}' deleted."
-    else
-        return "No event found with title '{title}'."
-    end if
-end tell"#
+        if found then
+            return "Event '{title}' deleted."
+        else
+            return "No event found with title '{title}'."
+        end if
+    end tell
+end timeout"#
                 );
                 let result =
                     run_osascript(&script)
@@ -285,7 +310,9 @@ end tell"#
     }
 
     fn timeout(&self) -> Duration {
-        Duration::from_secs(15)
+        // Calendar.app event queries are inherently slow (30-90s) due to CalDAV
+        // sync, subscription calendars, and large datasets. Give enough time.
+        Duration::from_secs(90)
     }
 }
 
@@ -478,7 +505,7 @@ end tell"#
     }
 
     fn timeout(&self) -> Duration {
-        Duration::from_secs(15)
+        Duration::from_secs(30)
     }
 }
 
@@ -658,7 +685,7 @@ end tell"#
     }
 
     fn timeout(&self) -> Duration {
-        Duration::from_secs(15)
+        Duration::from_secs(30)
     }
 }
 
@@ -1687,7 +1714,7 @@ end tell"#
     }
 
     fn timeout(&self) -> Duration {
-        Duration::from_secs(15)
+        Duration::from_secs(30)
     }
 }
 
@@ -2027,7 +2054,7 @@ mod tests {
 
     #[test]
     fn test_calendar_tool_timeout() {
-        assert_eq!(MacosCalendarTool.timeout(), Duration::from_secs(15));
+        assert_eq!(MacosCalendarTool.timeout(), Duration::from_secs(90));
     }
 
     #[test]

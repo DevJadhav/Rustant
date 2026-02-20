@@ -267,7 +267,26 @@ pub async fn resolve_auth(
 }
 
 /// Create a single LLM provider based on the configuration.
+///
+/// Resolves API key from credential store (keychain) first, then falls back to
+/// env var. This ensures both primary and fallback providers can use keychain keys.
 fn create_single_provider(config: &LlmConfig) -> Result<Arc<dyn LlmProvider>, LlmError> {
+    // Try to resolve API key from keychain via credential_store_key
+    if config.api_key.is_none() {
+        if let Some(ref cs_key) = config.credential_store_key {
+            let cred_store = crate::credentials::KeyringCredentialStore::new();
+            match cred_store.get_key(cs_key) {
+                Ok(key) => {
+                    tracing::debug!(provider = %config.provider, "Resolved API key from credential store");
+                    return create_single_provider_with_key(config, key);
+                }
+                Err(e) => {
+                    tracing::warn!(provider = %config.provider, "Credential store lookup failed for '{cs_key}': {e}");
+                }
+            }
+        }
+    }
+
     match config.provider.as_str() {
         "anthropic" => Ok(Arc::new(AnthropicProvider::new(config)?)),
         "gemini" => Ok(Arc::new(GeminiProvider::new(config)?)),
@@ -368,11 +387,19 @@ pub fn create_provider(config: &LlmConfig) -> Result<Arc<dyn LlmProvider>, LlmEr
     // Build fallback providers, logging warnings for any that fail to initialize
     let mut providers: Vec<Arc<dyn LlmProvider>> = vec![primary];
     for fallback_config in &config.fallback_providers {
+        // Use the fallback's own credential_store_key if set, otherwise derive
+        // from the provider name so keychain lookups resolve correctly.
+        let fb_credential_key = fallback_config
+            .credential_store_key
+            .clone()
+            .or_else(|| Some(fallback_config.provider.clone()));
         let fb_llm_config = LlmConfig {
             provider: fallback_config.provider.clone(),
             model: fallback_config.model.clone(),
             api_key_env: fallback_config.api_key_env.clone(),
             base_url: fallback_config.base_url.clone(),
+            credential_store_key: fb_credential_key,
+            api_key: None, // Don't inherit primary provider's resolved key
             ..config.clone()
         };
         match create_single_provider(&fb_llm_config) {
@@ -419,11 +446,17 @@ pub async fn create_provider_with_auth(
 
     let mut providers: Vec<Arc<dyn LlmProvider>> = vec![primary];
     for fallback_config in &config.fallback_providers {
+        let fb_credential_key = fallback_config
+            .credential_store_key
+            .clone()
+            .or_else(|| Some(fallback_config.provider.clone()));
         let fb_llm_config = LlmConfig {
             provider: fallback_config.provider.clone(),
             model: fallback_config.model.clone(),
             api_key_env: fallback_config.api_key_env.clone(),
             base_url: fallback_config.base_url.clone(),
+            credential_store_key: fb_credential_key,
+            api_key: None, // Don't inherit primary provider's resolved key
             ..config.clone()
         };
         match create_single_provider(&fb_llm_config) {

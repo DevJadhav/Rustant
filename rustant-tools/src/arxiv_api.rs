@@ -147,6 +147,8 @@ pub struct ArxivLibraryState {
     pub citation_graph: Option<CitationGraphState>,
     #[serde(default)]
     pub blueprints: Vec<ImplementationBlueprint>,
+    #[serde(default)]
+    pub visuals: Vec<VisualRecord>,
 }
 
 /// A cached summary of a paper at a specific level and audience.
@@ -188,6 +190,67 @@ pub struct BlueprintFile {
     pub path: String,
     pub purpose: String,
     pub component_id: String,
+}
+
+/// Style for paper-to-visual illustration generation.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum VisualStyle {
+    Architecture,
+    Pipeline,
+    Comparison,
+    Conceptual,
+    Results,
+}
+
+impl VisualStyle {
+    pub fn from_str_loose(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "architecture" | "arch" => VisualStyle::Architecture,
+            "pipeline" | "flow" => VisualStyle::Pipeline,
+            "comparison" | "compare" => VisualStyle::Comparison,
+            "results" | "plot" => VisualStyle::Results,
+            _ => VisualStyle::Conceptual,
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            VisualStyle::Architecture => "architecture",
+            VisualStyle::Pipeline => "pipeline",
+            VisualStyle::Comparison => "comparison",
+            VisualStyle::Conceptual => "conceptual",
+            VisualStyle::Results => "results",
+        }
+    }
+
+    pub fn prompt_hint(&self) -> &str {
+        match self {
+            VisualStyle::Architecture => {
+                "a clear system architecture diagram showing components, connections, and data flow"
+            }
+            VisualStyle::Pipeline => {
+                "a step-by-step pipeline flow diagram with inputs, processing stages, and outputs"
+            }
+            VisualStyle::Comparison => {
+                "a side-by-side comparison chart highlighting differences between approaches"
+            }
+            VisualStyle::Conceptual => {
+                "a conceptual illustration explaining the core idea with visual metaphors"
+            }
+            VisualStyle::Results => "a results visualization with clean charts, plots, or tables",
+        }
+    }
+}
+
+/// A record of a generated visual for a paper.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VisualRecord {
+    pub arxiv_id: String,
+    pub style: String,
+    pub prompt_used: String,
+    pub output_path: String,
+    pub model_used: String,
+    pub created_at: DateTime<Utc>,
 }
 
 /// Configuration for daily paper digest.
@@ -1157,6 +1220,7 @@ convolutional neural networks that include an encoder and a decoder.  </summary>
             summaries: Vec::new(),
             citation_graph: None,
             blueprints: Vec::new(),
+            visuals: Vec::new(),
         };
 
         let json = serde_json::to_string_pretty(&state).unwrap();

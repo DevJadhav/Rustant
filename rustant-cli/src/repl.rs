@@ -1258,6 +1258,21 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
             continue;
         }
 
+        // Natural language → slash command auto-routing
+        let effective_input;
+        let input = if !input.starts_with('/') {
+            if let Some(intent) = crate::slash::detect_slash_intent(input) {
+                let synthetic = intent.to_command_string();
+                println!("\x1b[90m  [auto-routing to {synthetic}]\x1b[0m");
+                effective_input = synthetic;
+                effective_input.as_str()
+            } else {
+                input
+            }
+        } else {
+            input
+        };
+
         // Handle commands
         if input.starts_with('/') {
             let parts: Vec<&str> = input.splitn(3, ' ').collect();

@@ -330,7 +330,7 @@ pub async fn record_audio_chunk(
         let status = tokio::process::Command::new("arecord")
             .args([
                 "-d",
-                &format!("{:.0}", duration_secs),
+                &format!("{duration_secs:.0}"),
                 "-f",
                 "S16_LE",
                 "-c",
@@ -342,7 +342,7 @@ pub async fn record_audio_chunk(
             .status()
             .await
             .map_err(|e| VoiceError::AudioError {
-                message: format!("arecord failed: {}", e),
+                message: format!("arecord failed: {e}"),
             })?;
 
         if !status.success() {
