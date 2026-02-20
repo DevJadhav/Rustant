@@ -22,7 +22,7 @@ The loop runs up to `max_iterations` (default: 50) or until the LLM produces a t
 Before the LLM sees the context, routing hints are injected:
 
 - **`tool_routing_hint()`** — Platform-specific hints guiding the LLM to correct macOS tools
-- **`workflow_routing_hint()`** — Matches task patterns to 39+ workflow templates
+- **`workflow_routing_hint()`** — Matches task patterns to 38 workflow templates
 - **`auto_correct_tool_call()`** — Post-LLM correction, reroutes mismatched tools (e.g., `document_read` → `macos_clipboard`)
 
 Auto-routing is duplicated in both single `ToolCall` and `MultiPart` code paths. System messages are never injected between `tool_call` and `tool_result` (breaks OpenAI sequencing).

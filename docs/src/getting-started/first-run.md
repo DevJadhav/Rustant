@@ -15,10 +15,11 @@ The wizard will guide you through:
 3. Picking a model
 4. Setting an approval mode
 
-You can also set your API key directly:
+Or store your API key directly in the OS keychain:
 
 ```bash
-export OPENAI_API_KEY=sk-...
+rustant auth login openai
+# Prompts for API key securely — never stored as plaintext
 ```
 
 ## Running a Single Task
@@ -35,12 +36,6 @@ Start the interactive REPL by running `rustant` with no arguments:
 
 ```bash
 rustant
-```
-
-To use the TUI (terminal UI) interface instead of the default REPL:
-
-```bash
-rustant --tui
 ```
 
 ## Configuration File

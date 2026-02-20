@@ -56,9 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Slash command registry expanded** — 110+ commands across 9 categories (General, Agent, Memory, Safety, Session, Debug, Workflow, Channel, Sre, Development, AiEngineer)
-- **Workflow templates expanded** — 39+ built-in templates (was 12), grouped by category
-- **Tool count** — 72 base tools on macOS (45 base + 3 iMessage + 24 macOS native), plus 33 security tools and 54 ML tools registered separately
+- **Slash command registry expanded** — 117 commands across 9 categories (General, Agent, Memory, Safety, Session, Debug, Workflow, Channel, Sre, Development, AiEngineer)
+- **Workflow templates expanded** — 38 built-in templates (was 12), grouped by category
+- **Tool count** — 73 base tools on macOS (45 base + 3 iMessage + 25 macOS native), plus 33 security tools and 54 ML tools registered separately
 - **Workspace expanded** — 8 crates (added `rustant-security` and `rustant-ml`)
 
 ### Removed

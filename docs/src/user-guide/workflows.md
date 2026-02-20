@@ -2,9 +2,9 @@
 
 Workflows are declarative multi-step task definitions that chain tool executions with input/output flow, conditional gates, and error handling.
 
-## Built-in Workflows (39+)
+## Built-in Workflows (38)
 
-Rustant includes 39+ built-in workflow templates across categories:
+Rustant includes 38 built-in workflow templates across categories:
 
 ### Core Development
 | Template | Description |

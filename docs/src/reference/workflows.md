@@ -1,6 +1,6 @@
 # Workflow Templates Reference
 
-Rustant ships with 39+ built-in workflow templates. Workflows are multi-step automation sequences defined in YAML, executed by the workflow engine. Each step invokes a tool, and steps can be gated with approval requirements.
+Rustant ships with 38 built-in workflow templates. Workflows are multi-step automation sequences defined in YAML, executed by the workflow engine. Each step invokes a tool, and steps can be gated with approval requirements.
 
 Run workflows via:
 - CLI: `rustant workflow run <name> -i key=val`

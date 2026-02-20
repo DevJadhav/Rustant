@@ -7,7 +7,7 @@ The name: **Rust** + **Ass**istant = **Rustant**.
 ## Key Features
 
 - **Multi-provider LLM support** — OpenAI, Anthropic, Gemini, Azure, Ollama, vLLM with circuit-breaker failover and prompt caching
-- **159+ tools** — 72 base tools (45 cross-platform + 3 iMessage + 24 macOS native), 33 security tools, 54 ML tools across file I/O, Git, shell, search, productivity, research, cognitive extension, SRE/DevOps, fullstack development, security scanning, and ML engineering
+- **160 tools** — 73 base tools (45 cross-platform + 3 iMessage + 25 macOS native), 33 security tools, 54 ML tools across file I/O, Git, shell, search, productivity, research, cognitive extension, SRE/DevOps, fullstack development, security scanning, and ML engineering
 - **13 messaging channels** — Slack, Discord, Telegram, Email, Teams, WhatsApp, Signal, Matrix, IRC, SMS, iMessage, WebChat, Webhook with CDC auto-reply and communication style learning
 - **Three-tier memory** — Working, short-term, and long-term memory with auto-summarization, message pinning, and cross-session learning
 - **Five-layer safety** — Input validation, authorization (4 modes + 5-level progressive trust), sandboxing, output validation, and Merkle audit trail
@@ -17,8 +17,8 @@ The name: **Rust** + **Ass**istant = **Rustant**.
 - **Adaptive personas** — 8 task-specific personas with auto-detection and evolution
 - **Voice interface** — Text-to-speech and speech-to-text via OpenAI
 - **Browser automation** — Headless Chrome via CDP + MCP integration
-- **Workflow engine** — 39+ templates with cron scheduling and automatic task routing
-- **110+ slash commands** — Across 9+ categories with tab completion and typo suggestions
+- **Workflow engine** — 38 templates with cron scheduling and automatic task routing
+- **117 slash commands** — Across 9+ categories with tab completion and typo suggestions
 - **Plugin system** — Native and WASM plugin loading with hook points
 - **MCP support** — Model Context Protocol server and client
 - **Sessions** — Auto-save, resume, search, tagging, auto-recovery
@@ -30,8 +30,8 @@ Rustant is organized as a Cargo workspace with eight crates:
 | Crate | Purpose |
 |-------|---------|
 | `rustant-core` | Agent orchestrator, LLM brain, memory, safety, config, channels, gateway, personas, policy |
-| `rustant-tools` | 72 built-in tool implementations (45 base + 3 iMessage + 24 macOS native) |
-| `rustant-cli` | Binary entry point with CLI and REPL (110+ slash commands) |
+| `rustant-tools` | 73 built-in tool implementations (45 base + 3 iMessage + 25 macOS native) |
+| `rustant-cli` | Binary entry point with CLI and REPL (117 slash commands) |
 | `rustant-mcp` | MCP server and client (JSON-RPC 2.0) |
 | `rustant-plugins` | Plugin loading (native + WASM) and hook system |
 | `rustant-security` | Security scanning, code review, compliance, incident response (33 tools) |

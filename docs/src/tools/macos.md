@@ -1,6 +1,6 @@
 # macOS Native Tools
 
-Rustant includes 24 macOS-native tools that integrate deeply with Apple system services via AppleScript. These tools are only available when running on macOS (`#[cfg(target_os = "macos")]`).
+Rustant includes 25 macOS-native tools that integrate deeply with Apple system services via AppleScript. These tools are only available when running on macOS (`#[cfg(target_os = "macos")]`).
 
 All macOS tools use `sanitize_applescript_string()` for injection prevention, escaping backslashes, quotes, newlines, carriage returns, tabs, and null bytes.
 
@@ -32,6 +32,7 @@ All macOS tools use `sanitize_applescript_string()` for injection prevention, es
 | `homekit` | 3 | Smart Home |
 | `macos_say` | 2 | Media |
 | `macos_photos` | 3 | Media |
+| `siri_integration` | 5 | Integration |
 
 ---
 
@@ -361,6 +362,31 @@ Control HomeKit-compatible smart home devices via the macOS Shortcuts CLI (macOS
 | `run_with_input` | Run with specific parameters |
 
 Requires that HomeKit Shortcuts are pre-configured in the Shortcuts app.
+
+---
+
+## Integration
+
+### siri_integration
+
+Manage Siri Shortcuts for voice-controlled Rustant interactions. Requires the daemon to be running and the `siri_integration` feature flag enabled.
+
+| Action | Description |
+|--------|-------------|
+| `install_shortcuts` | Install Rustant Siri Shortcuts into the Shortcuts app |
+| `list_shortcuts` | List installed Rustant-related shortcuts |
+| `status` | Check Siri integration status (active/inactive) |
+| `activate` | Activate Siri integration (creates `~/.rustant/siri_active` flag) |
+| `deactivate` | Deactivate Siri integration (removes flag file) |
+
+**Example:**
+```json
+{
+  "action": "activate"
+}
+```
+
+Activation creates a flag file at `~/.rustant/siri_active` and ensures the background daemon is running to handle Siri voice commands.
 
 ---
 

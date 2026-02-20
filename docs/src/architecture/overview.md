@@ -5,8 +5,8 @@
 ```
 rustant/
   rustant-core/      — Agent orchestrator, brain, memory, safety, channels, gateway, personas, policy
-  rustant-tools/     — 72 built-in tools (45 base + 3 iMessage + 24 macOS native)
-  rustant-cli/       — Binary entry point (CLI, REPL, 110+ slash commands)
+  rustant-tools/     — 73 built-in tools (45 base + 3 iMessage + 25 macOS native)
+  rustant-cli/       — Binary entry point (CLI, REPL, 117 slash commands)
   rustant-mcp/       — Model Context Protocol server and client
   rustant-plugins/   — Plugin loading and hook system
   rustant-security/  — Security scanning, code review, compliance, incident response (33 tools)
@@ -65,7 +65,7 @@ trait Tool: Send + Sync {
 }
 ```
 
-**159+ tools** across categories: core (17), productivity (11), research (1 with 22 actions), cognitive extension (10), macOS native (24), iMessage (3), SRE/DevOps (5), fullstack (5), security (33), ML (54).
+**160 tools** across categories: core (17), productivity (11), research (1 with 22 actions), cognitive extension (10), macOS native (25), iMessage (3), SRE/DevOps (5), fullstack (5), security (33), ML (54).
 
 **Dual registration**: `ToolRegistry` (rustant-tools) holds all tools; `Agent` (rustant-core) has its own `HashMap<String, RegisteredTool>`. Bridged via `register_agent_tools_from_registry()` using `Arc<ToolRegistry>` as fallback.
 

@@ -4,11 +4,15 @@ Rustant supports voice interaction through text-to-speech (TTS) and speech-to-te
 
 ## Prerequisites
 
-Set your OpenAI API key:
+Ensure your OpenAI API key is stored in the OS keychain:
 
 ```bash
-export OPENAI_API_KEY=sk-...
+rustant setup        # Interactive wizard (stores key in OS keychain)
+# Or manually:
+rustant auth login openai
 ```
+
+Voice features use the same credential as your LLM provider. Rustant resolves the key from the OS keychain automatically — no environment variables needed.
 
 ## Text-to-Speech
 

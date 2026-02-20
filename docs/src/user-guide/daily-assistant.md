@@ -20,14 +20,13 @@ Grant these permissions in **System Settings > Privacy & Security**:
 
 ### LLM Provider Setup
 
+Store your API key securely via the setup wizard:
+
 ```bash
-# Cloud (Anthropic Claude)
-export ANTHROPIC_API_KEY="your-key-here"
+# Cloud provider (stores key in OS keychain)
+rustant setup
 
-# Cloud (OpenAI)
-export OPENAI_API_KEY="your-key-here"
-
-# Local (Ollama — Zero Cloud)
+# Or local (Ollama — Zero Cloud, no key needed)
 brew install ollama
 ollama pull qwen2.5:14b
 ollama serve
@@ -35,7 +34,7 @@ ollama serve
 
 See the [Ollama Setup](../ollama-setup.md) guide for full model recommendations.
 
-## Available macOS Tools (24)
+## Available macOS Tools (25)
 
 ### PIM (Calendar, Reminders, Notes, Contacts)
 

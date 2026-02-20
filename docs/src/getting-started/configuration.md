@@ -21,13 +21,13 @@ rustant setup         # Interactive wizard
 
 ```toml
 [llm]
-provider = "openai"        # openai, anthropic, gemini, azure, ollama, vllm
-model = "gpt-4o"           # Model name
-api_key_env = "OPENAI_API_KEY"
-auth_method = "env"        # env, keyring, oauth
+provider = "openai"              # openai, anthropic, gemini, azure, ollama, vllm
+model = "gpt-4o"                 # Model name
+credential_store_key = "openai"  # Reads API key from OS keychain (set via `rustant setup`)
+auth_method = "keyring"          # keyring (recommended), env, oauth
 temperature = 0.7
 max_tokens = 4096
-use_streaming = true       # Enable streaming responses
+use_streaming = true             # Enable streaming responses
 
 [llm.retry]
 max_retries = 3

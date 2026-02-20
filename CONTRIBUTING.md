@@ -57,8 +57,8 @@ Thank you for your interest in contributing to Rustant! This guide will help you
 | Crate | Purpose |
 |-------|---------|
 | `rustant-core` | Agent orchestrator, brain, memory, safety, channels, gateway, personas, policy, anomaly detection |
-| `rustant-tools` | 72 built-in tools (45 base + 3 iMessage + 24 macOS native) + 5 fullstack tools |
-| `rustant-cli` | CLI binary (published as `rustant` on crates.io), REPL, 110+ slash commands |
+| `rustant-tools` | 73 built-in tools (45 base + 3 iMessage + 25 macOS native) + 5 fullstack tools |
+| `rustant-cli` | CLI binary (published as `rustant` on crates.io), REPL, 117 slash commands |
 | `rustant-mcp` | MCP protocol server and client (JSON-RPC 2.0) |
 | `rustant-plugins` | Plugin system (native .so/.dll/.dylib + WASM via wasmi) |
 | `rustant-security` | Security scanning (SAST/SCA/secrets), code review, compliance, incident response (33 tools) |

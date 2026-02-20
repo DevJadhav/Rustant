@@ -1,6 +1,6 @@
 # Slash Commands Reference
 
-Rustant provides 110+ slash commands in the interactive REPL. Type `/help` to see all commands or `/help <topic>` for detailed help on a specific command.
+Rustant provides 117 slash commands in the interactive REPL. Type `/help` to see all commands or `/help <topic>` for detailed help on a specific command.
 
 ## Session
 

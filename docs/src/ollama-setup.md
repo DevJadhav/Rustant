@@ -51,9 +51,8 @@ Or manually set in `.rustant/config.toml`:
 
 ```toml
 [llm]
-provider = "openai"
+provider = "ollama"
 model = "qwen2.5:14b"
-api_key_env = "OLLAMA_API_KEY"
 base_url = "http://localhost:11434/v1"
 max_tokens = 4096
 temperature = 0.7
@@ -61,6 +60,7 @@ context_window = 32768
 input_cost_per_million = 0.0
 output_cost_per_million = 0.0
 use_streaming = true
+# No API key needed — Ollama runs locally
 ```
 
 No API key is needed for Ollama — Rustant detects localhost and skips authentication.

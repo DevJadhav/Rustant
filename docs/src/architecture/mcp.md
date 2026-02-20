@@ -14,7 +14,7 @@ The MCP server exposes Rustant's tools to external clients:
 - **Channel transport** — In-process async channel communication
 - **Process transport** — Spawn and communicate with child processes via NDJSON
 
-All registered tools (72 base on macOS, 45 on other platforms, plus 33 security tools) are exposed via the `tools/list` and `tools/call` methods.
+All registered tools (73 base on macOS, 45 on other platforms, plus 33 security tools) are exposed via the `tools/list` and `tools/call` methods.
 
 ### Output Limits
 

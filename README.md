@@ -6,7 +6,7 @@
   <a href="https://github.com/DevJadhav/Rustant/actions/workflows/ci.yml"><img src="https://github.com/DevJadhav/Rustant/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://crates.io/crates/rustant"><img src="https://img.shields.io/crates/v/rustant.svg" alt="crates.io"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.85%2B-orange.svg" alt="Rust"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.88%2B-orange.svg" alt="Rust"></a>
   <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.1-green.svg" alt="Version"></a>
 </p>
 
@@ -48,10 +48,13 @@ brew install DevJadhav/rustant/rustant
 curl -fsSL https://raw.githubusercontent.com/DevJadhav/Rustant/main/scripts/install.sh | bash
 ```
 
-```bash
-# Interactive setup wizard
-rustant setup
+**Security-first credentials** — Rustant stores API keys in your OS keychain, never as plaintext environment variables:
 
+```bash
+rustant setup              # Interactive wizard → stores key in OS keychain
+```
+
+```bash
 # Interactive REPL
 rustant
 
@@ -67,7 +70,7 @@ rustant --model gpt-4o --approval cautious --workspace ./project "add tests for 
 ```
 rustant/
 ├── rustant-core/      # Agent orchestrator, brain, memory, safety, channels, gateway
-├── rustant-tools/     # 72 built-in tools (45 base + 3 iMessage + 24 macOS native)
+├── rustant-tools/     # 73 built-in tools (45 base + 3 iMessage + 25 macOS native)
 ├── rustant-cli/       # CLI with REPL and slash commands
 ├── rustant-mcp/       # MCP server + client (JSON-RPC 2.0)
 ├── rustant-plugins/   # Plugin system (native + WASM)
@@ -76,7 +79,7 @@ rustant/
 └── rustant-ui/        # Tauri desktop dashboard
 ```
 
-**159+ tools** across 8 crates: 72 base (macOS) + 33 security + 54 ML. **110+ slash commands.** **39+ workflow templates.**
+**160 tools** across 8 crates: 73 base (macOS) + 33 security + 54 ML. **117 slash commands.** **38 workflow templates.**
 
 | Component | Description |
 |-----------|-------------|
@@ -87,7 +90,7 @@ rustant/
 | **Channels** | 13 platform integrations with CDC, auto-reply, digest, style learning |
 | **Security Engine** | SAST, SCA, secrets scanning, container/IAC analysis, compliance, incident response |
 | **ML Engine** | Data pipelines, training, model zoo, LLM fine-tuning, RAG, evaluation, inference, research |
-| **Workflows** | 39+ templates with approval gates, cron scheduling, automatic task routing |
+| **Workflows** | 38 templates with approval gates, cron scheduling, automatic task routing |
 
 ## Features
 
@@ -105,7 +108,7 @@ OpenAI, Anthropic, Google Gemini, Azure OpenAI, Ollama (local), and vLLM (self-h
 | Productivity | 11 | organizer, pomodoro, inbox, finance, flashcards, travel, pdf, template |
 | Research | 1 | arxiv_research (22 actions: search, summarize, citation graph, paper-to-code) |
 | Cognitive | 10 | knowledge_graph, experiment_tracker, code_intelligence, content_engine, system_monitor |
-| macOS Native | 24 | calendar, reminders, notes, mail, music, contacts, safari, gui_scripting, accessibility, OCR, homekit |
+| macOS Native | 25 | calendar, reminders, notes, mail, music, contacts, safari, gui_scripting, accessibility, OCR, homekit, siri |
 | iMessage | 3 | send, read, search |
 | SRE/DevOps | 5 | alert_manager, deployment_intel, prometheus, kubernetes, oncall |
 | Fullstack | 5 | scaffold, dev_server, database, test_runner, lint |
@@ -142,7 +145,7 @@ cargo clippy --workspace --all-targets -- -D warnings  # Lint
 cargo doc --workspace --no-deps --open # API docs
 ```
 
-**Requirements:** Rust 1.85+, Git configured (`git config --global user.email` / `user.name`)
+**Requirements:** Rust 1.88+, Git configured (`git config --global user.email` / `user.name`)
 
 ## Documentation
 

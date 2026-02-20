@@ -1,5 +1,7 @@
 # Environment Variables Reference
 
+> **Security Note:** Rustant follows a **keychain-first** credential model aligned with its Security pillar. API keys should be stored in the OS keychain via `rustant setup`, not as environment variables. Environment variables are supported as a **fallback for CI/CD environments** where keychain access is unavailable.
+
 Rustant reads configuration from environment variables using a `RUSTANT_` prefix with double-underscore (`__`) nesting for nested config keys. It also reads service-specific variables directly for API keys and integrations.
 
 ## Configuration Override Pattern
@@ -32,9 +34,9 @@ The double underscore (`__`) separates nested config levels. Examples:
 
 Environment variables take priority over config files but are overridden by CLI flags.
 
-## LLM Provider API Keys
+## LLM Provider API Keys (CI/CD Fallback)
 
-These are the primary API key variables checked by Rustant. The `api_key_env` config field specifies which variable the LLM provider reads.
+These environment variables are checked as a **fallback** when no keychain credential is found. For interactive use, prefer `rustant setup` which stores keys in the OS keychain.
 
 | Variable | Provider | Description |
 |----------|----------|-------------|
@@ -110,15 +112,15 @@ SRE tools can also be configured via `.rustant/sre_config.json` or the `[sre]` c
 
 ## .env File Support
 
-Rustant loads `.env` files from the working directory via `dotenvy`. Place a `.env` file in your project root:
+Rustant loads `.env` files from the working directory via `dotenvy`. Place a `.env` file in your project root for **non-secret** configuration overrides:
 
 ```bash
-# .env
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
+# .env — for configuration overrides only
 RUSTANT_SAFETY__APPROVAL_MODE=cautious
 RUSTANT_LLM__MODEL=claude-sonnet-4-20250514
 ```
+
+> **Prefer OS keychain for API keys.** Use `rustant setup` to store secrets in the OS keychain rather than `.env` files. If you must use `.env` for CI/CD, ensure `.env` is in your `.gitignore`.
 
 The `.env` file is loaded before any other configuration, so its values can be overridden by workspace config, user config, and CLI flags.
 
@@ -135,7 +137,7 @@ From highest to lowest priority:
 
 ## Security Notes
 
-- Never commit API keys to version control. Use `.env` files (added to `.gitignore`) or OS keychain storage.
+- **Store API keys in the OS keychain** via `rustant setup` (preferred). Never commit API keys to version control.
 - Rustant auto-migrates plaintext channel secrets in config files to the OS keychain on first run.
 - The secret redaction system (60+ patterns + Shannon entropy) scrubs API keys from all LLM context, memory, audit logs, and MCP output.
 - Denied paths in the default safety config include `.env*`, `**/*.key`, `**/secrets/**`, and other sensitive patterns.

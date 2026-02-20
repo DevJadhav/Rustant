@@ -14,7 +14,7 @@ Rustant uses layered configuration via [figment](https://docs.rs/figment). Confi
 |-----|------|---------|-------------|
 | `provider` | string | `"openai"` | Provider: `openai`, `anthropic`, `gemini`, `ollama` |
 | `model` | string | `"gpt-4o"` | Model identifier |
-| `api_key_env` | string | `"OPENAI_API_KEY"` | Env var containing the API key |
+| `api_key_env` | string | `"OPENAI_API_KEY"` | Env var fallback for API key (CI/CD only; prefer `credential_store_key` with OS keychain) |
 | `api_key` | string? | `null` | Direct API key (supports `keychain:` prefix) |
 | `base_url` | string? | `null` | Base URL override (e.g., for Azure or Ollama) |
 | `max_tokens` | int | `4096` | Maximum tokens per response |
@@ -42,7 +42,8 @@ Rustant uses layered configuration via [figment](https://docs.rs/figment). Confi
 [[llm.fallback_providers]]
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"
-api_key_env = "ANTHROPIC_API_KEY"
+credential_store_key = "anthropic"  # OS keychain (preferred)
+# api_key_env = "ANTHROPIC_API_KEY"  # CI/CD fallback only
 # base_url = "https://custom-endpoint.example.com"
 ```
 
@@ -298,13 +299,13 @@ Per-channel overrides with the same keys as `[intelligence.defaults]`.
 [[council.members]]
 provider = "openai"
 model = "gpt-4o"
-api_key_env = "OPENAI_API_KEY"
+credential_store_key = "openai"  # OS keychain (preferred)
 weight = 1.0
 
 [[council.members]]
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"
-api_key_env = "ANTHROPIC_API_KEY"
+credential_store_key = "anthropic"  # OS keychain (preferred)
 weight = 1.0
 
 [[council.members]]
@@ -467,7 +468,7 @@ Stored as raw JSON to avoid circular dependency with the rustant-security crate.
 [llm]
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"
-api_key_env = "ANTHROPIC_API_KEY"
+credential_store_key = "anthropic"  # OS keychain (set via `rustant setup`)
 use_streaming = true
 max_tokens = 8192
 temperature = 0.5

@@ -87,7 +87,7 @@ This checks: LLM connectivity, tool registration, config validation, workspace w
 ### Build / Development
 
 **"Compilation errors"**
-- Ensure Rust 1.85+: `rustup update stable`
+- Ensure Rust 1.88+: `rustup update stable`
 - Install system deps (Linux): `sudo apt-get install -y cmake pkg-config libdbus-1-dev libssl-dev`
 - Clean build: `cargo clean && cargo build --workspace`
 
