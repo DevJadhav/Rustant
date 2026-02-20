@@ -349,7 +349,8 @@ impl MoeRouter {
         // 6. MERGE tool sets from selected experts
         let shared_tools = ExpertId::shared_tools();
         let mut routed_tools = Vec::new();
-        let mut seen_tools: std::collections::HashSet<String> = shared_tools.iter().cloned().collect();
+        let mut seen_tools: std::collections::HashSet<String> =
+            shared_tools.iter().cloned().collect();
 
         for (rank, (expert_id, _score)) in selected_experts.iter().enumerate() {
             let precision = match rank {
@@ -365,7 +366,11 @@ impl MoeRouter {
                     .filter(|t| !ExpertId::shared_tools().contains(t))
                     .collect()
             } else {
-                expert_id.domain_tools().iter().map(|s| s.to_string()).collect::<Vec<_>>()
+                expert_id
+                    .domain_tools()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
             };
 
             for tool in domain_tools {
@@ -466,11 +471,7 @@ impl MoeRouter {
     }
 
     /// Score all experts and select Top-K above activation threshold.
-    fn score_and_select(
-        &self,
-        task: &str,
-        heuristic_expert: ExpertId,
-    ) -> Vec<(ExpertId, f64)> {
+    fn score_and_select(&self, task: &str, heuristic_expert: ExpertId) -> Vec<(ExpertId, f64)> {
         let lower = task.to_lowercase();
         let mut scored: Vec<(ExpertId, f64, f64)> = Vec::with_capacity(20);
 
@@ -537,11 +538,7 @@ impl MoeRouter {
 
     /// Update expert bias based on success tracking (DeepSeek auxiliary-loss-free).
     fn update_bias(&mut self) {
-        let total_routes = self
-            .success_tracker
-            .values()
-            .map(|s| s.total)
-            .sum::<u64>();
+        let total_routes = self.success_tracker.values().map(|s| s.total).sum::<u64>();
 
         if total_routes == 0 {
             self.routes_since_bias_update = 0;
@@ -739,7 +736,13 @@ mod tests {
         // Should go to a security expert
         let primary = result.primary_expert();
         assert!(
-            matches!(primary, ExpertId::SecScan | ExpertId::SecReview | ExpertId::SecCompliance | ExpertId::SecIncident),
+            matches!(
+                primary,
+                ExpertId::SecScan
+                    | ExpertId::SecReview
+                    | ExpertId::SecCompliance
+                    | ExpertId::SecIncident
+            ),
             "Expected Security expert, got {primary:?}"
         );
     }
@@ -837,14 +840,25 @@ mod tests {
         // Should select multiple experts (ML + Security)
         let experts: Vec<ExpertId> = result.selected_experts.iter().map(|(id, _)| *id).collect();
         // At least one ML and one Security expert
-        let has_ml = experts.iter().any(|e| matches!(e,
-            ExpertId::MLTrain | ExpertId::MLData | ExpertId::MLInference
-            | ExpertId::MLSafety | ExpertId::MLResearch
-        ));
-        let has_sec = experts.iter().any(|e| matches!(e,
-            ExpertId::SecScan | ExpertId::SecReview | ExpertId::SecCompliance
-            | ExpertId::SecIncident
-        ));
+        let has_ml = experts.iter().any(|e| {
+            matches!(
+                e,
+                ExpertId::MLTrain
+                    | ExpertId::MLData
+                    | ExpertId::MLInference
+                    | ExpertId::MLSafety
+                    | ExpertId::MLResearch
+            )
+        });
+        let has_sec = experts.iter().any(|e| {
+            matches!(
+                e,
+                ExpertId::SecScan
+                    | ExpertId::SecReview
+                    | ExpertId::SecCompliance
+                    | ExpertId::SecIncident
+            )
+        });
         assert!(
             has_ml || has_sec,
             "Expected cross-domain routing, got: {experts:?}"
@@ -945,7 +959,10 @@ mod tests {
         let result2 = router.route("train model with LoRA adapter");
         assert!(result2.cache_hit);
         assert_eq!(result1.primary_expert(), result2.primary_expert());
-        assert_eq!(result1.selected_experts.len(), result2.selected_experts.len());
+        assert_eq!(
+            result1.selected_experts.len(),
+            result2.selected_experts.len()
+        );
     }
 
     #[test]

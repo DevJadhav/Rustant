@@ -842,10 +842,15 @@ impl TaskClassification {
         {
             return Self::Workflow("ml_rag".into());
         }
-        if lower.contains("inference") && (lower.contains("model") || lower.contains("serve") || lower.contains("batch")) {
+        if lower.contains("inference")
+            && (lower.contains("model") || lower.contains("serve") || lower.contains("batch"))
+        {
             return Self::Workflow("ml_inference".into());
         }
-        if lower.contains("training data") || lower.contains("data pipeline") || lower.contains("feature engineer") {
+        if lower.contains("training data")
+            || lower.contains("data pipeline")
+            || lower.contains("feature engineer")
+        {
             return Self::Workflow("ml_data".into());
         }
         if lower.contains("embedding")

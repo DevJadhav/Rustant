@@ -198,7 +198,10 @@ impl ExpertId {
             | "dependency_audit" | "fullstack_verify" => ExpertId::DevTools,
 
             // macOS briefing workflows
-            "morning_briefing" | "daily_briefing_full" | "end_of_day_summary" | "email_triage"
+            "morning_briefing"
+            | "daily_briefing_full"
+            | "end_of_day_summary"
+            | "email_triage"
             | "meeting_recorder" => ExpertId::MacOSApps,
 
             // Screen automation
@@ -215,9 +218,16 @@ impl ExpertId {
             "ml_eval" | "ml_research" | "ml_engineering" => ExpertId::MLResearch,
 
             // Productivity workflows
-            "knowledge_graph" | "experiment_tracking" | "code_analysis" | "content_pipeline"
-            | "skill_development" | "career_planning" | "life_planning" | "privacy_audit"
-            | "self_improvement_loop" | "system_monitoring" => ExpertId::Productivity,
+            "knowledge_graph"
+            | "experiment_tracking"
+            | "code_analysis"
+            | "content_pipeline"
+            | "skill_development"
+            | "career_planning"
+            | "life_planning"
+            | "privacy_audit"
+            | "self_improvement_loop"
+            | "system_monitoring" => ExpertId::Productivity,
 
             _ => ExpertId::FileOps,
         }
@@ -559,94 +569,252 @@ impl ExpertId {
     pub fn keywords(&self) -> &'static [&'static str] {
         match self {
             ExpertId::FileOps => &[
-                "file", "read", "write", "create", "delete", "list", "search",
-                "directory", "folder", "path", "move", "rename", "organize",
-                "compress", "document", "pdf",
+                "file",
+                "read",
+                "write",
+                "create",
+                "delete",
+                "list",
+                "search",
+                "directory",
+                "folder",
+                "path",
+                "move",
+                "rename",
+                "organize",
+                "compress",
+                "document",
+                "pdf",
             ],
             ExpertId::Git => &[
-                "git", "commit", "diff", "branch", "merge", "push", "pull",
-                "status", "log", "stash", "rebase", "cherry-pick", "codebase",
+                "git",
+                "commit",
+                "diff",
+                "branch",
+                "merge",
+                "push",
+                "pull",
+                "status",
+                "log",
+                "stash",
+                "rebase",
+                "cherry-pick",
+                "codebase",
             ],
             ExpertId::MacOSApps => &[
-                "calendar", "reminder", "notes", "mail", "email", "music",
-                "shortcut", "photo", "homekit", "say", "speak", "notification",
-                "meeting", "briefing", "todo",
+                "calendar",
+                "reminder",
+                "notes",
+                "mail",
+                "email",
+                "music",
+                "shortcut",
+                "photo",
+                "homekit",
+                "say",
+                "speak",
+                "notification",
+                "meeting",
+                "briefing",
+                "todo",
             ],
             ExpertId::MacOSSystem => &[
-                "app", "launch", "quit", "clipboard", "screenshot",
-                "system info", "battery", "cpu", "disk", "spotlight",
-                "finder", "focus mode", "dnd",
+                "app",
+                "launch",
+                "quit",
+                "clipboard",
+                "screenshot",
+                "system info",
+                "battery",
+                "cpu",
+                "disk",
+                "spotlight",
+                "finder",
+                "focus mode",
+                "dnd",
             ],
             ExpertId::ScreenUI => &[
-                "gui", "scripting", "accessibility", "ocr", "screen",
-                "click", "button", "window", "contacts", "safari",
-                "ui element", "automation",
+                "gui",
+                "scripting",
+                "accessibility",
+                "ocr",
+                "screen",
+                "click",
+                "button",
+                "window",
+                "contacts",
+                "safari",
+                "ui element",
+                "automation",
             ],
             ExpertId::Communication => &[
-                "imessage", "message", "sms", "text", "slack", "siri",
-                "voice command", "chat", "send message",
+                "imessage",
+                "message",
+                "sms",
+                "text",
+                "slack",
+                "siri",
+                "voice command",
+                "chat",
+                "send message",
             ],
             ExpertId::WebBrowse => &[
-                "browser", "web", "fetch", "http", "url", "navigate",
-                "webpage", "download", "api", "arxiv",
+                "browser", "web", "fetch", "http", "url", "navigate", "webpage", "download", "api",
+                "arxiv",
             ],
             ExpertId::DevTools => &[
-                "scaffold", "dev server", "database", "test", "lint",
-                "template", "build", "compile", "framework", "project",
-                "code review", "refactor",
+                "scaffold",
+                "dev server",
+                "database",
+                "test",
+                "lint",
+                "template",
+                "build",
+                "compile",
+                "framework",
+                "project",
+                "code review",
+                "refactor",
             ],
             ExpertId::Productivity => &[
-                "knowledge graph", "experiment", "content", "skill",
-                "career", "life plan", "privacy", "self improvement",
-                "pomodoro", "inbox", "productivity",
+                "knowledge graph",
+                "experiment",
+                "content",
+                "skill",
+                "career",
+                "life plan",
+                "privacy",
+                "self improvement",
+                "pomodoro",
+                "inbox",
+                "productivity",
             ],
             ExpertId::SecScan => &[
-                "sast", "sca", "secret", "vulnerability", "scan",
-                "supply chain", "container", "dockerfile", "iac",
+                "sast",
+                "sca",
+                "secret",
+                "vulnerability",
+                "scan",
+                "supply chain",
+                "container",
+                "dockerfile",
+                "iac",
                 "security scan",
             ],
             ExpertId::SecReview => &[
-                "code review", "quality", "complexity", "dead code",
-                "duplication", "tech debt", "autofix", "suggest fix",
+                "code review",
+                "quality",
+                "complexity",
+                "dead code",
+                "duplication",
+                "tech debt",
+                "autofix",
+                "suggest fix",
             ],
             ExpertId::SecCompliance => &[
-                "license", "sbom", "compliance", "policy", "risk",
-                "audit", "regulation", "standard",
+                "license",
+                "sbom",
+                "compliance",
+                "policy",
+                "risk",
+                "audit",
+                "regulation",
+                "standard",
             ],
             ExpertId::SecIncident => &[
-                "alert", "triage", "incident", "respond", "log",
-                "threat", "k8s", "terraform", "mitre",
+                "alert",
+                "triage",
+                "incident",
+                "respond",
+                "log",
+                "threat",
+                "k8s",
+                "terraform",
+                "mitre",
             ],
             ExpertId::MLTrain => &[
-                "train", "fine-tune", "finetune", "lora", "qlora", "adapter",
-                "quantize", "quantization", "checkpoint", "hyperparameter",
-                "epoch", "gradient", "backprop", "neural", "model",
+                "train",
+                "fine-tune",
+                "finetune",
+                "lora",
+                "qlora",
+                "adapter",
+                "quantize",
+                "quantization",
+                "checkpoint",
+                "hyperparameter",
+                "epoch",
+                "gradient",
+                "backprop",
+                "neural",
+                "model",
             ],
             ExpertId::MLData => &[
-                "dataset", "data pipeline", "schema", "transform", "validate",
-                "feature", "feature store", "lineage", "data source",
+                "dataset",
+                "data pipeline",
+                "schema",
+                "transform",
+                "validate",
+                "feature",
+                "feature store",
+                "lineage",
+                "data source",
                 "training data",
             ],
             ExpertId::MLInference => &[
-                "rag", "retrieval", "inference", "serve", "predict",
-                "embed", "vector", "chunk", "rerank", "pipeline",
+                "rag",
+                "retrieval",
+                "inference",
+                "serve",
+                "predict",
+                "embed",
+                "vector",
+                "chunk",
+                "rerank",
+                "pipeline",
             ],
             ExpertId::MLSafety => &[
-                "ai safety", "pii", "bias", "fairness", "alignment",
-                "adversarial", "provenance", "audit trail", "red team",
+                "ai safety",
+                "pii",
+                "bias",
+                "fairness",
+                "alignment",
+                "adversarial",
+                "provenance",
+                "audit trail",
+                "red team",
             ],
             ExpertId::MLResearch => &[
-                "research", "evaluate", "benchmark", "explain",
-                "reasoning", "interpretab", "explainab", "compare model",
+                "research",
+                "evaluate",
+                "benchmark",
+                "explain",
+                "reasoning",
+                "interpretab",
+                "explainab",
+                "compare model",
                 "eval harness",
             ],
             ExpertId::SRE => &[
-                "alert", "deployment", "prometheus", "kubernetes", "k8s",
-                "oncall", "monitor", "uptime", "sre", "incident",
+                "alert",
+                "deployment",
+                "prometheus",
+                "kubernetes",
+                "k8s",
+                "oncall",
+                "monitor",
+                "uptime",
+                "sre",
+                "incident",
             ],
             ExpertId::Research => &[
-                "research", "investigate", "analyze", "synthesize",
-                "literature", "source", "deep research",
+                "research",
+                "investigate",
+                "analyze",
+                "synthesize",
+                "literature",
+                "source",
+                "deep research",
             ],
         }
     }
@@ -687,41 +855,85 @@ impl ExpertId {
     pub fn system_prompt_exclusions(&self) -> &'static [&'static str] {
         match self {
             // ML experts don't need macOS/GUI/calendar instructions
-            ExpertId::MLTrain | ExpertId::MLData | ExpertId::MLInference
-            | ExpertId::MLSafety | ExpertId::MLResearch => &[
-                "AppleScript", "macOS", "Calendar", "Reminders", "Notes.app",
-                "GUI scripting", "accessibility", "HomeKit", "Photos.app",
-                "Safari", "iMessage", "Siri", "meeting_recorder",
+            ExpertId::MLTrain
+            | ExpertId::MLData
+            | ExpertId::MLInference
+            | ExpertId::MLSafety
+            | ExpertId::MLResearch => &[
+                "AppleScript",
+                "macOS",
+                "Calendar",
+                "Reminders",
+                "Notes.app",
+                "GUI scripting",
+                "accessibility",
+                "HomeKit",
+                "Photos.app",
+                "Safari",
+                "iMessage",
+                "Siri",
+                "meeting_recorder",
             ],
             // Security experts don't need ML/macOS instructions
-            ExpertId::SecScan | ExpertId::SecReview | ExpertId::SecCompliance
+            ExpertId::SecScan
+            | ExpertId::SecReview
+            | ExpertId::SecCompliance
             | ExpertId::SecIncident => &[
-                "AppleScript", "macOS", "Calendar", "Reminders", "Notes.app",
-                "HomeKit", "Photos.app", "Safari", "iMessage", "Siri",
-                "LoRA", "quantiz", "finetun", "RAG", "embedding",
+                "AppleScript",
+                "macOS",
+                "Calendar",
+                "Reminders",
+                "Notes.app",
+                "HomeKit",
+                "Photos.app",
+                "Safari",
+                "iMessage",
+                "Siri",
+                "LoRA",
+                "quantiz",
+                "finetun",
+                "RAG",
+                "embedding",
             ],
             // SRE doesn't need macOS/ML-specific instructions
             ExpertId::SRE => &[
-                "AppleScript", "Calendar", "Reminders", "Notes.app",
-                "HomeKit", "Photos.app", "Safari", "iMessage", "Siri",
-                "LoRA", "quantiz", "finetun",
+                "AppleScript",
+                "Calendar",
+                "Reminders",
+                "Notes.app",
+                "HomeKit",
+                "Photos.app",
+                "Safari",
+                "iMessage",
+                "Siri",
+                "LoRA",
+                "quantiz",
+                "finetun",
             ],
             // macOS experts don't need ML/SRE instructions
-            ExpertId::MacOSApps | ExpertId::MacOSSystem | ExpertId::ScreenUI
+            ExpertId::MacOSApps
+            | ExpertId::MacOSSystem
+            | ExpertId::ScreenUI
             | ExpertId::Communication => &[
-                "kubernetes", "prometheus", "terraform",
-                "LoRA", "quantiz", "finetun", "training data",
-                "SAST", "SBOM", "CycloneDX",
+                "kubernetes",
+                "prometheus",
+                "terraform",
+                "LoRA",
+                "quantiz",
+                "finetun",
+                "training data",
+                "SAST",
+                "SBOM",
+                "CycloneDX",
             ],
             // File/Git/Dev experts are generic — minimal exclusions
-            ExpertId::FileOps | ExpertId::Git | ExpertId::DevTools => &[
-                "HomeKit", "Photos.app", "Siri",
-                "LoRA", "quantiz",
-            ],
+            ExpertId::FileOps | ExpertId::Git | ExpertId::DevTools => {
+                &["HomeKit", "Photos.app", "Siri", "LoRA", "quantiz"]
+            }
             // Web/Productivity/Research are broad — minimal exclusions
-            ExpertId::WebBrowse | ExpertId::Productivity | ExpertId::Research => &[
-                "HomeKit", "Photos.app",
-            ],
+            ExpertId::WebBrowse | ExpertId::Productivity | ExpertId::Research => {
+                &["HomeKit", "Photos.app"]
+            }
         }
     }
 }

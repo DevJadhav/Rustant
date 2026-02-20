@@ -4,12 +4,12 @@
 //! and provides an OpenAI-compatible implementation with streaming support.
 
 use crate::error::LlmError;
-use std::collections::HashMap;
 use crate::types::{
     CompletionRequest, CompletionResponse, Content, CostEstimate, Message, Role, StreamEvent,
     TokenUsage, ToolDefinition,
 };
 use async_trait::async_trait;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::mpsc;
@@ -447,10 +447,7 @@ impl Brain {
     /// Providers that support deferred tool loading (e.g., Anthropic Tool Search)
     /// will map Half/Quarter precision tools to `defer_loading: true`, reducing
     /// prompt token cost for secondary/tertiary expert tools to zero.
-    pub fn set_tool_precision_hints(
-        &mut self,
-        hints: HashMap<String, crate::moe::ToolPrecision>,
-    ) {
+    pub fn set_tool_precision_hints(&mut self, hints: HashMap<String, crate::moe::ToolPrecision>) {
         self.tool_precision_hints = hints;
     }
 
@@ -482,7 +479,9 @@ impl Brain {
         // Walk backwards to find the last tool result
         for msg in conversation.iter().rev() {
             match &msg.content {
-                Content::ToolResult { output, is_error, .. } => {
+                Content::ToolResult {
+                    output, is_error, ..
+                } => {
                     if *is_error || output.len() < 100 || output.len() > 50_000 {
                         return None;
                     }
@@ -491,7 +490,10 @@ impl Brain {
                 Content::MultiPart { parts } => {
                     // Check the last ToolResult in a multi-part message
                     for part in parts.iter().rev() {
-                        if let Content::ToolResult { output, is_error, .. } = part {
+                        if let Content::ToolResult {
+                            output, is_error, ..
+                        } = part
+                        {
                             if *is_error || output.len() < 100 || output.len() > 50_000 {
                                 return None;
                             }

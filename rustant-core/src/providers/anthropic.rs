@@ -125,8 +125,7 @@ impl AnthropicProvider {
             {
                 if let Some(content) = first_user["content"].as_array_mut() {
                     if let Some(last_block) = content.last_mut() {
-                        last_block["cache_control"] =
-                            serde_json::json!({"type": "ephemeral"});
+                        last_block["cache_control"] = serde_json::json!({"type": "ephemeral"});
                     }
                 }
             }
@@ -171,7 +170,9 @@ impl AnthropicProvider {
                 // Hybrid MoE + Tool Search: use precision hints to decide defer_loading
                 tools
                     .iter()
-                    .map(|tool| Self::tool_definition_to_json_hybrid(tool, &request.tool_precision_hints))
+                    .map(|tool| {
+                        Self::tool_definition_to_json_hybrid(tool, &request.tool_precision_hints)
+                    })
                     .collect()
             } else if use_tool_search {
                 // Legacy path: defer non-core tools
@@ -187,14 +188,19 @@ impl AnthropicProvider {
             // This gives Claude the ability to discover deferred tools on demand.
             if use_tool_search || has_precision_hints {
                 let has_deferred = tools_json.iter().any(|t| {
-                    t.get("defer_loading").and_then(|v| v.as_bool()).unwrap_or(false)
+                    t.get("defer_loading")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
                 });
                 if has_deferred {
                     // Insert the BM25 tool search tool (better for natural language queries)
-                    tools_json.insert(0, serde_json::json!({
-                        "type": "tool_search_tool_bm25_20251119",
-                        "name": "tool_search"
-                    }));
+                    tools_json.insert(
+                        0,
+                        serde_json::json!({
+                            "type": "tool_search_tool_bm25_20251119",
+                            "name": "tool_search"
+                        }),
+                    );
                 }
             }
 
@@ -992,7 +998,8 @@ impl LlmProvider for AnthropicProvider {
             .header("content-type", "application/json");
 
         // Build combined beta header string
-        let beta_header = Self::build_beta_header(caching_enabled, &self.model, tool_search_enabled);
+        let beta_header =
+            Self::build_beta_header(caching_enabled, &self.model, tool_search_enabled);
         if !beta_header.is_empty() {
             req_builder = req_builder.header("anthropic-beta", &beta_header);
         }
@@ -1061,7 +1068,8 @@ impl LlmProvider for AnthropicProvider {
             .header("content-type", "application/json");
 
         // Build combined beta header string
-        let beta_header = Self::build_beta_header(caching_enabled, &self.model, tool_search_enabled);
+        let beta_header =
+            Self::build_beta_header(caching_enabled, &self.model, tool_search_enabled);
         if !beta_header.is_empty() {
             req_builder = req_builder.header("anthropic-beta", &beta_header);
         }
@@ -2278,10 +2286,7 @@ mod tests {
             parameters: serde_json::json!({"type": "object"}),
         };
         let mut hints = std::collections::HashMap::new();
-        hints.insert(
-            "file_read".to_string(),
-            crate::moe::ToolPrecision::Quarter,
-        );
+        hints.insert("file_read".to_string(), crate::moe::ToolPrecision::Quarter);
 
         let json = AnthropicProvider::tool_definition_to_json_hybrid(&tool, &hints);
         // Even with Quarter precision hint, CORE_TOOLS are never deferred
@@ -2310,10 +2315,7 @@ mod tests {
             parameters: serde_json::json!({"type": "object"}),
         };
         let mut hints = std::collections::HashMap::new();
-        hints.insert(
-            "security_scan".to_string(),
-            crate::moe::ToolPrecision::Half,
-        );
+        hints.insert("security_scan".to_string(), crate::moe::ToolPrecision::Half);
 
         let json = AnthropicProvider::tool_definition_to_json_hybrid(&tool, &hints);
         assert_eq!(json["defer_loading"], serde_json::json!(true));
@@ -2327,10 +2329,7 @@ mod tests {
             parameters: serde_json::json!({"type": "object"}),
         };
         let mut hints = std::collections::HashMap::new();
-        hints.insert(
-            "kubernetes".to_string(),
-            crate::moe::ToolPrecision::Quarter,
-        );
+        hints.insert("kubernetes".to_string(), crate::moe::ToolPrecision::Quarter);
 
         let json = AnthropicProvider::tool_definition_to_json_hybrid(&tool, &hints);
         assert_eq!(json["defer_loading"], serde_json::json!(true));
@@ -2396,10 +2395,7 @@ mod tests {
     fn test_build_request_body_injects_tool_search_entry() {
         let provider = make_provider();
         let mut hints = std::collections::HashMap::new();
-        hints.insert(
-            "security_scan".to_string(),
-            crate::moe::ToolPrecision::Half,
-        );
+        hints.insert("security_scan".to_string(), crate::moe::ToolPrecision::Half);
         hints.insert("file_read".to_string(), crate::moe::ToolPrecision::Full);
 
         let request = CompletionRequest {
@@ -2424,10 +2420,7 @@ mod tests {
         let tools = body["tools"].as_array().unwrap();
 
         // First entry should be the tool_search_tool (BM25 variant)
-        assert_eq!(
-            tools[0]["type"],
-            "tool_search_tool_bm25_20251119"
-        );
+        assert_eq!(tools[0]["type"], "tool_search_tool_bm25_20251119");
         assert_eq!(tools[0]["name"], "tool_search");
 
         // file_read (core tool) should NOT be deferred
@@ -2435,10 +2428,7 @@ mod tests {
         assert!(file_read.get("defer_loading").is_none());
 
         // security_scan (Half precision) should be deferred
-        let sec_scan = tools
-            .iter()
-            .find(|t| t["name"] == "security_scan")
-            .unwrap();
+        let sec_scan = tools.iter().find(|t| t["name"] == "security_scan").unwrap();
         assert_eq!(sec_scan["defer_loading"], true);
     }
 
@@ -2458,7 +2448,9 @@ mod tests {
             Content::MultiPart { ref parts } => {
                 assert_eq!(parts.len(), 2);
                 assert!(matches!(&parts[0], Content::Text { text } if text.contains("security")));
-                assert!(matches!(&parts[1], Content::ToolCall { name, .. } if name == "security_scan"));
+                assert!(
+                    matches!(&parts[1], Content::ToolCall { name, .. } if name == "security_scan")
+                );
             }
             _ => panic!("Expected MultiPart content"),
         }

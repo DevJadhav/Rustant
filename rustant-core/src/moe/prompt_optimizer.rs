@@ -184,11 +184,7 @@ impl PromptOptimizer {
     ///
     /// Only non-empty lines containing keywords are removed; headings and structural
     /// lines (starting with `#` or `---`) are always preserved to maintain readability.
-    pub fn strip_irrelevant_sections(
-        &self,
-        prompt: &str,
-        exclusions: &[&str],
-    ) -> String {
+    pub fn strip_irrelevant_sections(&self, prompt: &str, exclusions: &[&str]) -> String {
         if exclusions.is_empty() {
             return prompt.to_string();
         }
@@ -209,7 +205,9 @@ impl PromptOptimizer {
                 }
                 // Check if line contains any exclusion keyword
                 let lower = trimmed.to_lowercase();
-                !exclusions_lower.iter().any(|exc| lower.contains(exc.as_str()))
+                !exclusions_lower
+                    .iter()
+                    .any(|exc| lower.contains(exc.as_str()))
             })
             .collect::<Vec<_>>()
             .join("\n")

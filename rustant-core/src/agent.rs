@@ -3981,7 +3981,10 @@ impl Agent {
         // of whether the assistant has consumed it. This catches long-lived tool
         // outputs that persist across many iterations.
         let stale_age = self.config.memory.window_size * 2;
-        let stale_masked = self.memory.short_term.mask_stale_observations(stale_age, 200);
+        let stale_masked = self
+            .memory
+            .short_term
+            .mask_stale_observations(stale_age, 200);
         if stale_masked > 0 {
             debug!(stale_masked, "Masked stale tool observations by age");
         }

@@ -122,13 +122,22 @@ impl EnhancedRedactor {
         // Cloud providers (beyond BasicRedactor's AWS access key)
         let extra: Vec<(&str, &str)> = vec![
             // AWS secret key
-            (r#"(?i)(?:aws_secret_access_key|aws_secret)\s*[=:]\s*['"]?[A-Za-z0-9/+=]{40}['"]?"#, "AWS_SECRET_KEY"),
+            (
+                r#"(?i)(?:aws_secret_access_key|aws_secret)\s*[=:]\s*['"]?[A-Za-z0-9/+=]{40}['"]?"#,
+                "AWS_SECRET_KEY",
+            ),
             // GCP service account
-            (r#"(?i)"type"\s*:\s*"service_account""#, "GCP_SERVICE_ACCOUNT"),
+            (
+                r#"(?i)"type"\s*:\s*"service_account""#,
+                "GCP_SERVICE_ACCOUNT",
+            ),
             // GCP API key
             (r"AIza[0-9A-Za-z\-_]{35}", "GCP_API_KEY"),
             // Azure storage key
-            (r"(?i)(?:DefaultEndpointsProtocol|AccountKey)\s*=\s*[A-Za-z0-9+/=]{44,}", "AZURE_STORAGE_KEY"),
+            (
+                r"(?i)(?:DefaultEndpointsProtocol|AccountKey)\s*=\s*[A-Za-z0-9+/=]{44,}",
+                "AZURE_STORAGE_KEY",
+            ),
             // GitLab token
             (r"glpat-[A-Za-z0-9\-_]{20,}", "GITLAB_TOKEN"),
             // Stripe publishable
@@ -136,33 +145,54 @@ impl EnhancedRedactor {
             // Stripe restricted
             (r"rk_live_[a-zA-Z0-9]{24,}", "STRIPE_RESTRICTED"),
             // Slack webhook
-            (r"https://hooks\.slack\.com/services/T[A-Z0-9]{8,}/B[A-Z0-9]{8,}/[A-Za-z0-9]{24,}", "SLACK_WEBHOOK"),
+            (
+                r"https://hooks\.slack\.com/services/T[A-Z0-9]{8,}/B[A-Z0-9]{8,}/[A-Za-z0-9]{24,}",
+                "SLACK_WEBHOOK",
+            ),
             // Discord token
             (r"[MN][A-Za-z\d]{23,}\.[\w-]{6}\.[\w-]{27}", "DISCORD_TOKEN"),
             // Twilio
             (r"SK[0-9a-fA-F]{32}", "TWILIO_API_KEY"),
             // SendGrid
-            (r"SG\.[A-Za-z0-9\-_]{22,}\.[A-Za-z0-9\-_]{43,}", "SENDGRID_API_KEY"),
+            (
+                r"SG\.[A-Za-z0-9\-_]{22,}\.[A-Za-z0-9\-_]{43,}",
+                "SENDGRID_API_KEY",
+            ),
             // NPM token
             (r"npm_[A-Za-z0-9]{36}", "NPM_TOKEN"),
             // PyPI token
             (r"pypi-[A-Za-z0-9\-_]{100,}", "PYPI_TOKEN"),
             // Heroku
-            (r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", "HEROKU_API_KEY"),
+            (
+                r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+                "HEROKU_API_KEY",
+            ),
             // Database connection strings (postgres/mysql/mongodb)
-            (r"(?i)(?:postgres|mysql|mongodb)://[^\s]{10,}", "DATABASE_URL"),
+            (
+                r"(?i)(?:postgres|mysql|mongodb)://[^\s]{10,}",
+                "DATABASE_URL",
+            ),
             // SSH private key
             (r"-----BEGIN OPENSSH PRIVATE KEY-----", "SSH_PRIVATE_KEY"),
             // PGP private key
             (r"-----BEGIN PGP PRIVATE KEY BLOCK-----", "PGP_PRIVATE_KEY"),
             // Generic secret in env-style files
-            (r#"(?i)(?:secret|credential|auth)[_-]?(?:key|token|password)\s*[:=]\s*['"]?[^\s'"]{8,}['"]?"#, "GENERIC_SECRET"),
+            (
+                r#"(?i)(?:secret|credential|auth)[_-]?(?:key|token|password)\s*[:=]\s*['"]?[^\s'"]{8,}['"]?"#,
+                "GENERIC_SECRET",
+            ),
             // Anthropic API key
             (r"sk-ant-[A-Za-z0-9\-_]{40,}", "ANTHROPIC_API_KEY"),
             // OpenAI API key
-            (r"sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}", "OPENAI_API_KEY"),
+            (
+                r"sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}",
+                "OPENAI_API_KEY",
+            ),
             // Datadog
-            (r#"(?i)(?:dd|datadog)[_-]?(?:api[_-]?key|app[_-]?key)\s*[:=]\s*['"]?[a-f0-9]{32,}['"]?"#, "DATADOG_KEY"),
+            (
+                r#"(?i)(?:dd|datadog)[_-]?(?:api[_-]?key|app[_-]?key)\s*[:=]\s*['"]?[a-f0-9]{32,}['"]?"#,
+                "DATADOG_KEY",
+            ),
         ];
         for (pattern_str, name) in extra {
             if let Ok(re) = regex::Regex::new(pattern_str) {
@@ -325,6 +355,10 @@ mod tests {
     fn test_enhanced_redactor_pattern_count() {
         let redactor = EnhancedRedactor::new();
         // Basic (9) + Enhanced (21) = 30 patterns
-        assert!(redactor.patterns.len() >= 25, "Expected >= 25 patterns, got {}", redactor.patterns.len());
+        assert!(
+            redactor.patterns.len() >= 25,
+            "Expected >= 25 patterns, got {}",
+            redactor.patterns.len()
+        );
     }
 }

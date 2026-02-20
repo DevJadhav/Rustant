@@ -487,8 +487,7 @@ impl ShortTermMemory {
                 ..
             } = self.messages[i].content
             {
-                output.len() >= min_chars && !is_error
-                    && !output.starts_with("[Tool result:")
+                output.len() >= min_chars && !is_error && !output.starts_with("[Tool result:")
             } else {
                 false
             };
