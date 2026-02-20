@@ -328,8 +328,7 @@ mod tests {
         let redactor = EnhancedRedactor::new();
         let prefix = "SG";
         let text = format!(
-            "SENDGRID_KEY={}.abcdefghijklmnopqrstuv.ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq",
-            prefix
+            "SENDGRID_KEY={prefix}.abcdefghijklmnopqrstuv.ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq",
         );
         let result = redactor.redact(&text);
         assert!(result.contains("[REDACTED:SENDGRID_API_KEY]"));
