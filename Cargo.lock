@@ -5703,6 +5703,7 @@ dependencies = [
  "ignore",
  "keyring",
  "lettre",
+ "lru",
  "native-tls",
  "open",
  "openssl",

@@ -416,7 +416,7 @@ impl std::fmt::Display for AgentStatus {
 /// Used by `tool_routing_hint()` and `auto_correct_tool_call()` to avoid
 /// repeated `.contains()` string matching on every tool call (~300 calls
 /// per iteration without caching).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TaskClassification {
     Calendar,
     Reminders,
@@ -460,6 +460,7 @@ pub enum TaskClassification {
     Spotlight,
     FocusMode,
     Finder,
+    DeepResearch,
     Workflow(String),
     General,
 }
@@ -721,6 +722,19 @@ impl TaskClassification {
         {
             return Self::ArxivResearch;
         }
+        // Deep research mode
+        if lower.contains("deep research")
+            || lower.contains("research deeply")
+            || lower.contains("comprehensive research")
+            || lower.contains("thorough research")
+            || lower.contains("investigate thoroughly")
+            || (lower.contains("research")
+                && (lower.contains("compare")
+                    || lower.contains("analyze")
+                    || lower.contains("synthesize")))
+        {
+            return Self::DeepResearch;
+        }
         if lower.contains("knowledge graph")
             || lower.contains("concept")
             || lower.contains("citation")
@@ -805,6 +819,78 @@ impl TaskClassification {
             || lower.contains("self-improvement")
         {
             return Self::SelfImprovement;
+        }
+
+        // ML/AI domain keywords (prevents General → System misroute)
+        if lower.contains("lora")
+            || lower.contains("qlora")
+            || lower.contains("adapter")
+                && (lower.contains("model") || lower.contains("train") || lower.contains("fine"))
+        {
+            return Self::Workflow("ml_finetune".into());
+        }
+        if lower.contains("quantiz") {
+            return Self::Workflow("ml_quantize".into());
+        }
+        if lower.contains("finetun") || lower.contains("fine-tun") || lower.contains("fine tun") {
+            return Self::Workflow("ml_finetune".into());
+        }
+        if lower.contains("rag")
+            || lower.contains("retrieval augmented")
+            || lower.contains("vector database")
+            || lower.contains("vector store")
+        {
+            return Self::Workflow("ml_rag".into());
+        }
+        if lower.contains("inference") && (lower.contains("model") || lower.contains("serve") || lower.contains("batch")) {
+            return Self::Workflow("ml_inference".into());
+        }
+        if lower.contains("training data") || lower.contains("data pipeline") || lower.contains("feature engineer") {
+            return Self::Workflow("ml_data".into());
+        }
+        if lower.contains("embedding")
+            || lower.contains("tokeniz")
+            || lower.contains("transformer")
+            || lower.contains("attention mechanism")
+        {
+            return Self::Workflow("ml_training".into());
+        }
+        if lower.contains("neural")
+            || lower.contains("gradient")
+            || lower.contains("backprop")
+            || lower.contains("diffusion")
+            || lower.contains("generative model")
+        {
+            return Self::Workflow("ml_training".into());
+        }
+        if lower.contains("eval harness")
+            || lower.contains("benchmark model")
+            || (lower.contains("evaluat") && lower.contains("model"))
+        {
+            return Self::Workflow("ml_eval".into());
+        }
+        if lower.contains("ai safety")
+            || lower.contains("bias detect")
+            || lower.contains("fairness")
+            || lower.contains("alignment")
+            || lower.contains("red team")
+        {
+            return Self::Workflow("ml_safety".into());
+        }
+
+        // Code operations (generic file/git without specific macOS/workflow match)
+        if lower.contains("read file")
+            || lower.contains("open file")
+            || lower.contains("show file")
+            || lower.contains("cat file")
+            || lower.contains("write to file")
+            || lower.contains("create file")
+            || lower.contains("edit file")
+        {
+            return Self::FileOperation;
+        }
+        if lower.contains("git ") || lower.contains("commit") || lower.contains("branch") {
+            return Self::GitOperation;
         }
 
         Self::General
@@ -980,6 +1066,19 @@ pub struct CompletionResponse {
     pub usage: TokenUsage,
     pub model: String,
     pub finish_reason: Option<String>,
+    /// Parsed rate limit headers from the provider response.
+    pub rate_limit_headers: Option<RateLimitHeaders>,
+}
+
+/// Parsed rate limit information from provider response headers.
+#[derive(Debug, Clone, Default)]
+pub struct RateLimitHeaders {
+    /// Input tokens per minute limit.
+    pub itpm_limit: Option<usize>,
+    /// Requests per minute limit.
+    pub rpm_limit: Option<usize>,
+    /// Output tokens per minute limit.
+    pub otpm_limit: Option<usize>,
 }
 
 /// Configuration for extended thinking / chain-of-thought mode.
@@ -1052,6 +1151,11 @@ pub struct CompletionRequest {
     pub enable_code_execution: bool,
     /// Grounding tools (Gemini Google Search, URL context).
     pub grounding_tools: Vec<GroundingTool>,
+    /// Per-tool precision hints from MoE routing.
+    /// Maps tool name → precision tier. Tools not in this map default to Full.
+    /// Providers can use these hints to implement deferred loading (e.g., Anthropic
+    /// Tool Search maps Half/Quarter precision to `defer_loading: true`).
+    pub tool_precision_hints: HashMap<String, crate::moe::ToolPrecision>,
 }
 
 impl Default for CompletionRequest {
@@ -1071,6 +1175,7 @@ impl Default for CompletionRequest {
             enable_citations: false,
             enable_code_execution: false,
             grounding_tools: Vec::new(),
+            tool_precision_hints: HashMap::new(),
         }
     }
 }

@@ -20,6 +20,9 @@
 - [Sessions & Memory](user-guide/sessions.md)
 - [Plan Mode](user-guide/plan-mode.md)
 - [Personas](user-guide/personas.md)
+- [Deep Research](user-guide/deep-research.md)
+- [Background Daemon](user-guide/daemon.md)
+- [Siri Integration (macOS)](user-guide/siri-integration.md)
 - [Troubleshooting](user-guide/troubleshooting.md)
 
 # Tool Reference
@@ -57,6 +60,10 @@
 - [Multi-Agent](architecture/multi-agent.md)
 - [Gateway & WebSocket](architecture/gateway.md)
 - [Codebase Intelligence](architecture/codebase-intelligence.md)
+- [Deep Research Pipeline](architecture/deep-research.md)
+- [Daemon & Siri](architecture/daemon-siri.md)
+- [Foundational Pillars](architecture/pillars.md)
+- [MoE & TTFT Optimization](architecture/moe-optimization.md)
 
 # Operator Guide
 

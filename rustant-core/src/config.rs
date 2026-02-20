@@ -126,6 +126,26 @@ pub struct AgentConfig {
     /// The rustant-security crate deserializes this into its `SecurityConfig` type.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security: Option<serde_json::Value>,
+    /// Optional Mixture-of-Experts (MoE) routing configuration.
+    /// When enabled, tasks are routed to specialized expert agents with focused
+    /// toolsets, reducing per-request tool token overhead by 80-90%.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moe: Option<crate::moe::MoeConfig>,
+    /// Optional audit trail configuration (Merkle chain, trace limits).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit: Option<crate::audit::AuditConfig>,
+    /// Optional deep research engine configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub research: Option<ResearchConfig>,
+    /// Optional consent framework configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consent: Option<ConsentConfig>,
+    /// Optional daemon configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daemon: Option<DaemonConfig>,
+    /// Optional Siri integration configuration (macOS only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub siri: Option<SiriConfig>,
 }
 
 /// ArXiv research tool configuration.
@@ -973,6 +993,28 @@ pub struct LlmConfig {
     /// Retry configuration for transient API errors (429, 5xx, timeouts).
     #[serde(default)]
     pub retry: RetryConfig,
+    /// Optional provider rate limits for client-side throttling.
+    /// When set, the client proactively delays requests to stay within limits
+    /// instead of relying on 429 backpressure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limits: Option<ProviderLimits>,
+}
+
+/// Client-side rate limit configuration for a provider.
+///
+/// Values of 0 mean unlimited. If not configured, limits can be
+/// auto-detected from provider response headers.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProviderLimits {
+    /// Input tokens per minute (0 = unlimited).
+    #[serde(default)]
+    pub input_tokens_per_minute: usize,
+    /// Output tokens per minute (0 = unlimited).
+    #[serde(default)]
+    pub output_tokens_per_minute: usize,
+    /// Requests per minute (0 = unlimited).
+    #[serde(default)]
+    pub requests_per_minute: usize,
 }
 
 /// Configuration for a fallback LLM provider.
@@ -1007,6 +1049,7 @@ impl Default for LlmConfig {
             auth_method: String::new(),
             api_key: None,
             retry: RetryConfig::default(),
+            rate_limits: None,
         }
     }
 }
@@ -1468,6 +1511,21 @@ pub struct FeatureFlags {
     /// Enable fullstack development mode (hydration, verification, templates).
     #[serde(default)]
     pub fullstack_mode: bool,
+    /// Enable deep research engine.
+    #[serde(default)]
+    pub deep_research: bool,
+    /// Enable Siri integration (macOS only).
+    #[serde(default)]
+    pub siri_integration: bool,
+    /// Enable data flow tracking for transparency.
+    #[serde(default = "default_feature_true")]
+    pub data_flow_tracking: bool,
+    /// Enable consent framework.
+    #[serde(default)]
+    pub consent_framework: bool,
+    /// Enable dynamic risk scoring.
+    #[serde(default)]
+    pub dynamic_risk_scoring: bool,
 }
 
 fn default_feature_true() -> bool {
@@ -1491,6 +1549,11 @@ impl Default for FeatureFlags {
             ai_training: false,
             ai_research: false,
             fullstack_mode: false,
+            deep_research: false,
+            siri_integration: false,
+            data_flow_tracking: true,
+            consent_framework: false,
+            dynamic_risk_scoring: false,
         }
     }
 }
@@ -1740,6 +1803,193 @@ pub fn update_channel_config(
     std::fs::write(&config_path, &toml_str)?;
 
     Ok(config_path)
+}
+
+// ---------------------------------------------------------------------------
+// Deep Research configuration
+// ---------------------------------------------------------------------------
+
+/// Research depth level.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ResearchDepth {
+    /// Single decomposition pass, 1-2 sub-queries, no verification.
+    Quick,
+    /// Full decomposition, parallel queries, 1 verification iteration.
+    Detailed,
+    /// Full pipeline, 3 verification iterations, contradiction analysis.
+    Comprehensive,
+}
+
+impl Default for ResearchDepth {
+    fn default() -> Self {
+        Self::Detailed
+    }
+}
+
+/// Research output format.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ResearchOutputFormat {
+    Summary,
+    DetailedReport,
+    AnnotatedBibliography,
+    ImplementationRoadmap,
+}
+
+impl Default for ResearchOutputFormat {
+    fn default() -> Self {
+        Self::DetailedReport
+    }
+}
+
+/// Configuration for the deep research engine.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResearchConfig {
+    /// Whether deep research is enabled (requires feature flag too).
+    #[serde(default)]
+    pub enabled: bool,
+    /// Default research depth.
+    #[serde(default)]
+    pub default_depth: ResearchDepth,
+    /// Maximum parallel sub-queries.
+    #[serde(default = "default_max_parallel_queries")]
+    pub max_parallel_queries: usize,
+    /// Whether to use LLM Council for synthesis (otherwise single provider).
+    #[serde(default)]
+    pub use_council: bool,
+    /// Maximum refinement iterations in verification phase.
+    #[serde(default = "default_max_refinement")]
+    pub max_refinement_iterations: usize,
+    /// Default output formats.
+    #[serde(default)]
+    pub output_formats: Vec<ResearchOutputFormat>,
+}
+
+fn default_max_parallel_queries() -> usize {
+    5
+}
+fn default_max_refinement() -> usize {
+    3
+}
+
+impl Default for ResearchConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            default_depth: ResearchDepth::Detailed,
+            max_parallel_queries: 5,
+            use_council: false,
+            max_refinement_iterations: 3,
+            output_formats: vec![ResearchOutputFormat::DetailedReport],
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Consent framework configuration
+// ---------------------------------------------------------------------------
+
+/// Configuration for the user consent framework.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ConsentConfig {
+    /// Whether consent tracking is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Whether to require explicit consent before sending data to a provider.
+    #[serde(default)]
+    pub require_explicit_provider_consent: bool,
+    /// Default consent TTL in hours (0 = indefinite).
+    #[serde(default)]
+    pub default_ttl_hours: u64,
+}
+
+// ---------------------------------------------------------------------------
+// Daemon configuration
+// ---------------------------------------------------------------------------
+
+/// Configuration for the Rustant background daemon.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DaemonConfig {
+    /// Whether the daemon should auto-start on login.
+    #[serde(default)]
+    pub auto_start: bool,
+    /// Path to the IPC socket.
+    #[serde(default)]
+    pub ipc_socket_path: Option<std::path::PathBuf>,
+    /// Path to the PID file.
+    #[serde(default)]
+    pub pid_file_path: Option<std::path::PathBuf>,
+    /// Auto-stop after N minutes idle (0 = never).
+    #[serde(default)]
+    pub idle_timeout_mins: u64,
+    /// Pre-load MoE tool caches on daemon start.
+    #[serde(default = "default_true")]
+    pub preload_moe: bool,
+    /// Start the gateway server.
+    #[serde(default = "default_true")]
+    pub gateway_enabled: bool,
+}
+
+impl Default for DaemonConfig {
+    fn default() -> Self {
+        Self {
+            auto_start: false,
+            ipc_socket_path: None,
+            pid_file_path: None,
+            idle_timeout_mins: 0,
+            preload_moe: true,
+            gateway_enabled: true,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Siri integration configuration
+// ---------------------------------------------------------------------------
+
+/// Configuration for Siri integration (macOS only).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SiriConfig {
+    /// Whether Siri integration is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Safety mode for Siri commands (minimum: "safe").
+    #[serde(default = "default_siri_safety")]
+    pub safety_mode: String,
+    /// Allowed workflow names (empty = all).
+    #[serde(default)]
+    pub allowed_workflows: Vec<String>,
+    /// Maximum speech duration in seconds.
+    #[serde(default = "default_max_speech")]
+    pub max_speech_duration_secs: u32,
+    /// macOS voice name for TTS.
+    #[serde(default)]
+    pub voice: Option<String>,
+    /// Whether write/destructive actions require voice confirmation.
+    #[serde(default = "default_true")]
+    pub require_confirmation_for_writes: bool,
+}
+
+fn default_siri_safety() -> String {
+    "safe".to_string()
+}
+
+fn default_max_speech() -> u32 {
+    30
+}
+
+impl Default for SiriConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            safety_mode: "safe".to_string(),
+            allowed_workflows: Vec::new(),
+            max_speech_duration_secs: 30,
+            voice: None,
+            require_confirmation_for_writes: true,
+        }
+    }
 }
 
 #[cfg(test)]

@@ -183,6 +183,22 @@ pub enum Commands {
         #[command(subcommand)]
         action: AlertsAction,
     },
+    /// Manage the Rustant background daemon
+    Daemon {
+        #[command(subcommand)]
+        action: DaemonAction,
+    },
+    /// Siri voice integration (macOS)
+    #[cfg(target_os = "macos")]
+    Siri {
+        #[command(subcommand)]
+        action: SiriAction,
+    },
+    /// Deep research mode
+    Research {
+        #[command(subcommand)]
+        action: ResearchAction,
+    },
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -721,6 +737,84 @@ pub enum AuthAction {
     Refresh {
         /// Provider name (e.g., openai, gemini, slack, discord, teams, whatsapp)
         provider: String,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum DaemonAction {
+    /// Start the background daemon
+    Start {
+        /// Enable Siri routing mode
+        #[arg(long)]
+        siri_mode: bool,
+    },
+    /// Stop the background daemon
+    Stop {
+        /// Also deactivate Siri mode
+        #[arg(long)]
+        siri_mode: bool,
+    },
+    /// Show daemon status
+    Status,
+    /// Install daemon for auto-start on login (launchd on macOS, systemd on Linux)
+    Install,
+    /// Remove auto-start configuration
+    Uninstall,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(clap::Subcommand, Debug)]
+pub enum SiriAction {
+    /// Interactive Siri shortcut setup wizard
+    Setup,
+    /// Send a command to Rustant via Siri (used by Shortcuts)
+    Send {
+        /// The command text from Siri
+        command: String,
+    },
+    /// List available Siri shortcuts
+    Shortcuts,
+    /// Show Siri integration status
+    Status,
+    /// Confirm or deny a pending approval
+    Confirm {
+        /// Session ID
+        session_id: String,
+        /// yes or no
+        answer: String,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum ResearchAction {
+    /// Start a new deep research session
+    Start {
+        /// The research question
+        question: String,
+        /// Research depth: quick, detailed, comprehensive
+        #[arg(short, long, default_value = "detailed")]
+        depth: String,
+        /// Output format: summary, detailed, bibliography, roadmap
+        #[arg(short, long, default_value = "detailed")]
+        format: String,
+        /// Use multi-model council for synthesis
+        #[arg(long)]
+        council: bool,
+    },
+    /// Show status of the active research session
+    Status,
+    /// Resume a paused research session
+    Resume {
+        /// Session ID to resume
+        id: String,
+    },
+    /// List all research sessions
+    Sessions,
+    /// Export the research report
+    Report {
+        /// Output format: summary, detailed, bibliography, roadmap
+        #[arg(short, long, default_value = "detailed")]
+        format: String,
     },
 }
 

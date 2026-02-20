@@ -195,9 +195,13 @@ rustant-ml = { path = "rustant-ml", version = "1.0.1" }
 [profile.release]
 lto = "thin"
 strip = true
-opt-level = "z"
+opt-level = 3
 codegen-units = 1
 panic = "abort"
+
+[profile.small]
+inherits = "release"
+opt-level = "z"
 
 [profile.dist]
 inherits = "release"

@@ -65,10 +65,7 @@ impl CollectionManager {
     }
 
     pub fn save(&self, path: &Path) -> Result<(), MlError> {
-        let content = serde_json::to_string_pretty(self)?;
-        let tmp = path.with_extension("tmp");
-        std::fs::write(&tmp, &content)?;
-        std::fs::rename(&tmp, path)?;
+        rustant_core::persistence::atomic_write_json(path, self)?;
         Ok(())
     }
 }

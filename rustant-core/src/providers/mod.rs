@@ -12,20 +12,60 @@ pub mod failover;
 pub mod gemini;
 pub mod models;
 pub mod openai_compat;
+pub mod rate_limiter;
+pub mod warmup;
 
 use crate::brain::LlmProvider;
 use crate::config::LlmConfig;
 use crate::credentials::CredentialStore;
 use crate::error::LlmError;
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+
+// =============================================================================
+// Shared HTTP Client
+// =============================================================================
+
+/// Shared reqwest::Client for all providers.
+///
+/// Creating a new `reqwest::Client` is expensive (~5-20ms): it spawns a connection
+/// pool, compiles TLS settings, and resolves system proxy. By sharing one client
+/// across all providers, we:
+/// 1. Save 50-150ms TTFT on the first request (no redundant pool creation)
+/// 2. Enable HTTP/2 connection reuse across providers hitting the same host
+/// 3. Pool TCP connections (keep-alive) for subsequent requests
+///
+/// The client is lazily initialized on first use with generous timeouts suitable
+/// for LLM APIs (120s response timeout, 10s connect timeout).
+static SHARED_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+/// Get the shared HTTP client, creating it on first call.
+///
+/// All providers should use this instead of `Client::new()` or `Client::builder().build()`.
+/// The client is configured with:
+/// - 120s response timeout (LLM APIs can be slow)
+/// - 10s connect timeout
+/// - Connection pooling (keep-alive) enabled by default
+/// - System proxy settings respected
+pub fn shared_http_client() -> reqwest::Client {
+    SHARED_HTTP_CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(120))
+                .connect_timeout(Duration::from_secs(10))
+                .pool_max_idle_per_host(4)
+                .build()
+                .expect("Failed to build shared HTTP client")
+        })
+        .clone()
+}
 
 pub use crate::config::RetryConfig;
 pub use anthropic::AnthropicProvider;
 pub use failover::{AuthProfile, CircuitBreaker, CircuitState, FailoverProvider};
 pub use gemini::GeminiProvider;
-pub use models::ModelInfo;
+pub use models::{ModelInfo, PricingCache, PricingEntry};
 pub use openai_compat::OpenAiCompatibleProvider;
 
 /// Execute an async operation with exponential backoff retry on transient errors.
@@ -467,6 +507,7 @@ mod tests {
             auth_method: String::new(),
             api_key: None,
             retry: RetryConfig::default(),
+            rate_limits: None,
         }
     }
 

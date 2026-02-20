@@ -50,6 +50,10 @@ pub struct GeminiProvider {
     cost_output: f64,
     token_counter: TokenCounter,
     auth_mode: GeminiAuthMode,
+    /// Cached content name from the Gemini Context Caching API.
+    /// Set after a successful `create_cached_content()` call, and reused
+    /// in subsequent requests to avoid re-processing long system prompts.
+    pub cached_content_name: Option<String>,
 }
 
 impl GeminiProvider {
@@ -77,13 +81,7 @@ impl GeminiProvider {
             .clone()
             .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
 
-        let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .build()
-            .map_err(|e| LlmError::Connection {
-                message: format!("Failed to build HTTP client: {e}"),
-            })?;
+        let client = super::shared_http_client();
         let token_counter = TokenCounter::for_model(&config.model);
 
         let auth_mode = if config.auth_method == "oauth" {
@@ -109,6 +107,7 @@ impl GeminiProvider {
             cost_output: cost_out / 1_000_000.0,
             token_counter,
             auth_mode,
+            cached_content_name: None,
         })
     }
 
@@ -664,6 +663,7 @@ impl GeminiProvider {
             usage,
             model,
             finish_reason,
+            rate_limit_headers: None,
         })
     }
 
@@ -698,6 +698,97 @@ impl GeminiProvider {
                 parts: content_parts,
             }),
         }
+    }
+
+    /// Create a cached content entry via the Gemini Context Caching API.
+    ///
+    /// Long-lived system prompts and tool definitions can be cached server-side
+    /// to reduce TTFT on subsequent requests. The returned cache name should be
+    /// stored in `cached_content_name` and referenced in future requests via
+    /// `CacheHint.cached_content_ref`.
+    ///
+    /// # Arguments
+    /// * `system_prompt` - The system instruction text to cache.
+    /// * `tools` - Tool definitions in Gemini JSON format (functionDeclarations).
+    /// * `ttl_secs` - Time-to-live for the cached content in seconds.
+    ///
+    /// # Returns
+    /// The `name` of the created cached content resource (e.g., `cachedContents/abc123`).
+    pub async fn create_cached_content(
+        &mut self,
+        system_prompt: &str,
+        tools: &[Value],
+        ttl_secs: u64,
+    ) -> Result<String, LlmError> {
+        let url = match self.auth_mode {
+            GeminiAuthMode::ApiKey => {
+                format!("{}/cachedContents?key={}", self.base_url, self.api_key)
+            }
+            GeminiAuthMode::Bearer => {
+                format!("{}/cachedContents", self.base_url)
+            }
+        };
+
+        let mut body = serde_json::json!({
+            "model": format!("models/{}", self.model),
+            "contents": [],
+            "systemInstruction": {
+                "parts": [{"text": system_prompt}]
+            },
+            "ttl": format!("{ttl_secs}s"),
+        });
+
+        if !tools.is_empty() {
+            body["tools"] = serde_json::json!([{
+                "functionDeclarations": tools
+            }]);
+        }
+
+        debug!(
+            model = self.model.as_str(),
+            url = url.as_str(),
+            ttl_secs = ttl_secs,
+            "Creating cached content via Gemini API"
+        );
+
+        let response = self
+            .build_authed_request(&url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| LlmError::ApiRequest {
+                message: format!("Cached content creation request to Gemini API failed: {e}"),
+            })?;
+
+        let status = response.status();
+        let body_text = response.text().await.map_err(|e| LlmError::ResponseParse {
+            message: format!("Failed to read cached content response body: {e}"),
+        })?;
+
+        if !status.is_success() {
+            return Err(Self::map_http_error(status, &body_text));
+        }
+
+        let response_json: Value =
+            serde_json::from_str(&body_text).map_err(|e| LlmError::ResponseParse {
+                message: format!("Invalid JSON in cached content response: {e}"),
+            })?;
+
+        let name = response_json["name"]
+            .as_str()
+            .ok_or_else(|| LlmError::ResponseParse {
+                message: "Missing 'name' in cachedContents response".to_string(),
+            })?
+            .to_string();
+
+        self.cached_content_name = Some(name.clone());
+
+        debug!(
+            cached_content_name = name.as_str(),
+            "Successfully created cached content"
+        );
+
+        Ok(name)
     }
 
     /// Map an HTTP status code to the appropriate `LlmError`.
@@ -1061,6 +1152,7 @@ mod tests {
             auth_method: String::new(),
             api_key: None,
             retry: crate::config::RetryConfig::default(),
+            rate_limits: None,
         }
     }
 
@@ -1916,6 +2008,58 @@ mod tests {
             provider.is_ok(),
             "Provider with timeout should create successfully"
         );
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var(env_var) };
+    }
+
+    #[test]
+    fn test_cached_content_name_initially_none() {
+        let provider = make_provider();
+        assert!(
+            provider.cached_content_name.is_none(),
+            "cached_content_name should be None initially"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_cached_content_connection_error() {
+        // We cannot call the real API in unit tests, but we can verify the method
+        // exists and handles error responses correctly by pointing at a non-routable
+        // server. This validates the request construction and error mapping path.
+        let env_var = "GEMINI_TEST_KEY_CACHED_CONTENT";
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var(env_var, "test-gemini-cache-key") };
+        let mut config = test_config(env_var);
+        // Point to a non-routable address so the request fails fast
+        config.base_url = Some("http://127.0.0.1:1".to_string());
+        let mut provider = GeminiProvider::new(&config).unwrap();
+
+        let tools = vec![serde_json::json!({
+            "name": "file_read",
+            "description": "Read a file",
+            "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}
+        })];
+
+        let result = provider
+            .create_cached_content("You are a helpful assistant.", &tools, 3600)
+            .await;
+
+        // Should fail with a connection error since we are hitting a non-routable address
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        match err {
+            LlmError::ApiRequest { message } => {
+                assert!(
+                    message.contains("Cached content creation request"),
+                    "Expected cached content error, got: {message}"
+                );
+            }
+            other => panic!("Expected ApiRequest error, got {other:?}"),
+        }
+
+        // cached_content_name should remain None on failure
+        assert!(provider.cached_content_name.is_none());
+
         // SAFETY: test-only env var manipulation
         unsafe { std::env::remove_var(env_var) };
     }

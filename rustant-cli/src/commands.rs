@@ -10,10 +10,12 @@ use crate::Commands;
 use crate::ComplianceAction;
 use crate::ConfigAction;
 use crate::CronAction;
+use crate::DaemonAction;
 use crate::LicenseAction;
 use crate::PluginAction;
 use crate::PolicyAction;
 use crate::QualityAction;
+use crate::ResearchAction;
 use crate::ReviewAction;
 use crate::RiskAction;
 use crate::SbomAction;
@@ -54,6 +56,10 @@ pub async fn handle_command(command: Commands, workspace: &Path) -> anyhow::Resu
         Commands::Risk { action } => handle_risk(action, workspace).await,
         Commands::Policy { action } => handle_policy(action, workspace).await,
         Commands::Alerts { action } => handle_alerts(action, workspace).await,
+        Commands::Daemon { action } => handle_daemon(action, workspace).await,
+        #[cfg(target_os = "macos")]
+        Commands::Siri { action } => handle_siri(action, workspace).await,
+        Commands::Research { action } => handle_research(action, workspace).await,
     }
 }
 
@@ -2479,6 +2485,314 @@ async fn run_security_tool(
         Err(e) => {
             eprintln!("Tool error: {e}");
             Err(anyhow::anyhow!("{e}"))
+        }
+    }
+}
+
+pub async fn handle_daemon(action: DaemonAction, workspace: &Path) -> anyhow::Result<()> {
+    let base_dir = workspace.join(".rustant");
+
+    match action {
+        DaemonAction::Start { siri_mode } => {
+            use rustant_core::daemon::lifecycle::check_daemon_running;
+            if let Some(pid) = check_daemon_running(&base_dir) {
+                println!("Daemon already running (PID {pid})");
+                if siri_mode {
+                    let flag_path = base_dir.join("siri_active");
+                    std::fs::create_dir_all(&base_dir)?;
+                    std::fs::write(&flag_path, "1")?;
+                    println!("Siri mode activated.");
+                }
+                return Ok(());
+            }
+
+            println!("Starting Rustant daemon...");
+            use rustant_core::daemon::process::RustantDaemon;
+            let config = rustant_core::config::DaemonConfig::default();
+            let mut daemon = RustantDaemon::new(config, base_dir.clone());
+            daemon
+                .start()
+                .await
+                .map_err(|e| anyhow::anyhow!("Daemon error: {e}"))?;
+
+            if siri_mode {
+                let flag_path = base_dir.join("siri_active");
+                std::fs::write(&flag_path, "1")?;
+                println!("Siri mode activated.");
+            }
+
+            println!("Daemon started.");
+            Ok(())
+        }
+        DaemonAction::Stop { siri_mode } => {
+            if siri_mode {
+                let flag_path = base_dir.join("siri_active");
+                if flag_path.exists() {
+                    let _ = std::fs::remove_file(&flag_path);
+                    println!("Siri mode deactivated.");
+                }
+            }
+
+            use rustant_core::daemon::lifecycle::check_daemon_running;
+            if let Some(pid) = check_daemon_running(&base_dir) {
+                println!("Stopping daemon (PID {pid})...");
+                // Send SIGTERM
+                #[cfg(unix)]
+                {
+                    unsafe {
+                        unsafe extern "C" {
+                            fn kill(pid: i32, sig: i32) -> i32;
+                        }
+                        kill(pid as i32, 15); // SIGTERM
+                    }
+                }
+                let _ = std::fs::remove_file(base_dir.join("daemon.pid"));
+                println!("Daemon stopped.");
+            } else {
+                println!("Daemon is not running.");
+            }
+            Ok(())
+        }
+        DaemonAction::Status => {
+            use rustant_core::daemon::lifecycle::check_daemon_running;
+            if let Some(pid) = check_daemon_running(&base_dir) {
+                println!("Daemon: running (PID {pid})");
+            } else {
+                println!("Daemon: not running");
+            }
+            let siri_active = base_dir.join("siri_active").exists();
+            println!(
+                "Siri mode: {}",
+                if siri_active { "active" } else { "inactive" }
+            );
+            Ok(())
+        }
+        DaemonAction::Install => {
+            #[cfg(target_os = "macos")]
+            {
+                let bin_path = std::env::current_exe()?;
+                let plist = rustant_core::daemon::lifecycle::install_launchd_plist(&bin_path)?;
+                println!("Installed launchd plist at: {}", plist.display());
+                println!(
+                    "Run `launchctl load {}` to start on login.",
+                    plist.display()
+                );
+            }
+            #[cfg(target_os = "linux")]
+            {
+                let bin_path = std::env::current_exe()?;
+                let service = rustant_core::daemon::lifecycle::install_systemd_service(&bin_path)?;
+                println!("Installed systemd service at: {}", service.display());
+                println!("Run `systemctl --user enable --now rustant` to start.");
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+            {
+                println!("Auto-start installation not supported on this platform.");
+            }
+            Ok(())
+        }
+        DaemonAction::Uninstall => {
+            #[cfg(target_os = "macos")]
+            {
+                rustant_core::daemon::lifecycle::uninstall_launchd_plist()?;
+                println!("Uninstalled launchd plist.");
+            }
+            #[cfg(target_os = "linux")]
+            {
+                rustant_core::daemon::lifecycle::uninstall_systemd_service()?;
+                println!("Uninstalled systemd service.");
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+            {
+                println!("Auto-start removal not supported on this platform.");
+            }
+            Ok(())
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub async fn handle_siri(action: crate::SiriAction, workspace: &Path) -> anyhow::Result<()> {
+    let base_dir = workspace.join(".rustant");
+
+    match action {
+        crate::SiriAction::Setup => {
+            use rustant_core::siri::shortcuts::ShortcutGenerator;
+            let bin_path = std::env::current_exe().unwrap_or_else(|_| "rustant".into());
+            let generator = ShortcutGenerator::new(bin_path, base_dir.clone());
+            let shortcuts = generator.generate_all();
+            println!("\n  \x1b[1mSiri Shortcut Setup\x1b[0m\n");
+            println!("  Create the following shortcuts in the Shortcuts app:\n");
+            for shortcut in &shortcuts {
+                println!("  \x1b[36m{}\x1b[0m", shortcut.name);
+                println!("    Trigger: \"{}\"", shortcut.trigger);
+                println!("    Action: Run Shell Script → `{}`\n", shortcut.command);
+            }
+            println!("  Or run `rustant siri shortcuts` to see a compact list.");
+            Ok(())
+        }
+        crate::SiriAction::Send { command } => {
+            use rustant_core::siri::bridge::SiriBridge;
+            let bridge = SiriBridge::new(base_dir.clone());
+            if !bridge.is_active() {
+                println!("Rustant is not activated. Say \"Hey Siri, activate Rustant\" first.");
+                return Ok(());
+            }
+            match bridge.send_command(&command) {
+                Ok(response) => println!("{response}"),
+                Err(e) => eprintln!("Siri command error: {e}"),
+            }
+            Ok(())
+        }
+        crate::SiriAction::Shortcuts => {
+            use rustant_core::siri::shortcuts::ShortcutGenerator;
+            let bin_path = std::env::current_exe().unwrap_or_else(|_| "rustant".into());
+            let generator = ShortcutGenerator::new(bin_path, base_dir.clone());
+            let shortcuts = generator.generate_all();
+            println!("Available Siri Shortcuts:\n");
+            for shortcut in &shortcuts {
+                println!("  {}: \"{}\"", shortcut.name, shortcut.trigger);
+            }
+            Ok(())
+        }
+        crate::SiriAction::Status => {
+            use rustant_core::siri::bridge::SiriBridge;
+            let bridge = SiriBridge::new(base_dir.clone());
+            println!("Siri Integration Status:");
+            println!("  Active: {}", bridge.is_active());
+            use rustant_core::daemon::lifecycle::check_daemon_running;
+            if let Some(pid) = check_daemon_running(&base_dir) {
+                println!("  Daemon: running (PID {pid})");
+            } else {
+                println!("  Daemon: not running");
+            }
+            Ok(())
+        }
+        crate::SiriAction::Confirm { session_id, answer } => {
+            let approved = matches!(answer.to_lowercase().as_str(), "yes" | "y" | "approve");
+            println!(
+                "Confirmation for session {session_id}: {}",
+                if approved { "approved" } else { "denied" }
+            );
+            // In a full implementation, this would send to daemon via IPC
+            Ok(())
+        }
+    }
+}
+
+pub async fn handle_research(action: ResearchAction, workspace: &Path) -> anyhow::Result<()> {
+    let base_dir = workspace.join(".rustant");
+
+    match action {
+        ResearchAction::Start {
+            question,
+            depth,
+            format,
+            council,
+        } => {
+            use rustant_core::config::ResearchDepth;
+            let depth = match depth.as_str() {
+                "quick" => ResearchDepth::Quick,
+                "comprehensive" => ResearchDepth::Comprehensive,
+                _ => ResearchDepth::Detailed,
+            };
+
+            println!("\n  \x1b[1mDeep Research Mode\x1b[0m\n");
+            println!("  Question: {question}");
+            println!("  Depth: {depth:?}");
+            println!("  Format: {format}");
+            if council {
+                println!("  Council: enabled (multi-model synthesis)");
+            }
+
+            use rustant_core::research::session::ResearchSession;
+            let session = ResearchSession::new(&question, depth);
+            println!("\n  Session ID: {}", session.id);
+            println!("  Phase: {:?}", session.phase);
+
+            // Persist session
+            let _ = session.save(&base_dir);
+            println!("\n  Session saved. Use `rustant research status` to check progress.");
+            println!("  Note: Full research pipeline requires an active agent session.");
+            Ok(())
+        }
+        ResearchAction::Status => {
+            use rustant_core::research::session::ResearchSession;
+            let sessions = ResearchSession::list_sessions(&base_dir);
+            if sessions.is_empty() {
+                println!("No active research sessions.");
+            } else {
+                let latest = &sessions[0];
+                println!("Latest research session:");
+                println!("  ID: {}", latest.id);
+                println!("  Question: {}", latest.question);
+                println!("  Phase: {:?}", latest.phase);
+                println!("  Progress: {:.0}%", latest.progress * 100.0);
+                println!(
+                    "  Updated: {}",
+                    latest.updated_at.format("%Y-%m-%d %H:%M:%S")
+                );
+            }
+            Ok(())
+        }
+        ResearchAction::Resume { id } => {
+            use rustant_core::research::session::ResearchSession;
+            let uuid = id
+                .parse()
+                .map_err(|e| anyhow::anyhow!("Invalid session ID: {e}"))?;
+            let mut session = ResearchSession::load(&base_dir, &uuid)
+                .map_err(|e| anyhow::anyhow!("Failed to load session: {e}"))?;
+            session.resume();
+            let _ = session.save(&base_dir);
+            println!(
+                "Resumed session {} — phase: {:?}",
+                session.id, session.phase
+            );
+            Ok(())
+        }
+        ResearchAction::Sessions => {
+            use rustant_core::research::session::ResearchSession;
+            let sessions = ResearchSession::list_sessions(&base_dir);
+            if sessions.is_empty() {
+                println!("No research sessions found.");
+            } else {
+                println!("Research Sessions:\n");
+                for s in &sessions {
+                    println!(
+                        "  {} | {:?} | {:.0}% | {}",
+                        &s.id.to_string()[..8],
+                        s.phase,
+                        s.progress * 100.0,
+                        if s.question.len() > 60 {
+                            format!("{}...", &s.question[..60])
+                        } else {
+                            s.question.clone()
+                        }
+                    );
+                }
+            }
+            Ok(())
+        }
+        ResearchAction::Report { format } => {
+            use rustant_core::research::session::ResearchSession;
+            let sessions = ResearchSession::list_sessions(&base_dir);
+            if sessions.is_empty() {
+                println!("No research sessions found.");
+                return Ok(());
+            }
+            let latest = &sessions[0];
+            let session = ResearchSession::load(&base_dir, &latest.id)
+                .map_err(|e| anyhow::anyhow!("Failed to load session: {e}"))?;
+            if let Some(ref report) = session.report {
+                println!("{}", report.content);
+            } else {
+                println!(
+                    "Session {} ({:?}) has no report yet. Format requested: {format}",
+                    &latest.id.to_string()[..8],
+                    latest.phase
+                );
+            }
+            Ok(())
         }
     }
 }

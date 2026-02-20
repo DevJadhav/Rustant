@@ -13,8 +13,12 @@ pub mod cache;
 pub mod canvas;
 pub mod channels;
 pub mod config;
+pub mod consent;
 pub mod council;
 pub mod credentials;
+pub mod daemon;
+pub mod data_flow;
+pub mod decision_log;
 pub mod embeddings;
 pub mod encryption;
 pub mod error;
@@ -28,10 +32,12 @@ pub mod injection;
 pub mod memory;
 pub mod merkle;
 pub mod metrics;
+pub mod moe;
 pub mod multi;
 pub mod nodes;
 pub mod oauth;
 pub mod pairing;
+pub mod persistence;
 pub mod personas;
 pub mod plan;
 pub mod project_detect;
@@ -39,6 +45,8 @@ pub mod providers;
 pub mod redact;
 pub mod replay;
 pub mod repo_map;
+pub mod research;
+pub mod risk_scorer;
 pub mod safety;
 pub mod sandbox;
 pub mod sanitize;
@@ -46,6 +54,8 @@ pub mod scheduler;
 pub mod search;
 pub mod secret_ref;
 pub mod session_manager;
+#[cfg(target_os = "macos")]
+pub mod siri;
 pub mod skills;
 pub mod summarizer;
 pub mod types;
@@ -134,9 +144,9 @@ pub use project_detect::{
     ProjectInfo, ProjectType, detect_project, example_tasks, recommended_allowed_commands,
 };
 pub use providers::{
-    CircuitBreaker, CircuitState, FailoverProvider, GeminiProvider, ModelInfo,
-    create_council_members, create_provider, create_provider_with_auth, is_ollama_available,
-    list_ollama_models, resolve_api_key_by_env,
+    CircuitBreaker, CircuitState, FailoverProvider, GeminiProvider, ModelInfo, PricingCache,
+    PricingEntry, create_council_members, create_provider, create_provider_with_auth,
+    is_ollama_available, list_ollama_models, resolve_api_key_by_env,
 };
 pub use redact::{BasicRedactor, OutputRedactor, SharedRedactor, create_basic_redactor};
 pub use safety::{

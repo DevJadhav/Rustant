@@ -171,6 +171,42 @@ pub enum TraceEventKind {
         incident_id: String,
         success: bool,
     },
+    /// A deep research session was started.
+    ResearchStarted {
+        session_id: String,
+        question: String,
+        depth: String,
+    },
+    /// A deep research session completed.
+    ResearchCompleted {
+        session_id: String,
+        sources_count: usize,
+        confidence: f64,
+    },
+    /// A Siri command was received via the daemon.
+    SiriCommandReceived {
+        command: String,
+    },
+    /// A consent grant was recorded.
+    ConsentGranted {
+        scope: String,
+    },
+    /// A consent was revoked.
+    ConsentRevoked {
+        scope: String,
+    },
+    /// A data flow was recorded.
+    DataFlowRecorded {
+        source: String,
+        destination: String,
+        token_count: usize,
+    },
+    /// The daemon was started.
+    DaemonStarted {
+        pid: u32,
+    },
+    /// The daemon was stopped.
+    DaemonStopped,
 }
 
 impl TraceEventKind {
@@ -244,6 +280,14 @@ impl TraceEventKind {
             TraceEventKind::PolicyEvaluated { .. } => "policy_evaluated",
             TraceEventKind::ComplianceReportGenerated { .. } => "compliance_report_generated",
             TraceEventKind::IncidentActionTaken { .. } => "incident_action_taken",
+            TraceEventKind::ResearchStarted { .. } => "research_started",
+            TraceEventKind::ResearchCompleted { .. } => "research_completed",
+            TraceEventKind::SiriCommandReceived { .. } => "siri_command_received",
+            TraceEventKind::ConsentGranted { .. } => "consent_granted",
+            TraceEventKind::ConsentRevoked { .. } => "consent_revoked",
+            TraceEventKind::DataFlowRecorded { .. } => "data_flow_recorded",
+            TraceEventKind::DaemonStarted { .. } => "daemon_started",
+            TraceEventKind::DaemonStopped => "daemon_stopped",
         }
     }
 
@@ -397,6 +441,28 @@ impl TraceEventKind {
                 let tag = if *success { "OK" } else { "FAILED" };
                 format!("Incident action: {action_type} on {target} [{tag}]")
             }
+            TraceEventKind::ResearchStarted {
+                question, depth, ..
+            } => format!("Research started [{depth}]: {question}"),
+            TraceEventKind::ResearchCompleted {
+                session_id,
+                sources_count,
+                confidence,
+            } => format!(
+                "Research completed: {session_id} ({sources_count} sources, confidence={confidence:.2})"
+            ),
+            TraceEventKind::SiriCommandReceived { command } => {
+                format!("Siri command: {command}")
+            }
+            TraceEventKind::ConsentGranted { scope } => format!("Consent granted: {scope}"),
+            TraceEventKind::ConsentRevoked { scope } => format!("Consent revoked: {scope}"),
+            TraceEventKind::DataFlowRecorded {
+                source,
+                destination,
+                token_count,
+            } => format!("Data flow: {source} -> {destination} ({token_count} tokens)"),
+            TraceEventKind::DaemonStarted { pid } => format!("Daemon started (PID {pid})"),
+            TraceEventKind::DaemonStopped => "Daemon stopped".to_string(),
         }
     }
 
@@ -570,6 +636,37 @@ impl TraceEventKind {
                     "action={action_type} target={target} incident={incident_id} success={success}"
                 ),
             ),
+            TraceEventKind::ResearchStarted {
+                session_id,
+                question,
+                depth,
+            } => (
+                String::new(),
+                format!("session={session_id} depth={depth} question={question}"),
+            ),
+            TraceEventKind::ResearchCompleted {
+                session_id,
+                sources_count,
+                confidence,
+            } => (
+                String::new(),
+                format!("session={session_id} sources={sources_count} confidence={confidence:.4}"),
+            ),
+            TraceEventKind::SiriCommandReceived { command } => {
+                (String::new(), format!("command={command}"))
+            }
+            TraceEventKind::ConsentGranted { scope } => (String::new(), format!("scope={scope}")),
+            TraceEventKind::ConsentRevoked { scope } => (String::new(), format!("scope={scope}")),
+            TraceEventKind::DataFlowRecorded {
+                source,
+                destination,
+                token_count,
+            } => (
+                String::new(),
+                format!("source={source} dest={destination} tokens={token_count}"),
+            ),
+            TraceEventKind::DaemonStarted { pid } => (String::new(), format!("pid={pid}")),
+            TraceEventKind::DaemonStopped => (String::new(), String::new()),
         }
     }
 }
@@ -700,6 +797,40 @@ pub enum AuditError {
 // AuditStore
 // ---------------------------------------------------------------------------
 
+/// Configuration for the audit store.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditConfig {
+    /// Whether the Merkle chain is enabled for tamper-evident integrity.
+    #[serde(default = "default_audit_merkle")]
+    pub merkle_enabled: bool,
+    /// Maximum number of traces to store.
+    #[serde(default = "default_audit_max_traces")]
+    pub max_traces: usize,
+    /// Whether to persist the chain to disk.
+    #[serde(default = "default_audit_persist")]
+    pub persist_chain: bool,
+}
+
+fn default_audit_merkle() -> bool {
+    true
+}
+fn default_audit_max_traces() -> usize {
+    1000
+}
+fn default_audit_persist() -> bool {
+    true
+}
+
+impl Default for AuditConfig {
+    fn default() -> Self {
+        Self {
+            merkle_enabled: true,
+            max_traces: 1000,
+            persist_chain: true,
+        }
+    }
+}
+
 /// Persistent, capacity-bounded store of execution traces.
 pub struct AuditStore {
     traces: Vec<ExecutionTrace>,
@@ -708,12 +839,13 @@ pub struct AuditStore {
 }
 
 impl AuditStore {
-    /// Create a new store with the default capacity of 1 000 traces.
+    /// Create a new store with the default capacity of 1 000 traces
+    /// and Merkle chain enabled by default.
     pub fn new() -> Self {
         Self {
             traces: Vec::new(),
             max_traces: 1000,
-            merkle_chain: None,
+            merkle_chain: Some(MerkleChain::new()),
         }
     }
 
@@ -723,6 +855,19 @@ impl AuditStore {
             traces: Vec::new(),
             max_traces: 1000,
             merkle_chain: Some(MerkleChain::new()),
+        }
+    }
+
+    /// Create a new store from an `AuditConfig`.
+    pub fn new_with_config(config: &AuditConfig) -> Self {
+        Self {
+            traces: Vec::new(),
+            max_traces: config.max_traces,
+            merkle_chain: if config.merkle_enabled {
+                Some(MerkleChain::new())
+            } else {
+                None
+            },
         }
     }
 
@@ -2106,8 +2251,11 @@ mod tests {
     // 33
     #[test]
     fn test_audit_store_verify_integrity_without_merkle() {
+        // Merkle chain is now enabled by default, so verify_integrity returns Some
         let store = AuditStore::new();
-        assert!(store.verify_integrity().is_none());
+        let result = store.verify_integrity().unwrap();
+        assert!(result.is_valid);
+        assert_eq!(result.checked_nodes, 0);
     }
 
     // 34
@@ -2150,7 +2298,8 @@ mod tests {
     #[test]
     fn test_audit_store_no_merkle_by_default() {
         let store = AuditStore::new();
-        assert!(store.merkle_chain().is_none());
+        // Merkle chain is now enabled by default (but empty, so no root hash)
+        assert!(store.merkle_chain().is_some());
         assert!(store.merkle_root_hash().is_none());
     }
 

@@ -4,7 +4,6 @@
 //! or return hardcoded known models (Anthropic), along with filtering utilities.
 
 use crate::error::LlmError;
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::debug;
@@ -82,6 +81,10 @@ pub fn filter_chat_models(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
 /// Used only when the API call to list models fails.
 pub fn anthropic_known_models() -> Vec<ModelInfo> {
     let models_data = [
+        ("claude-opus-4-6", "Claude Opus 4.6", 200_000),
+        ("claude-sonnet-4-6", "Claude Sonnet 4.6", 200_000),
+        ("claude-opus-4-5", "Claude Opus 4.5", 200_000),
+        ("claude-haiku-4-5", "Claude Haiku 4.5", 200_000),
         ("claude-opus-4-20250514", "Claude Opus 4", 200_000),
         ("claude-sonnet-4-20250514", "Claude Sonnet 4", 200_000),
         ("claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet", 200_000),
@@ -112,7 +115,7 @@ pub async fn fetch_anthropic_models(api_key: &str) -> Result<Vec<ModelInfo>, Llm
 
     debug!("Fetching models from Anthropic API");
 
-    let client = Client::new();
+    let client = super::shared_http_client();
     let response = client
         .get(url)
         .header("x-api-key", api_key)
@@ -231,7 +234,7 @@ pub async fn fetch_gemini_models(api_key: &str) -> Result<Vec<ModelInfo>, LlmErr
         "Fetching models from Gemini API"
     );
 
-    let client = Client::new();
+    let client = super::shared_http_client();
     let response = client
         .get(&url)
         .send()
@@ -351,7 +354,7 @@ pub async fn fetch_openai_models(
 
     debug!(url = %url, "Fetching models from OpenAI-compatible endpoint");
 
-    let client = Client::new();
+    let client = super::shared_http_client();
     let response = client
         .get(&url)
         .header("Authorization", format!("Bearer {api_key}"))
@@ -425,15 +428,174 @@ pub async fn list_models(
     }
 }
 
-/// Look up per-model pricing across all providers.
+/// Persistent pricing cache that resolves model pricing on first use and
+/// stores it to disk so subsequent sessions reuse the cached values.
+///
+/// Pricing is resolved in order:
+/// 1. Persistent cache (`.rustant/pricing_cache.json`)
+/// 2. Hardcoded fallback table ([`model_pricing`])
+/// 3. User-configured values from `LlmConfig`
+///
+/// When a model is first selected, its pricing is written to the cache file
+/// and never re-resolved unless explicitly cleared.
+pub struct PricingCache {
+    entries: std::collections::HashMap<String, PricingEntry>,
+    cache_path: std::path::PathBuf,
+    dirty: bool,
+}
+
+/// A single cached pricing entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PricingEntry {
+    /// Input cost per million tokens (USD).
+    pub input_cost_per_million: f64,
+    /// Output cost per million tokens (USD).
+    pub output_cost_per_million: f64,
+    /// Cache read discount multiplier (0.0-1.0, lower = bigger discount).
+    #[serde(default = "default_discount")]
+    pub cache_read_discount: f64,
+    /// Whether this was user-specified (takes priority over updates).
+    #[serde(default)]
+    pub user_set: bool,
+}
+
+fn default_discount() -> f64 {
+    1.0
+}
+
+impl PricingCache {
+    /// Load the pricing cache from the given directory (typically `.rustant/`).
+    ///
+    /// Creates a new empty cache if the file doesn't exist yet.
+    pub fn load(rustant_dir: &std::path::Path) -> Self {
+        let cache_path = rustant_dir.join("pricing_cache.json");
+        let entries = crate::persistence::load_json(&cache_path)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        Self {
+            entries,
+            cache_path,
+            dirty: false,
+        }
+    }
+
+    /// Resolve pricing for a model.
+    ///
+    /// Checks the persistent cache first. If not found, falls back to the
+    /// hardcoded pricing table and caches the result for future sessions.
+    /// Returns `None` only for completely unknown models.
+    pub fn resolve(&mut self, model: &str) -> Option<(f64, f64)> {
+        // Check persistent cache first
+        if let Some(entry) = self.entries.get(model) {
+            return Some((entry.input_cost_per_million, entry.output_cost_per_million));
+        }
+
+        // Fall back to hardcoded pricing
+        if let Some((input, output)) = model_pricing(model) {
+            let discount = cache_read_discount(model);
+            self.entries.insert(
+                model.to_string(),
+                PricingEntry {
+                    input_cost_per_million: input,
+                    output_cost_per_million: output,
+                    cache_read_discount: discount,
+                    user_set: false,
+                },
+            );
+            self.dirty = true;
+            return Some((input, output));
+        }
+
+        None
+    }
+
+    /// Set custom pricing for a model (user-specified, persists across sessions).
+    pub fn set_pricing(&mut self, model: &str, input: f64, output: f64) {
+        let discount = cache_read_discount(model);
+        self.entries.insert(
+            model.to_string(),
+            PricingEntry {
+                input_cost_per_million: input,
+                output_cost_per_million: output,
+                cache_read_discount: discount,
+                user_set: true,
+            },
+        );
+        self.dirty = true;
+    }
+
+    /// Get the cache read discount for a model (from cache or computed).
+    pub fn get_cache_discount(&mut self, model: &str) -> f64 {
+        if let Some(entry) = self.entries.get(model) {
+            return entry.cache_read_discount;
+        }
+        cache_read_discount(model)
+    }
+
+    /// Flush dirty cache entries to disk.
+    pub fn flush(&mut self) {
+        if self.dirty {
+            if let Err(e) = crate::persistence::atomic_write_json(&self.cache_path, &self.entries) {
+                tracing::warn!("Failed to persist pricing cache: {e}");
+            }
+            self.dirty = false;
+        }
+    }
+
+    /// Clear the cache (re-resolves from hardcoded on next access).
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.dirty = true;
+    }
+
+    /// Number of cached entries.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether the cache is empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+impl Drop for PricingCache {
+    fn drop(&mut self) {
+        self.flush();
+    }
+}
+
+/// Look up per-model pricing across all providers (hardcoded fallback table).
 ///
 /// Returns `(input_cost_per_million, output_cost_per_million)` for known models.
 /// Returns `None` for unknown models (callers should fall back to config values).
+///
+/// Prefer using [`PricingCache::resolve`] which checks persistent cache first
+/// and stores results for reuse across sessions.
 pub fn model_pricing(model: &str) -> Option<(f64, f64)> {
     // Normalize: strip date suffixes for Anthropic (e.g. "claude-sonnet-4-20250514" → "claude-sonnet-4")
     let normalized = model.to_lowercase();
 
-    // OpenAI models
+    // OpenAI models — check more specific prefixes before less specific ones
+    if normalized.starts_with("gpt-5-nano") {
+        return Some((0.05, 0.40));
+    }
+    if normalized.starts_with("gpt-5-mini") {
+        return Some((0.25, 2.00));
+    }
+    if normalized.starts_with("gpt-5") {
+        return Some((1.25, 10.00));
+    }
+    if normalized.starts_with("gpt-4.1-nano") {
+        return Some((0.10, 0.40));
+    }
+    if normalized.starts_with("gpt-4.1-mini") {
+        return Some((0.40, 1.60));
+    }
+    if normalized.starts_with("gpt-4.1") {
+        return Some((2.00, 8.00));
+    }
     if normalized.starts_with("gpt-4o-mini") {
         return Some((0.15, 0.60));
     }
@@ -446,39 +608,62 @@ pub fn model_pricing(model: &str) -> Option<(f64, f64)> {
     if normalized.starts_with("gpt-3.5-turbo") {
         return Some((0.50, 1.50));
     }
-    if normalized.starts_with("o1-mini") {
-        return Some((3.0, 12.0));
+    if normalized.starts_with("o4-mini") {
+        return Some((1.10, 4.40));
     }
     if normalized.starts_with("o3-mini") {
         return Some((1.10, 4.40));
+    }
+    if normalized.starts_with("o3") {
+        return Some((2.00, 8.00));
+    }
+    if normalized.starts_with("o1-mini") {
+        return Some((3.0, 12.0));
     }
     if normalized.starts_with("o1") {
         return Some((15.0, 60.0));
     }
 
-    // Anthropic models
+    // Anthropic models — check more specific variants before less specific ones
+    // claude-opus-4-6 and claude-opus-4-5 (newer, cheaper)
+    if normalized.contains("claude-opus-4-6") || normalized.contains("claude-opus-4-5") {
+        return Some((5.00, 25.00));
+    }
+    // claude-opus-4-1 and claude-opus-4 (original, more expensive) — also legacy claude-3-opus
     if normalized.contains("claude-opus-4") || normalized.contains("claude-3-opus") {
         return Some((15.0, 75.0));
     }
+    // claude-sonnet-4-6, claude-sonnet-4-5, claude-sonnet-4
     if normalized.contains("claude-sonnet-4")
         || normalized.contains("claude-3-5-sonnet")
         || normalized.contains("claude-3.5-sonnet")
     {
         return Some((3.0, 15.0));
     }
-    if normalized.contains("claude-3-5-haiku") || normalized.contains("claude-3.5-haiku") {
+    // claude-haiku-4-5
+    if normalized.contains("claude-haiku-4-5") {
+        return Some((1.00, 5.00));
+    }
+    // claude-haiku-3-5 / claude-3-5-haiku / claude-3.5-haiku
+    if normalized.contains("claude-haiku-3-5")
+        || normalized.contains("claude-3-5-haiku")
+        || normalized.contains("claude-3.5-haiku")
+    {
         return Some((0.80, 4.0));
     }
     if normalized.contains("claude-3-haiku") {
         return Some((0.25, 1.25));
     }
 
-    // Gemini models
+    // Gemini models — check more specific prefixes before less specific ones
     if normalized.starts_with("gemini-2.5-pro") {
         return Some((1.25, 10.0));
     }
+    if normalized.starts_with("gemini-2.5-flash-lite") {
+        return Some((0.10, 0.40));
+    }
     if normalized.starts_with("gemini-2.5-flash") {
-        return Some((0.15, 0.60));
+        return Some((0.30, 2.50));
     }
     if normalized.starts_with("gemini-2.0-flash") {
         return Some((0.10, 0.40));
@@ -513,6 +698,20 @@ pub fn model_pricing(model: &str) -> Option<(f64, f64)> {
     }
 
     None
+}
+
+/// Get the cache read cost discount multiplier for a provider.
+/// Returns a value between 0.0 and 1.0 where lower means bigger discount.
+pub fn cache_read_discount(model: &str) -> f64 {
+    if model.starts_with("claude-") {
+        0.10 // 90% discount
+    } else if model.starts_with("gpt-") || model.starts_with("o3") || model.starts_with("o4") {
+        0.50 // 50% discount
+    } else if model.starts_with("gemini-") {
+        0.10 // 90% discount
+    } else {
+        1.0 // No discount (e.g. local models)
+    }
 }
 
 #[cfg(test)]
@@ -741,13 +940,69 @@ mod tests {
 
     #[test]
     fn test_model_pricing_anthropic() {
+        // claude-opus-4 (original) — 15.0 / 75.0
         let (i, o) = model_pricing("claude-opus-4-20250514").unwrap();
         assert!((i - 15.0).abs() < f64::EPSILON);
         assert!((o - 75.0).abs() < f64::EPSILON);
 
+        // claude-opus-4-5 (newer, cheaper)
+        let (i, o) = model_pricing("claude-opus-4-5").unwrap();
+        assert!((i - 5.0).abs() < f64::EPSILON);
+        assert!((o - 25.0).abs() < f64::EPSILON);
+
+        // claude-opus-4-6 (newest, same price as 4-5)
+        let (i, o) = model_pricing("claude-opus-4-6").unwrap();
+        assert!((i - 5.0).abs() < f64::EPSILON);
+        assert!((o - 25.0).abs() < f64::EPSILON);
+
         let (i, o) = model_pricing("claude-sonnet-4-20250514").unwrap();
         assert!((i - 3.0).abs() < f64::EPSILON);
         assert!((o - 15.0).abs() < f64::EPSILON);
+
+        // claude-haiku-4-5
+        let (i, o) = model_pricing("claude-haiku-4-5").unwrap();
+        assert!((i - 1.0).abs() < f64::EPSILON);
+        assert!((o - 5.0).abs() < f64::EPSILON);
+
+        // claude-haiku-3-5
+        let (i, o) = model_pricing("claude-haiku-3-5").unwrap();
+        assert!((i - 0.80).abs() < f64::EPSILON);
+        assert!((o - 4.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_model_pricing_openai_new() {
+        let (i, o) = model_pricing("gpt-4.1").unwrap();
+        assert!((i - 2.0).abs() < f64::EPSILON);
+        assert!((o - 8.0).abs() < f64::EPSILON);
+
+        let (i, o) = model_pricing("gpt-4.1-mini").unwrap();
+        assert!((i - 0.40).abs() < f64::EPSILON);
+        assert!((o - 1.60).abs() < f64::EPSILON);
+
+        let (i, o) = model_pricing("gpt-4.1-nano").unwrap();
+        assert!((i - 0.10).abs() < f64::EPSILON);
+        assert!((o - 0.40).abs() < f64::EPSILON);
+
+        let (i, o) = model_pricing("gpt-5").unwrap();
+        assert!((i - 1.25).abs() < f64::EPSILON);
+        assert!((o - 10.0).abs() < f64::EPSILON);
+
+        let (i, o) = model_pricing("gpt-5-mini").unwrap();
+        assert!((i - 0.25).abs() < f64::EPSILON);
+        assert!((o - 2.0).abs() < f64::EPSILON);
+
+        let (i, o) = model_pricing("gpt-5-nano").unwrap();
+        assert!((i - 0.05).abs() < f64::EPSILON);
+        assert!((o - 0.40).abs() < f64::EPSILON);
+
+        let (i, o) = model_pricing("o3").unwrap();
+        assert!((i - 2.0).abs() < f64::EPSILON);
+        assert!((o - 8.0).abs() < f64::EPSILON);
+
+        let (i, o) = model_pricing("o4-mini").unwrap();
+        assert!((i - 1.10).abs() < f64::EPSILON);
+        assert!((o - 4.40).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -755,6 +1010,28 @@ mod tests {
         let (i, o) = model_pricing("gemini-2.5-pro").unwrap();
         assert!((i - 1.25).abs() < f64::EPSILON);
         assert!((o - 10.0).abs() < f64::EPSILON);
+
+        let (i, o) = model_pricing("gemini-2.5-flash").unwrap();
+        assert!((i - 0.30).abs() < f64::EPSILON);
+        assert!((o - 2.50).abs() < f64::EPSILON);
+
+        let (i, o) = model_pricing("gemini-2.5-flash-lite").unwrap();
+        assert!((i - 0.10).abs() < f64::EPSILON);
+        assert!((o - 0.40).abs() < f64::EPSILON);
+
+        let (i, o) = model_pricing("gemini-2.0-flash").unwrap();
+        assert!((i - 0.10).abs() < f64::EPSILON);
+        assert!((o - 0.40).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_cache_read_discount() {
+        assert!((cache_read_discount("claude-sonnet-4") - 0.10).abs() < f64::EPSILON);
+        assert!((cache_read_discount("gpt-4o") - 0.50).abs() < f64::EPSILON);
+        assert!((cache_read_discount("o3-mini") - 0.50).abs() < f64::EPSILON);
+        assert!((cache_read_discount("o4-mini") - 0.50).abs() < f64::EPSILON);
+        assert!((cache_read_discount("gemini-2.5-pro") - 0.10).abs() < f64::EPSILON);
+        assert!((cache_read_discount("llama3.1:8b") - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -767,5 +1044,74 @@ mod tests {
     #[test]
     fn test_model_pricing_unknown() {
         assert!(model_pricing("some-unknown-model").is_none());
+    }
+
+    #[test]
+    fn test_pricing_cache_resolve_and_persist() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut cache = PricingCache::load(dir.path());
+        assert!(cache.is_empty());
+
+        // First resolve populates from hardcoded table
+        let (i, o) = cache.resolve("gpt-4o").unwrap();
+        assert!((i - 2.50).abs() < f64::EPSILON);
+        assert!((o - 10.0).abs() < f64::EPSILON);
+        assert_eq!(cache.len(), 1);
+
+        // Second resolve returns cached value (no re-lookup)
+        let (i2, o2) = cache.resolve("gpt-4o").unwrap();
+        assert!((i2 - 2.50).abs() < f64::EPSILON);
+        assert!((o2 - 10.0).abs() < f64::EPSILON);
+
+        // Flush and reload
+        cache.flush();
+        let mut cache2 = PricingCache::load(dir.path());
+        let (i3, o3) = cache2.resolve("gpt-4o").unwrap();
+        assert!((i3 - 2.50).abs() < f64::EPSILON);
+        assert!((o3 - 10.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_pricing_cache_user_set() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut cache = PricingCache::load(dir.path());
+
+        cache.set_pricing("my-custom-model", 0.50, 1.50);
+        let (i, o) = cache.resolve("my-custom-model").unwrap();
+        assert!((i - 0.50).abs() < f64::EPSILON);
+        assert!((o - 1.50).abs() < f64::EPSILON);
+
+        // User-set persists across reload
+        cache.flush();
+        let mut cache2 = PricingCache::load(dir.path());
+        let (i2, o2) = cache2.resolve("my-custom-model").unwrap();
+        assert!((i2 - 0.50).abs() < f64::EPSILON);
+        assert!((o2 - 1.50).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_pricing_cache_unknown_returns_none() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut cache = PricingCache::load(dir.path());
+        assert!(cache.resolve("completely-unknown-model-xyz").is_none());
+    }
+
+    #[test]
+    fn test_pricing_cache_clear() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut cache = PricingCache::load(dir.path());
+        cache.resolve("gpt-4o");
+        assert_eq!(cache.len(), 1);
+        cache.clear();
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn test_pricing_cache_discount() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut cache = PricingCache::load(dir.path());
+        cache.resolve("claude-sonnet-4-20250514");
+        let d = cache.get_cache_discount("claude-sonnet-4-20250514");
+        assert!((d - 0.10).abs() < f64::EPSILON);
     }
 }

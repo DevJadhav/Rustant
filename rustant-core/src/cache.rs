@@ -125,6 +125,10 @@ pub struct CacheHint {
     pub enable_prompt_cache: bool,
     /// Provider-specific cached content reference (e.g., Gemini cachedContent name).
     pub cached_content_ref: Option<String>,
+    /// Predicted output content for speculative decoding (OpenAI Predicted Outputs).
+    /// When set, the provider includes a `prediction` field in the request body
+    /// to accelerate code-editing tasks via speculative decoding.
+    pub prediction_content: Option<String>,
 }
 
 #[cfg(test)]
@@ -221,5 +225,6 @@ mod tests {
         let hint = CacheHint::default();
         assert!(!hint.enable_prompt_cache);
         assert!(hint.cached_content_ref.is_none());
+        assert!(hint.prediction_content.is_none());
     }
 }

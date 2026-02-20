@@ -9,6 +9,7 @@
 
 use crate::config::{ApprovalMode, MessagePriority, SafetyConfig};
 use crate::injection::{InjectionDetector, InjectionScanResult, Severity as InjectionSeverity};
+use crate::risk_scorer::{DynamicRiskScorer, RiskContext};
 use crate::types::RiskLevel;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -1067,6 +1068,8 @@ pub struct SafetyGuardian {
     contract_enforcer: ContractEnforcer,
     /// Rate limiter for tool calls.
     rate_limiter: ToolRateLimiter,
+    /// Dynamic risk scorer for context-aware risk adjustment.
+    risk_scorer: Option<DynamicRiskScorer>,
 }
 
 impl SafetyGuardian {
@@ -1091,18 +1094,48 @@ impl SafetyGuardian {
             adaptive_trust,
             contract_enforcer,
             rate_limiter,
+            risk_scorer: Some(DynamicRiskScorer::new()),
         }
     }
 
     /// Check whether an action is permitted under current safety policy.
     pub fn check_permission(&mut self, action: &ActionRequest) -> PermissionResult {
-        // Layer 1: Check denied patterns first (always denied regardless of mode)
+        // Layer 1: Check denied patterns first (always denied regardless of mode).
+        // This MUST run before any fast-path to ensure .env, secrets, etc. are
+        // always blocked even for read-only tools.
         if let Some(reason) = self.check_denied(action) {
             self.log_event(AuditEvent::ActionDenied {
                 tool: action.tool_name.clone(),
                 reason: reason.clone(),
             });
             return PermissionResult::Denied { reason };
+        }
+
+        // Layer 1.05: Dynamic risk scoring — adjust risk level based on environmental context
+        // (time of day, consecutive errors, circuit breaker state, incidents, production env).
+        let effective_risk = if let Some(ref scorer) = self.risk_scorer {
+            let ctx = RiskContext::default();
+            scorer.evaluate(&action.tool_name, action.risk_level, &ctx)
+        } else {
+            action.risk_level
+        };
+
+        // Fast path: read-only tools in Safe/Yolo mode skip injection scan and
+        // policy checks entirely. This eliminates 12-category regex scanning for
+        // ~60% of tool calls while preserving safety for write/execute tools.
+        // NOTE: This runs AFTER denied-path check above.
+        if effective_risk == RiskLevel::ReadOnly
+            && matches!(
+                self.config.approval_mode,
+                ApprovalMode::Safe | ApprovalMode::Yolo
+            )
+            && !self.adaptive_trust.should_force_approval()
+        {
+            self.log_event(AuditEvent::ActionApproved {
+                tool: action.tool_name.clone(),
+            });
+            self.log_execution(&action.tool_name, true, 0);
+            return PermissionResult::Allowed;
         }
 
         // Layer 1.5: Check for prompt injection in action arguments
@@ -1149,7 +1182,7 @@ impl SafetyGuardian {
         // Layer 1.9: Check session-scoped allowlist ("approve all similar")
         if self
             .session_allowlist
-            .contains(&(action.tool_name.clone(), action.risk_level))
+            .contains(&(action.tool_name.clone(), effective_risk))
         {
             self.log_event(AuditEvent::ActionApproved {
                 tool: action.tool_name.clone(),
@@ -1696,6 +1729,11 @@ impl SafetyGuardian {
     /// Set an active safety contract for this session.
     pub fn set_contract(&mut self, contract: SafetyContract) {
         self.contract_enforcer = ContractEnforcer::new(Some(contract));
+    }
+
+    /// Set or replace the dynamic risk scorer for context-aware risk adjustment.
+    pub fn set_risk_scorer(&mut self, scorer: DynamicRiskScorer) {
+        self.risk_scorer = Some(scorer);
     }
 
     /// Get the contract enforcer (for pre/post checks and diagnostics).

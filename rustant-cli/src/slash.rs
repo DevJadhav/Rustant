@@ -1670,6 +1670,128 @@ impl CommandRegistry {
             ),
         });
 
+        // ── Deep Research & Pillars ──
+        self.register(CommandInfo {
+            name: "/deepresearch",
+            aliases: &["/dr"],
+            description: "Deep research: start, status, resume, sessions, report",
+            usage: "/deepresearch [start|status|resume|sessions|report|depth]",
+            category: CommandCategory::Agent,
+            detailed_help: Some(
+                "Multi-phase deep research engine.\n\n\
+                 Usage:\n  /deepresearch start <question>         — Start a new research session\n  \
+                 /deepresearch status                    — Show current session status\n  \
+                 /deepresearch resume <id>               — Resume a paused session\n  \
+                 /deepresearch sessions                  — List all saved sessions\n  \
+                 /deepresearch report [format]           — Generate report (summary|detailed|bibliography|roadmap)\n  \
+                 /deepresearch depth <quick|detailed|comprehensive> — Set research depth\n\n\
+                 Pipeline: decompose → query → synthesize → verify → report.\n\
+                 Sessions persist to .rustant/research/sessions/.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/decisions",
+            aliases: &["/agentexplain"],
+            description: "Show recent agent decisions with reasoning",
+            usage: "/decisions [count]",
+            category: CommandCategory::Agent,
+            detailed_help: Some(
+                "View the agent decision log for interpretability.\n\n\
+                 Usage:\n  /decisions          — Show last 10 decisions\n  \
+                 /decisions 20       — Show last 20 decisions\n  \
+                 /decisions all      — Show all recorded decisions\n\n\
+                 Each entry shows: action, reasoning, alternatives considered,\n\
+                 risk level, confidence, outcome, and expert/persona.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/dataflow",
+            aliases: &[],
+            description: "Show data flow tracking (transparency)",
+            usage: "/dataflow [recent|providers|stats]",
+            category: CommandCategory::Safety,
+            detailed_help: Some(
+                "View data flow records for transparency.\n\n\
+                 Usage:\n  /dataflow              — Show recent 20 data flows\n  \
+                 /dataflow recent [N]   — Show last N flows\n  \
+                 /dataflow providers    — Show flows grouped by LLM provider\n  \
+                 /dataflow stats        — Token counts and flow statistics\n\n\
+                 Tracks: user input → LLM, tool output → LLM, file content → tool,\n\
+                 memory facts → LLM, Siri voice input → daemon.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/consent",
+            aliases: &[],
+            description: "Manage user consent for data access",
+            usage: "/consent [status|grant|revoke|list]",
+            category: CommandCategory::Safety,
+            detailed_help: Some(
+                "Manage consent records for data access scopes.\n\n\
+                 Usage:\n  /consent status                   — Show consent overview\n  \
+                 /consent grant <scope> [ttl_hours]  — Grant consent for a scope\n  \
+                 /consent revoke <scope>             — Revoke consent\n  \
+                 /consent list                       — List all active consents\n\n\
+                 Scopes: provider:<name>, local_storage, memory_retention,\n\
+                 tool:<name>, channel:<name>, global.\n\
+                 State: .rustant/consent.json.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/siri",
+            aliases: &[],
+            description: "Siri integration: setup, activate, status",
+            usage: "/siri [setup|activate|deactivate|shortcuts|status|test]",
+            category: CommandCategory::System,
+            detailed_help: Some(
+                "Manage Siri voice control integration (macOS).\n\n\
+                 Usage:\n  /siri setup           — Install Siri shortcuts\n  \
+                 /siri activate        — Activate Siri mode\n  \
+                 /siri deactivate      — Deactivate Siri mode\n  \
+                 /siri shortcuts       — List available shortcuts\n  \
+                 /siri status          — Show Siri integration status\n  \
+                 /siri test <phrase>   — Test a Siri phrase\n\n\
+                 Requires: macOS 12+, Shortcuts app, rustant daemon running.",
+            ),
+        });
+        self.register(CommandInfo {
+            name: "/daemon",
+            aliases: &[],
+            description: "Background daemon: start, stop, status, install",
+            usage: "/daemon [start|stop|status|install|uninstall]",
+            category: CommandCategory::System,
+            detailed_help: Some(
+                "Manage the Rustant background daemon.\n\n\
+                 Usage:\n  /daemon start      — Start the background daemon\n  \
+                 /daemon stop       — Stop the daemon\n  \
+                 /daemon status     — Show daemon state and uptime\n  \
+                 /daemon install    — Install auto-start service (launchd/systemd)\n  \
+                 /daemon uninstall  — Remove auto-start service\n\n\
+                 The daemon keeps a warm agent with MoE cache, memory, and sessions.\n\
+                 Required for Siri integration and instant CLI response.",
+            ),
+        });
+
+        // ── MoE ──
+        self.register(CommandInfo {
+            name: "/moe",
+            aliases: &["/experts"],
+            description: "Mixture-of-Experts routing status and control",
+            usage: "/moe [status|route <task>|stats|reset]",
+            category: CommandCategory::Agent,
+            detailed_help: Some(
+                "Manage the Mixture-of-Experts (MoE) routing layer.\n\n\
+                 Usage:\n  /moe              — Show current MoE status\n  \
+                 /moe status       — Show expert hit rates and cache stats\n  \
+                 /moe route <task> — Preview which expert would handle a task\n  \
+                 /moe stats        — Detailed routing statistics\n  \
+                 /moe reset        — Clear classification cache and stats\n\n\
+                 The MoE router classifies tasks and dispatches them to specialized\n\
+                 expert agents (System, MacOS, DevOps, Security, ML, etc.), each with\n\
+                 a focused toolset of 10-25 tools instead of all 195.",
+            ),
+        });
+
         // ── Security ──
         self.register(CommandInfo {
             name: "/scan",
@@ -2080,10 +2202,10 @@ mod tests {
     #[test]
     fn test_register_defaults_populates() {
         let registry = CommandRegistry::with_defaults();
-        // We have 91+ commands registered (53 previous + 16 AI Engineer + 10 Fullstack Dev + 12 Security commands)
+        // We have 99+ commands registered (53 previous + 16 AI Engineer + 10 Fullstack Dev + 12 Security + 7 new pillars/research/siri/daemon + 1 MoE)
         assert!(
-            registry.len() >= 91,
-            "Expected at least 91 commands, got {}",
+            registry.len() >= 99,
+            "Expected at least 99 commands, got {}",
             registry.len()
         );
     }

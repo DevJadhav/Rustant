@@ -227,7 +227,9 @@ pub struct Agent {
     cancellation: CancellationToken,
     callback: Arc<dyn AgentCallback>,
     /// LLM-based context summarizer for intelligent compression.
-    summarizer: ContextSummarizer,
+    /// Lazily initialized on first use to avoid constructing an LLM-backed
+    /// summarizer when the agent never triggers context compression.
+    summarizer: Option<ContextSummarizer>,
     /// Token budget manager for cost control.
     budget: crate::brain::TokenBudgetManager,
     /// Cross-session knowledge distiller for learning from corrections/facts.
@@ -244,7 +246,7 @@ pub struct Agent {
     /// Resets when a different tool succeeds or a different tool is called.
     consecutive_failures: (String, usize),
     /// Recent decision explanations for transparency (capped at 50).
-    recent_explanations: Vec<DecisionExplanation>,
+    recent_explanations: std::collections::VecDeque<DecisionExplanation>,
     /// Optional output redactor for stripping secrets before storage.
     /// Set by CLI when security features are enabled.
     output_redactor: Option<crate::redact::SharedRedactor>,
@@ -256,6 +258,16 @@ pub struct Agent {
     persona_resolver: Option<crate::personas::PersonaResolver>,
     /// Most recent task classification (for persona auto-detection).
     last_classification: Option<crate::types::TaskClassification>,
+    /// Cached tool definitions keyed by classification, avoiding repeated clones.
+    cached_tool_defs: HashMap<Option<crate::types::TaskClassification>, Arc<Vec<ToolDefinition>>>,
+    /// Optional MoE router for expert-based tool filtering.
+    moe_router: Option<crate::moe::MoeRouter>,
+    /// Agent decision log for interpretability (tracks reasoning behind decisions).
+    decision_log: crate::decision_log::DecisionLog,
+    /// Data flow tracker for transparency (records data movements through the agent).
+    data_flow_tracker: crate::data_flow::DataFlowTracker,
+    /// Optional consent manager for tracking user consent per scope (provider, storage, etc.).
+    consent_manager: Option<crate::consent::ConsentManager>,
 }
 
 impl Agent {
@@ -264,8 +276,26 @@ impl Agent {
         config: AgentConfig,
         callback: Arc<dyn AgentCallback>,
     ) -> Self {
-        let summarizer = ContextSummarizer::new(Arc::clone(&provider));
-        let brain = Brain::new(provider, crate::brain::DEFAULT_SYSTEM_PROMPT);
+        let mut brain = Brain::new(provider, crate::brain::DEFAULT_SYSTEM_PROMPT);
+
+        // Bridge rate limits from config → Brain's rate limiter
+        if let Some(ref limits) = config.llm.rate_limits {
+            let rl_config = crate::providers::rate_limiter::RateLimitConfig {
+                itpm: limits.input_tokens_per_minute,
+                otpm: limits.output_tokens_per_minute,
+                rpm: limits.requests_per_minute,
+            };
+            if rl_config.itpm > 0 || rl_config.otpm > 0 || rl_config.rpm > 0 {
+                brain.set_rate_limits(rl_config);
+                debug!(
+                    itpm = limits.input_tokens_per_minute,
+                    otpm = limits.output_tokens_per_minute,
+                    rpm = limits.requests_per_minute,
+                    "Initialized rate limiter from config"
+                );
+            }
+        }
+
         let memory = MemorySystem::new(config.memory.window_size);
         let safety = SafetyGuardian::new(config.safety.clone());
         let max_iter = config.safety.max_iterations;
@@ -309,6 +339,32 @@ impl Agent {
             }
         };
 
+        // Initialize MoE router if configured and enabled
+        let moe_router = config
+            .moe
+            .as_ref()
+            .filter(|m| m.enabled)
+            .map(|m| crate::moe::MoeRouter::new(m.clone()));
+
+        // Initialize consent manager if consent framework is enabled
+        let consent_manager = config.consent.as_ref().filter(|c| c.enabled).map(|c| {
+            let policy = if c.require_explicit_provider_consent {
+                crate::consent::DefaultConsentPolicy::RequireExplicit
+            } else {
+                crate::consent::DefaultConsentPolicy::ImpliedGrant
+            };
+            // Try to load persisted consent records from ~/.rustant/consent.json
+            let persist_path = std::env::var("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_default()
+                .join(".rustant")
+                .join("consent.json");
+            let mut mgr = crate::consent::ConsentManager::with_persistence(persist_path);
+            mgr.default_policy = policy;
+            let _ = mgr.load();
+            mgr
+        });
+
         Self {
             brain,
             memory,
@@ -318,7 +374,7 @@ impl Agent {
             config,
             cancellation: CancellationToken::new(),
             callback,
-            summarizer,
+            summarizer: None,
             budget,
             knowledge,
             tool_token_usage: HashMap::new(),
@@ -326,18 +382,24 @@ impl Agent {
             heartbeat_manager,
             job_manager,
             consecutive_failures: (String::new(), 0),
-            recent_explanations: Vec::new(),
+            recent_explanations: std::collections::VecDeque::new(),
             output_redactor: None,
             plan_mode: plan_mode_enabled,
             current_plan: None,
             persona_resolver,
             last_classification: None,
+            cached_tool_defs: HashMap::new(),
+            moe_router,
+            decision_log: crate::decision_log::DecisionLog::new(),
+            data_flow_tracker: crate::data_flow::DataFlowTracker::new(),
+            consent_manager,
         }
     }
 
     /// Register a tool with the agent.
     pub fn register_tool(&mut self, tool: RegisteredTool) {
         self.tools.insert(tool.definition.name.clone(), tool);
+        self.invalidate_tool_def_cache();
     }
 
     /// Map a task classification to the set of tool names relevant for that task.
@@ -364,7 +426,9 @@ impl Agent {
         ];
 
         let extra: &[&str] = match classification {
-            TaskClassification::General | TaskClassification::Workflow(_) => return None,
+            TaskClassification::General
+            | TaskClassification::Workflow(_)
+            | TaskClassification::DeepResearch => return None,
             TaskClassification::FileOperation => &[
                 "file_patch",
                 "smart_edit",
@@ -476,6 +540,12 @@ impl Agent {
         &self,
         classification: Option<&TaskClassification>,
     ) -> Vec<ToolDefinition> {
+        // Check the cache first — avoids re-cloning all tool definitions per LLM call.
+        let cache_key = classification.cloned();
+        if let Some(cached) = self.cached_tool_defs.get(&cache_key) {
+            return (**cached).clone();
+        }
+
         let allowed = classification.and_then(Self::tools_for_classification);
 
         let mut defs: Vec<ToolDefinition> = if let Some(ref allowed_set) = allowed {
@@ -516,6 +586,45 @@ impl Agent {
         });
 
         defs
+    }
+
+    /// Warm the tool definition cache for the current classification.
+    /// Call this after tools are registered or when classification changes.
+    pub fn warm_tool_def_cache(&mut self, classification: Option<&TaskClassification>) {
+        let cache_key = classification.cloned();
+        let defs = {
+            let allowed = classification.and_then(Self::tools_for_classification);
+            let mut defs: Vec<ToolDefinition> = if let Some(ref allowed_set) = allowed {
+                self.tools
+                    .values()
+                    .filter(|t| allowed_set.contains(t.definition.name.as_str()))
+                    .map(|t| t.definition.clone())
+                    .collect()
+            } else {
+                self.tools.values().map(|t| t.definition.clone()).collect()
+            };
+            defs.push(ToolDefinition {
+                name: "ask_user".to_string(),
+                description: "Ask the user a clarifying question when you need more information to proceed. Use this when the task is ambiguous or you need to confirm something before taking action.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                            "description": "The question to ask the user"
+                        }
+                    },
+                    "required": ["question"]
+                }),
+            });
+            defs
+        };
+        self.cached_tool_defs.insert(cache_key, Arc::new(defs));
+    }
+
+    /// Invalidate the tool definition cache (e.g., when tools are added/removed).
+    pub fn invalidate_tool_def_cache(&mut self) {
+        self.cached_tool_defs.clear();
     }
 
     /// Process a user task through the agent loop.
@@ -559,6 +668,68 @@ impl Agent {
                 knowledge_addendum.push_str(&hint);
             }
         }
+        // Warm the tool definition cache for this classification so that
+        // tool_definitions() (which is &self) can serve cached results.
+        let classification_for_cache = self.state.task_classification.clone();
+        self.warm_tool_def_cache(classification_for_cache.as_ref());
+
+        // MoE: inject expert-specific system prompt addendum and precision hints
+        if let Some(ref mut router) = self.moe_router {
+            let route_result = router.route(task);
+            debug!(
+                expert = ?route_result.primary_expert(),
+                experts = route_result.selected_experts.len(),
+                tools = route_result.all_tool_names().len(),
+                tokens = route_result.total_tool_tokens,
+                cache_hit = route_result.cache_hit,
+                "MoE sparse-routed task to expert(s)"
+            );
+            knowledge_addendum.push_str("\n\n");
+            knowledge_addendum.push_str(&route_result.system_prompt_addendum);
+
+            // Pass precision hints to Brain for Anthropic Tool Search integration.
+            // Half/Quarter precision tools will be deferred (discovered on demand via
+            // tool_search_tool), while Full precision tools stay in the prompt.
+            let mut hints = std::collections::HashMap::new();
+            for (tool_name, precision) in &route_result.routed_tools {
+                hints.insert(tool_name.clone(), *precision);
+            }
+            // Mark shared tools as Full precision (never deferred)
+            for tool_name in &route_result.shared_tools {
+                hints.insert(tool_name.clone(), crate::moe::ToolPrecision::Full);
+            }
+            self.brain.set_tool_precision_hints(hints);
+
+            // Expert-aware prompt stripping: remove irrelevant system prompt sections
+            // based on the primary expert's domain (saves 500-1500 tokens per request).
+            let primary = route_result.primary_expert();
+            let exclusions = primary.system_prompt_exclusions();
+            self.brain.apply_expert_prompt_exclusions(exclusions);
+
+            // Log routing decision for interpretability (Pillar 5d)
+            let alternatives: Vec<String> = crate::moe::ExpertId::all()
+                .iter()
+                .filter(|&&e| !route_result.selected_experts.iter().any(|(id, _)| id == &e))
+                .take(3)
+                .map(|e| e.display_name().to_string())
+                .collect();
+            let decision_id = self.decision_log.record(
+                self.state.iteration,
+                format!("moe_route → {}", primary.display_name()),
+                &route_result.routing_reasoning,
+                "low",
+                crate::decision_log::DecisionOutcome::AutoApproved,
+            );
+            if let Some(entry) = self.decision_log.get_mut(decision_id) {
+                entry.alternatives = alternatives;
+                entry.expert = Some(primary.display_name().to_string());
+                entry.confidence = route_result
+                    .selected_experts
+                    .first()
+                    .map(|(_, score)| *score);
+            }
+        }
+
         // Hydration: inject relevant codebase context if configured
         if let Some(ref hydration_config) = self.config.hydration
             && hydration_config.enabled
@@ -693,6 +864,30 @@ impl Agent {
                 crate::brain::BudgetCheckResult::Ok => {}
             }
 
+            // Consent check: verify provider consent before sending data
+            if let Some(ref consent_mgr) = self.consent_manager {
+                let provider_name = self.brain.provider().model_name().to_string();
+                let scope = crate::consent::ConsentScope::Provider {
+                    provider: provider_name.clone(),
+                };
+                if !consent_mgr.check(&scope) {
+                    debug!(
+                        provider = provider_name,
+                        "Provider consent not granted, auto-granting for session"
+                    );
+                    // Auto-grant for the session (backward-compatible behavior).
+                    // In strict mode, this would prompt the user via ask_user.
+                    if let Some(ref mut mgr) = self.consent_manager {
+                        mgr.grant(
+                            scope,
+                            "Auto-granted for session",
+                            Some(24), // 24-hour TTL
+                        );
+                        let _ = mgr.persist();
+                    }
+                }
+            }
+
             // Cost prediction before LLM call
             {
                 let est_tokens = estimated_tokens + 500; // +500 for expected response
@@ -746,103 +941,7 @@ impl Agent {
                     );
                     self.memory.add_message(response.message.clone());
 
-                    // Build and emit decision explanation
-                    let explanation = self.build_decision_explanation(name, arguments);
-                    self.callback.on_decision_explanation(&explanation).await;
-                    self.record_explanation(explanation);
-
-                    // --- Tool call auto-correction ---
-                    // When the LLM calls a generic tool (document_read, file_read,
-                    // shell_exec) but the task clearly maps to a specific macOS tool,
-                    // reroute immediately. This is necessary because some LLMs
-                    // (notably gpt-4o) stubbornly call the wrong tool even with
-                    // explicit system prompt instructions.
-                    let (actual_name, actual_args) = if let Some((corrected_name, corrected_args)) =
-                        Self::auto_correct_tool_call(name, arguments, &self.state)
-                    {
-                        if corrected_name != *name {
-                            info!(
-                                original_tool = name,
-                                corrected_tool = corrected_name,
-                                "Auto-routing to correct macOS tool"
-                            );
-                            self.callback
-                                .on_assistant_message(&format!(
-                                    "[Routed: {name} → {corrected_name}]"
-                                ))
-                                .await;
-                            (corrected_name, corrected_args)
-                        } else {
-                            (name.to_string(), arguments.clone())
-                        }
-                    } else {
-                        (name.to_string(), arguments.clone())
-                    };
-
-                    // --- ACT ---
-                    let result = self.execute_tool(id, &actual_name, &actual_args).await;
-                    if let Err(ref e) = result {
-                        debug!(tool = %actual_name, error = %e, "Tool execution failed");
-                    }
-
-                    // --- OBSERVE ---
-                    let result_tokens = match &result {
-                        Ok(output) => {
-                            let result_msg = Message::tool_result(id, &output.content, false);
-                            let tokens = output.content.len() / 4; // rough estimate
-                            self.memory.add_message(result_msg);
-                            tokens
-                        }
-                        Err(e) => {
-                            let error_msg = format!("Tool error: {e}");
-                            let tokens = error_msg.len() / 4;
-                            let result_msg = Message::tool_result(id, &error_msg, true);
-                            self.memory.add_message(result_msg);
-                            tokens
-                        }
-                    };
-                    *self.tool_token_usage.entry(name.to_string()).or_insert(0) += result_tokens;
-
-                    // Track consecutive failures for circuit breaker
-                    if result.is_err() {
-                        if self.consecutive_failures.0 == *name {
-                            self.consecutive_failures.1 += 1;
-                        } else {
-                            self.consecutive_failures = (name.to_string(), 1);
-                        }
-                    } else {
-                        self.consecutive_failures = (String::new(), 0);
-                    }
-
-                    // Verification hook: after file writes, optionally run lint/test/typecheck
-                    if result.is_ok()
-                        && (actual_name == "file_write"
-                            || actual_name == "file_patch"
-                            || actual_name == "smart_edit")
-                        && let Some(ref verify_config) = self.config.verification
-                        && verify_config.run_on_file_write
-                    {
-                        let workspace = std::env::current_dir().unwrap_or_default();
-                        let verify_result = crate::verification::runner::run_verification(
-                            &workspace,
-                            verify_config,
-                        )
-                        .await;
-                        if !verify_result.passed {
-                            let feedback =
-                                crate::verification::feedback::format_feedback(&verify_result);
-                            let feedback_msg = Message::tool_result(
-                                id,
-                                format!("[Verification failed]\n{feedback}"),
-                                true,
-                            );
-                            self.memory.add_message(feedback_msg);
-                            debug!(
-                                errors = verify_result.error_count(),
-                                "Verification failed after file write"
-                            );
-                        }
-                    }
+                    self.handle_tool_call(id, name, arguments).await;
 
                     // Check context compression
                     self.check_and_compress().await;
@@ -866,98 +965,7 @@ impl Agent {
                                 arguments,
                             } => {
                                 has_tool_call = true;
-
-                                // Build and emit decision explanation (same as single ToolCall path)
-                                let explanation = self.build_decision_explanation(name, arguments);
-                                self.callback.on_decision_explanation(&explanation).await;
-                                self.record_explanation(explanation);
-
-                                // Auto-routing (same as single ToolCall path)
-                                let (actual_name, actual_args) = if let Some((cn, ca)) =
-                                    Self::auto_correct_tool_call(name, arguments, &self.state)
-                                {
-                                    if cn != *name {
-                                        info!(
-                                            original_tool = name,
-                                            corrected_tool = cn,
-                                            "Auto-routing to correct macOS tool (multipart)"
-                                        );
-                                        self.callback
-                                            .on_assistant_message(&format!(
-                                                "[Routed: {name} → {cn}]"
-                                            ))
-                                            .await;
-                                        (cn, ca)
-                                    } else {
-                                        (name.to_string(), arguments.clone())
-                                    }
-                                } else {
-                                    (name.to_string(), arguments.clone())
-                                };
-
-                                let result =
-                                    self.execute_tool(id, &actual_name, &actual_args).await;
-                                let result_tokens = match &result {
-                                    Ok(output) => {
-                                        let msg = Message::tool_result(id, &output.content, false);
-                                        let tokens = output.content.len() / 4;
-                                        self.memory.add_message(msg);
-                                        tokens
-                                    }
-                                    Err(e) => {
-                                        let error_msg = format!("Tool error: {e}");
-                                        let tokens = error_msg.len() / 4;
-                                        let msg = Message::tool_result(id, &error_msg, true);
-                                        self.memory.add_message(msg);
-                                        tokens
-                                    }
-                                };
-
-                                // Track failures and token usage
-                                if result.is_err() {
-                                    if self.consecutive_failures.0 == *name {
-                                        self.consecutive_failures.1 += 1;
-                                    } else {
-                                        self.consecutive_failures = (name.to_string(), 1);
-                                    }
-                                } else {
-                                    self.consecutive_failures = (String::new(), 0);
-                                }
-                                *self.tool_token_usage.entry(name.to_string()).or_insert(0) +=
-                                    result_tokens;
-
-                                // Verification hook (same as single ToolCall path)
-                                if result.is_ok()
-                                    && (actual_name == "file_write"
-                                        || actual_name == "file_patch"
-                                        || actual_name == "smart_edit")
-                                    && let Some(ref verify_config) = self.config.verification
-                                    && verify_config.run_on_file_write
-                                {
-                                    let workspace = std::env::current_dir().unwrap_or_default();
-                                    let verify_result =
-                                        crate::verification::runner::run_verification(
-                                            &workspace,
-                                            verify_config,
-                                        )
-                                        .await;
-                                    if !verify_result.passed {
-                                        let feedback =
-                                            crate::verification::feedback::format_feedback(
-                                                &verify_result,
-                                            );
-                                        let feedback_msg = Message::tool_result(
-                                            id,
-                                            format!("[Verification failed]\n{feedback}"),
-                                            true,
-                                        );
-                                        self.memory.add_message(feedback_msg);
-                                        debug!(
-                                            errors = verify_result.error_count(),
-                                            "Verification failed after file write (multipart)"
-                                        );
-                                    }
-                                }
+                                self.handle_tool_call(id, name, arguments).await;
                             }
                             _ => {}
                         }
@@ -1257,6 +1265,7 @@ impl Agent {
             usage,
             model: self.brain.model_name().to_string(),
             finish_reason: Some(finish_reason.to_string()),
+            rate_limit_headers: None,
         })
     }
 
@@ -1284,22 +1293,23 @@ impl Agent {
             return Ok(ToolOutput::text(answer));
         }
 
-        // Look up the tool
-        let tool = self
+        // Look up the tool — extract risk_level once (Copy) to avoid repeated HashMap lookups.
+        let risk_level = self
             .tools
             .get(tool_name)
             .ok_or_else(|| ToolError::NotFound {
                 name: tool_name.to_string(),
-            })?;
+            })?
+            .risk_level;
 
         // Build rich approval context from action details
         let details = Self::parse_action_details(tool_name, arguments);
-        let approval_context = Self::build_approval_context(tool_name, &details, tool.risk_level);
+        let approval_context = Self::build_approval_context(tool_name, &details, risk_level);
 
         // Build action request with rich context
         let action = SafetyGuardian::create_rich_action_request(
             tool_name,
-            tool.risk_level,
+            risk_level,
             format!("Execute tool: {tool_name}"),
             details,
             approval_context,
@@ -1345,10 +1355,10 @@ impl Agent {
                     ApprovalDecision::ApproveAllSimilar => {
                         // Add to session allowlist for future auto-approval
                         self.safety
-                            .add_session_allowlist(tool_name.to_string(), tool.risk_level);
+                            .add_session_allowlist(tool_name.to_string(), risk_level);
                         info!(
                             tool = tool_name,
-                            risk = %tool.risk_level,
+                            risk = %risk_level,
                             "Added tool to session allowlist (approve all similar)"
                         );
                     }
@@ -1391,14 +1401,7 @@ impl Agent {
             }
         }
 
-        // Check safety contract pre-conditions
-        let tool_entry = self
-            .tools
-            .get(tool_name)
-            .ok_or_else(|| ToolError::NotFound {
-                name: tool_name.to_string(),
-            })?;
-        let risk_level = tool_entry.risk_level;
+        // Check safety contract pre-conditions (risk_level already extracted above)
         let contract_result = self
             .safety
             .contract_enforcer_mut()
@@ -1433,15 +1436,11 @@ impl Agent {
 
         let start = Instant::now();
 
-        // Re-fetch the executor (borrow checker requires separate borrow from the one above)
-        let executor = &self
-            .tools
-            .get(tool_name)
-            .ok_or_else(|| ToolError::NotFound {
-                name: tool_name.to_string(),
-            })?
-            .executor;
-        let result = (executor)(arguments.clone()).await;
+        // Borrow executor separately (all &mut self calls above have completed)
+        let result = {
+            let executor = &self.tools[tool_name].executor;
+            (executor)(arguments.clone()).await
+        };
         let duration_ms = start.elapsed().as_millis() as u64;
 
         // Record execution in contract enforcer
@@ -1492,12 +1491,148 @@ impl Agent {
         result
     }
 
+    /// Handle a single tool call: auto-correction, execution, observation, failure tracking,
+    /// token usage, and verification hook. Extracted to eliminate duplication between the
+    /// single-ToolCall and MultiPart code paths.
+    async fn handle_tool_call(&mut self, id: &str, name: &str, arguments: &serde_json::Value) {
+        // Build and emit decision explanation
+        let explanation = self.build_decision_explanation(name, arguments);
+        self.callback.on_decision_explanation(&explanation).await;
+        self.record_explanation(explanation);
+
+        // Auto-correction: reroute wrong tool calls
+        let (actual_name, actual_args) =
+            if let Some((cn, ca)) = Self::auto_correct_tool_call(name, arguments, &self.state) {
+                if cn != *name {
+                    info!(
+                        original_tool = name,
+                        corrected_tool = cn,
+                        "Auto-routing to correct tool"
+                    );
+                    self.callback
+                        .on_assistant_message(&format!("[Routed: {name} → {cn}]"))
+                        .await;
+                    (cn, ca)
+                } else {
+                    (name.to_string(), arguments.clone())
+                }
+            } else {
+                (name.to_string(), arguments.clone())
+            };
+
+        // Execute tool
+        let result = self.execute_tool(id, &actual_name, &actual_args).await;
+        if let Err(ref e) = result {
+            debug!(tool = %actual_name, error = %e, "Tool execution failed");
+        }
+
+        // Observe: store result in memory
+        let result_tokens = match &result {
+            Ok(output) => {
+                let msg = Message::tool_result(id, &output.content, false);
+                let tokens = output.content.len() / 4;
+                self.memory.add_message(msg);
+                tokens
+            }
+            Err(e) => {
+                let error_msg = format!("Tool error: {e}");
+                let tokens = error_msg.len() / 4;
+                let msg = Message::tool_result(id, &error_msg, true);
+                self.memory.add_message(msg);
+                tokens
+            }
+        };
+        *self.tool_token_usage.entry(name.to_string()).or_insert(0) += result_tokens;
+
+        // Track consecutive failures for circuit breaker
+        if result.is_err() {
+            if self.consecutive_failures.0 == name {
+                self.consecutive_failures.1 += 1;
+            } else {
+                self.consecutive_failures = (name.to_string(), 1);
+            }
+        } else {
+            self.consecutive_failures = (String::new(), 0);
+        }
+
+        // Verification hook: after file writes, optionally run lint/test/typecheck
+        if result.is_ok()
+            && (actual_name == "file_write"
+                || actual_name == "file_patch"
+                || actual_name == "smart_edit")
+            && let Some(ref verify_config) = self.config.verification
+            && verify_config.run_on_file_write
+        {
+            let workspace = std::env::current_dir().unwrap_or_default();
+            let verify_result =
+                crate::verification::runner::run_verification(&workspace, verify_config).await;
+            if !verify_result.passed {
+                let feedback = crate::verification::feedback::format_feedback(&verify_result);
+                let feedback_msg =
+                    Message::tool_result(id, format!("[Verification failed]\n{feedback}"), true);
+                self.memory.add_message(feedback_msg);
+                debug!(
+                    errors = verify_result.error_count(),
+                    "Verification failed after file write"
+                );
+            }
+        }
+    }
+
     /// Record a decision explanation, capping at 50 entries.
     fn record_explanation(&mut self, explanation: DecisionExplanation) {
         if self.recent_explanations.len() >= 50 {
-            self.recent_explanations.remove(0);
+            self.recent_explanations.pop_front();
         }
-        self.recent_explanations.push(explanation);
+        // Also log to the decision log for interpretability
+        let iteration = self.state.iteration;
+        let action = match &explanation.decision_type {
+            crate::explanation::DecisionType::ToolSelection { selected_tool } => {
+                selected_tool.clone()
+            }
+            crate::explanation::DecisionType::ParameterChoice { tool, parameter } => {
+                format!("{tool}:{parameter}")
+            }
+            crate::explanation::DecisionType::TaskDecomposition { .. } => {
+                "task_decomposition".to_string()
+            }
+            crate::explanation::DecisionType::ErrorRecovery { strategy, .. } => {
+                format!("error_recovery:{strategy}")
+            }
+            crate::explanation::DecisionType::ModelSelection { selected_model, .. } => {
+                format!("model_selection:{selected_model}")
+            }
+            crate::explanation::DecisionType::RetrievalStrategy { strategy, .. } => {
+                format!("retrieval:{strategy}")
+            }
+            crate::explanation::DecisionType::SafetyOverride { rule, .. } => {
+                format!("safety_override:{rule}")
+            }
+            crate::explanation::DecisionType::EvaluationJudgement { evaluator, .. } => {
+                format!("eval:{evaluator}")
+            }
+        };
+        let reasoning = explanation
+            .reasoning_chain
+            .iter()
+            .map(|s| s.description.as_str())
+            .collect::<Vec<_>>()
+            .join("; ");
+        let risk_level_str = if explanation.confidence < 0.3 {
+            "high"
+        } else if explanation.confidence < 0.7 {
+            "medium"
+        } else {
+            "low"
+        };
+        self.decision_log.record(
+            iteration,
+            &action,
+            &reasoning,
+            risk_level_str,
+            crate::decision_log::DecisionOutcome::Pending,
+        );
+        self.recent_explanations.push_back(explanation);
     }
 
     /// Build rich approval context from action details, providing users with
@@ -3034,7 +3169,9 @@ impl Agent {
     /// Auto-correct a tool call when the LLM is stuck calling the wrong tool.
     /// Returns Some((corrected_name, corrected_args)) if a correction is possible.
     /// Uses the cached `TaskClassification` from `AgentState` for O(1) matching.
-    #[cfg(target_os = "macos")]
+    ///
+    /// Cross-platform: common corrections (Slack, ArXiv, WebSearch) work everywhere.
+    /// macOS-specific corrections (Clipboard, SystemInfo, AppControl) are gated by cfg.
     fn auto_correct_tool_call(
         failed_tool: &str,
         _args: &serde_json::Value,
@@ -3043,51 +3180,52 @@ impl Agent {
         let classification = state.task_classification.as_ref()?;
         let task = state.current_goal.as_deref().unwrap_or("");
 
+        // Cross-platform corrections
         match classification {
-            // Redirect GUI scripting / app control / shell to slack for Slack tasks
             TaskClassification::Slack
                 if matches!(
                     failed_tool,
-                    "macos_gui_scripting" | "macos_app_control" | "shell_exec"
+                    "shell_exec" | "web_fetch" | "macos_gui_scripting" | "macos_app_control"
                 ) =>
             {
-                Some((
+                return Some((
                     "slack".to_string(),
                     serde_json::json!({"action": "send_message"}),
-                ))
+                ));
             }
-            // Redirect Safari/shell/curl to arxiv_research for paper tasks
             TaskClassification::ArxivResearch
                 if matches!(
                     failed_tool,
                     "macos_safari" | "shell_exec" | "web_fetch" | "web_search"
                 ) =>
             {
-                Some((
+                return Some((
                     "arxiv_research".to_string(),
                     serde_json::json!({"action": "search", "query": task, "max_results": 10}),
-                ))
+                ));
             }
-            // Redirect Safari/shell to web_search for general web searches
             TaskClassification::WebSearch
                 if matches!(failed_tool, "macos_safari" | "shell_exec") =>
             {
-                Some(("web_search".to_string(), serde_json::json!({"query": task})))
+                return Some(("web_search".to_string(), serde_json::json!({"query": task})));
             }
-            // Redirect generic file/shell tools to clipboard
+            _ => {}
+        }
+
+        // macOS-specific corrections
+        #[cfg(target_os = "macos")]
+        match classification {
             TaskClassification::Clipboard
                 if matches!(failed_tool, "document_read" | "file_read" | "shell_exec") =>
             {
-                Some((
+                return Some((
                     "macos_clipboard".to_string(),
                     serde_json::json!({"action": "read"}),
-                ))
+                ));
             }
-            // Redirect to system_info based on classification
             TaskClassification::SystemInfo
                 if matches!(failed_tool, "document_read" | "file_read" | "shell_exec") =>
             {
-                // Use the task text to pick the right sub-action
                 let lower = task.to_lowercase();
                 let action = if lower.contains("battery") {
                     "battery"
@@ -3100,40 +3238,20 @@ impl Agent {
                 } else {
                     "version"
                 };
-                Some((
+                return Some((
                     "macos_system_info".to_string(),
                     serde_json::json!({"action": action}),
-                ))
+                ));
             }
-            // Redirect to app_control
             TaskClassification::AppControl
                 if matches!(failed_tool, "document_read" | "file_read" | "shell_exec") =>
             {
-                Some((
+                return Some((
                     "macos_app_control".to_string(),
                     serde_json::json!({"action": "list_running"}),
-                ))
+                ));
             }
-            _ => None,
-        }
-    }
-
-    /// Non-macOS fallback — Slack auto-correction only.
-    #[cfg(not(target_os = "macos"))]
-    fn auto_correct_tool_call(
-        failed_tool: &str,
-        _args: &serde_json::Value,
-        state: &AgentState,
-    ) -> Option<(String, serde_json::Value)> {
-        let classification = state.task_classification.as_ref()?;
-
-        if matches!(classification, TaskClassification::Slack)
-            && matches!(failed_tool, "shell_exec" | "web_fetch")
-        {
-            return Some((
-                "slack".to_string(),
-                serde_json::json!({"action": "send_message"}),
-            ));
+            _ => {}
         }
 
         None
@@ -3419,8 +3537,33 @@ impl Agent {
     }
 
     /// Get recent decision explanations for transparency.
-    pub fn recent_explanations(&self) -> &[DecisionExplanation] {
-        &self.recent_explanations
+    pub fn recent_explanations(&self) -> Vec<&DecisionExplanation> {
+        self.recent_explanations.iter().collect()
+    }
+
+    /// Get a reference to the decision log for interpretability queries.
+    pub fn decision_log(&self) -> &crate::decision_log::DecisionLog {
+        &self.decision_log
+    }
+
+    /// Get a mutable reference to the data flow tracker.
+    pub fn data_flow_tracker_mut(&mut self) -> &mut crate::data_flow::DataFlowTracker {
+        &mut self.data_flow_tracker
+    }
+
+    /// Get a reference to the data flow tracker.
+    pub fn data_flow_tracker(&self) -> &crate::data_flow::DataFlowTracker {
+        &self.data_flow_tracker
+    }
+
+    /// Get a reference to the consent manager, if initialized.
+    pub fn consent_manager(&self) -> Option<&crate::consent::ConsentManager> {
+        self.consent_manager.as_ref()
+    }
+
+    /// Get a mutable reference to the consent manager, if initialized.
+    pub fn consent_manager_mut(&mut self) -> Option<&mut crate::consent::ConsentManager> {
+        self.consent_manager.as_mut()
     }
 
     /// Get a reference to the persona resolver, if initialized.
@@ -3436,6 +3579,16 @@ impl Agent {
     /// Get the most recent task classification.
     pub fn last_classification(&self) -> &Option<crate::types::TaskClassification> {
         &self.last_classification
+    }
+
+    /// Get a reference to the MoE router, if enabled.
+    pub fn moe_router(&self) -> Option<&crate::moe::MoeRouter> {
+        self.moe_router.as_ref()
+    }
+
+    /// Get a mutable reference to the MoE router, if enabled.
+    pub fn moe_router_mut(&mut self) -> Option<&mut crate::moe::MoeRouter> {
+        self.moe_router.as_mut()
     }
 
     /// Get per-tool token usage breakdown (tool_name -> estimated tokens).
@@ -3823,7 +3976,26 @@ impl Agent {
             return;
         }
 
-        debug!("Triggering LLM-based context compression");
+        // Aggressively mask stale observations first — any tool result more than
+        // 2x window_size messages old is replaced with a compact summary regardless
+        // of whether the assistant has consumed it. This catches long-lived tool
+        // outputs that persist across many iterations.
+        let stale_age = self.config.memory.window_size * 2;
+        let stale_masked = self.memory.short_term.mask_stale_observations(stale_age, 200);
+        if stale_masked > 0 {
+            debug!(stale_masked, "Masked stale tool observations by age");
+        }
+
+        // Then mask consumed observations (tool results already used by assistant)
+        // to reduce input to the summarizer and overall context size.
+        let masked = self.memory.short_term.mask_consumed_observations(500);
+        if masked > 0 {
+            debug!(
+                masked_count = masked,
+                "Masked consumed tool observations before compression"
+            );
+        }
+
         let msgs_to_summarize: Vec<crate::types::Message> = self
             .memory
             .short_term
@@ -3834,7 +4006,12 @@ impl Agent {
         let msgs_count = msgs_to_summarize.len();
         let pinned_count = self.memory.short_term.pinned_count();
 
-        let (summary_text, was_llm) = match self.summarizer.summarize(&msgs_to_summarize).await {
+        // Lazily initialize the summarizer on first context compression.
+        let summarizer = self
+            .summarizer
+            .get_or_insert_with(|| ContextSummarizer::new(self.brain.provider_arc()));
+
+        let (summary_text, was_llm) = match summarizer.summarize(&msgs_to_summarize).await {
             Ok(result) => {
                 info!(
                     messages_summarized = result.messages_summarized,

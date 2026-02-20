@@ -291,9 +291,9 @@ mod tests {
         client.initialize(&mut client_transport).await.unwrap();
 
         let tools = client.discover_tools(&mut client_transport).await.unwrap();
-        // 72 base (macOS) + 33 security = 105; 45 base + 33 security = 78
+        // 73 base (macOS) + 33 security = 106; 45 base + 33 security = 78
         #[cfg(target_os = "macos")]
-        let expected_tools = 105;
+        let expected_tools = 106;
         #[cfg(not(target_os = "macos"))]
         let expected_tools = 78;
         assert_eq!(tools.len(), expected_tools);

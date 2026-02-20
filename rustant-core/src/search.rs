@@ -189,6 +189,8 @@ pub struct HybridSearchEngine {
     embedder: Box<dyn crate::embeddings::Embedder>,
     // In-memory vector store (backed by SQLite for persistence)
     vectors: HashMap<String, Vec<f32>>,
+    /// Number of documents added since last Tantivy commit (for batching).
+    pending_count: usize,
 }
 
 impl std::fmt::Debug for HybridSearchEngine {
@@ -250,10 +252,15 @@ impl HybridSearchEngine {
             content_field,
             embedder,
             vectors: HashMap::new(),
+            pending_count: 0,
         })
     }
 
     /// Index a fact for both full-text and vector search.
+    ///
+    /// Commits are batched: Tantivy writes are committed every 100 documents
+    /// to reduce I/O overhead. Call [`flush`] to force a commit of any
+    /// pending documents (e.g. at the end of bulk indexing).
     pub fn index_fact(&mut self, fact_id: &str, content: &str) -> Result<(), SearchError> {
         // Tantivy full-text
         self.writer
@@ -263,9 +270,10 @@ impl HybridSearchEngine {
             ))
             .map_err(|e| SearchError::IndexError(format!("Failed to add document: {e}")))?;
 
-        self.writer
-            .commit()
-            .map_err(|e| SearchError::IndexError(format!("Failed to commit: {e}")))?;
+        self.pending_count += 1;
+        if self.pending_count >= 100 {
+            self.flush()?;
+        }
 
         // Vector embedding
         let embedding = self.embedder.embed(content);
@@ -274,8 +282,24 @@ impl HybridSearchEngine {
         Ok(())
     }
 
+    /// Flush any pending Tantivy writes to disk.
+    ///
+    /// Call this after bulk indexing to ensure all documents are committed.
+    pub fn flush(&mut self) -> Result<(), SearchError> {
+        if self.pending_count > 0 {
+            self.writer
+                .commit()
+                .map_err(|e| SearchError::IndexError(format!("Failed to commit: {e}")))?;
+            self.pending_count = 0;
+        }
+        Ok(())
+    }
+
     /// Remove a fact from the index.
     pub fn remove_fact(&mut self, fact_id: &str) -> Result<(), SearchError> {
+        // Flush pending writes before deleting to avoid stale data.
+        self.flush()?;
+
         let term = tantivy::Term::from_field_text(self.id_field, fact_id);
         self.writer.delete_term(term);
         self.writer
@@ -600,6 +624,7 @@ mod tests {
         engine
             .index_fact("f3", "JavaScript runs in the browser")
             .unwrap();
+        engine.flush().unwrap(); // Flush batched commits before searching
 
         let results = engine.search_text("Rust programming").unwrap();
         assert!(!results.is_empty());
@@ -636,6 +661,7 @@ mod tests {
         engine
             .index_fact("f3", "JavaScript browser frontend development")
             .unwrap();
+        engine.flush().unwrap(); // Flush batched commits before searching
 
         let results = engine.search("Rust programming").unwrap();
         assert!(!results.is_empty());

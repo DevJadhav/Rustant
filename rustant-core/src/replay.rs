@@ -540,6 +540,43 @@ pub fn describe_event(kind: &TraceEventKind) -> String {
                 if *success { "ok" } else { "failed" }
             )
         }
+        // Research, Siri, consent, and daemon events
+        TraceEventKind::ResearchStarted {
+            session_id,
+            question,
+            depth,
+        } => {
+            format!("Research started: {question} (depth: {depth}, session: {session_id})")
+        }
+        TraceEventKind::ResearchCompleted {
+            session_id,
+            sources_count,
+            confidence,
+        } => {
+            format!(
+                "Research completed: session {session_id} ({sources_count} sources, confidence: {confidence:.2})"
+            )
+        }
+        TraceEventKind::SiriCommandReceived { command } => {
+            format!("Siri command: {command}")
+        }
+        TraceEventKind::ConsentGranted { scope } => {
+            format!("Consent granted: {scope}")
+        }
+        TraceEventKind::ConsentRevoked { scope } => {
+            format!("Consent revoked: {scope}")
+        }
+        TraceEventKind::DataFlowRecorded {
+            source,
+            destination,
+            token_count,
+        } => {
+            format!("Data flow: {source} -> {destination} ({token_count} tokens)")
+        }
+        TraceEventKind::DaemonStarted { pid } => {
+            format!("Daemon started (PID {pid})")
+        }
+        TraceEventKind::DaemonStopped => "Daemon stopped".to_string(),
     }
 }
 

@@ -40,6 +40,8 @@ pub mod knowledge_graph;
 pub mod life_planner;
 pub mod lint;
 pub mod lsp;
+#[macro_use]
+pub mod macros;
 #[cfg(target_os = "macos")]
 pub mod macos;
 #[cfg(target_os = "macos")]
@@ -59,6 +61,8 @@ pub mod scaffold;
 pub mod screen_analyze;
 pub mod self_improvement;
 pub mod shell;
+#[cfg(target_os = "macos")]
+pub mod siri;
 pub mod skill_tracker;
 pub mod slack;
 pub mod smart_edit;
@@ -198,6 +202,7 @@ pub fn register_builtin_tools_with_progress(
         tools.push(Arc::new(voice_tool::MacosSayTool::new()));
         tools.push(Arc::new(photos::MacosPhotosTool::new()));
         tools.push(Arc::new(homekit::HomeKitTool::new()));
+        tools.push(Arc::new(siri::SiriIntegrationTool));
     }
 
     for tool in tools {
@@ -236,7 +241,7 @@ mod tests {
 
         // 45 base + 3 iMessage + 24 macOS native = 72 on macOS
         #[cfg(target_os = "macos")]
-        assert_eq!(registry.len(), 72);
+        assert_eq!(registry.len(), 73);
         #[cfg(not(target_os = "macos"))]
         assert_eq!(registry.len(), 45);
 

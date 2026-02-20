@@ -39,12 +39,8 @@ impl FeatureStore {
         values: &HashMap<String, serde_json::Value>,
     ) -> Result<(), MlError> {
         let dir = self.base_dir.join(feature_group);
-        std::fs::create_dir_all(&dir)?;
         let path = dir.join(format!("{entity_key}.json"));
-        let content = serde_json::to_string_pretty(values)?;
-        let tmp = path.with_extension("tmp");
-        std::fs::write(&tmp, &content)?;
-        std::fs::rename(&tmp, &path)?;
+        rustant_core::persistence::atomic_write_json(&path, values)?;
         Ok(())
     }
 

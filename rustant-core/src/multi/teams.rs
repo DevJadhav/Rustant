@@ -102,6 +102,8 @@ pub enum CoordinationStrategy {
     ReviewChain,
     /// Planner → Executor → Verifier.
     PlanExecuteVerify,
+    /// MoE router classifies task → dispatches to specialized expert agent.
+    MoeRouting,
 }
 
 /// Registry of defined agent teams.

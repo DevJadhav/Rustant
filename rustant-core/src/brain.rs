@@ -4,15 +4,39 @@
 //! and provides an OpenAI-compatible implementation with streaming support.
 
 use crate::error::LlmError;
+use std::collections::HashMap;
 use crate::types::{
     CompletionRequest, CompletionResponse, Content, CostEstimate, Message, Role, StreamEvent,
     TokenUsage, ToolDefinition,
 };
 use async_trait::async_trait;
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
+
+/// Cached BPE instances wrapped in `Arc` for zero-copy sharing.
+///
+/// Building a `CoreBPE` is expensive (regex compilation for 128 threads,
+/// large hash maps of BPE ranks). tiktoken-rs provides `*_singleton()`
+/// functions backed by `lazy_static`, but those return `&'static CoreBPE`
+/// which cannot be stored without lifetime propagation. Instead, we wrap
+/// the singletons in `Arc` once and share them across all `TokenCounter`
+/// instances.
+static CL100K_ARC: OnceLock<Arc<tiktoken_rs::CoreBPE>> = OnceLock::new();
+static O200K_ARC: OnceLock<Arc<tiktoken_rs::CoreBPE>> = OnceLock::new();
+
+fn cached_cl100k() -> Arc<tiktoken_rs::CoreBPE> {
+    Arc::clone(CL100K_ARC.get_or_init(|| {
+        Arc::new(tiktoken_rs::cl100k_base().expect("cl100k_base should be available"))
+    }))
+}
+
+fn cached_o200k() -> Arc<tiktoken_rs::CoreBPE> {
+    Arc::clone(O200K_ARC.get_or_init(|| {
+        Arc::new(tiktoken_rs::o200k_base().expect("o200k_base should be available"))
+    }))
+}
 
 /// Trait for LLM providers, supporting both full and streaming completions.
 #[async_trait]
@@ -95,17 +119,38 @@ pub trait LlmProvider: Send + Sync {
 }
 
 /// Token counter using tiktoken-rs for accurate BPE tokenization.
+///
+/// Uses `Arc<CoreBPE>` internally so that commonly-used tokenizers (cl100k_base,
+/// o200k_base) are built once and shared across all `TokenCounter` instances.
 pub struct TokenCounter {
-    bpe: tiktoken_rs::CoreBPE,
+    bpe: Arc<tiktoken_rs::CoreBPE>,
 }
 
 impl TokenCounter {
     /// Create a token counter for the given model.
-    /// Falls back to cl100k_base if the model isn't recognized.
+    ///
+    /// Uses a cached BPE for cl100k_base and o200k_base (the two most common
+    /// tokenizers), avoiding expensive regex compilation and hash-map construction
+    /// on repeated calls. Falls back to cl100k_base for unrecognized models.
     pub fn for_model(model: &str) -> Self {
-        let bpe = tiktoken_rs::get_bpe_from_model(model).unwrap_or_else(|_| {
-            tiktoken_rs::cl100k_base().expect("cl100k_base should be available")
-        });
+        use tiktoken_rs::tokenizer::{Tokenizer, get_tokenizer};
+
+        let bpe = match get_tokenizer(model) {
+            Some(Tokenizer::Cl100kBase) => cached_cl100k(),
+            Some(Tokenizer::O200kBase | Tokenizer::O200kHarmony) => cached_o200k(),
+            Some(_other) => {
+                // Rare tokenizer (p50k, r50k, gpt2) — build on demand, not cached.
+                // These models are rarely used, so the one-time cost is acceptable.
+                match tiktoken_rs::get_bpe_from_model(model) {
+                    Ok(bpe) => Arc::new(bpe),
+                    Err(_) => cached_cl100k(),
+                }
+            }
+            None => {
+                // Unknown model (Anthropic, Gemini, Ollama, etc.) — use cl100k fallback
+                cached_cl100k()
+            }
+        };
         Self { bpe }
     }
 
@@ -311,6 +356,18 @@ pub struct Brain {
     token_counter: TokenCounter,
     /// Optional knowledge addendum appended to system prompt from distilled rules.
     knowledge_addendum: String,
+    /// Cached concatenated system prompt (system_prompt + knowledge_addendum).
+    /// Invalidated when `set_knowledge_addendum` is called.
+    cached_full_prompt: Option<String>,
+    /// Optional client-side rate limiter for proactive throttling.
+    rate_limiter: Option<crate::providers::rate_limiter::TokenBucketLimiter>,
+    /// Per-tool precision hints from MoE sparse routing.
+    /// Passed to providers that support deferred tool loading (e.g., Anthropic Tool Search).
+    /// Half/Quarter precision tools are deferred; Full and shared tools stay in prompt.
+    tool_precision_hints: HashMap<String, crate::moe::ToolPrecision>,
+    /// Per-provider cost breakdown for transparency.
+    /// Key is provider name (e.g., "anthropic", "openai", "gemini"), value is accumulated cost.
+    costs_by_provider: HashMap<String, CostEstimate>,
 }
 
 impl Brain {
@@ -323,12 +380,78 @@ impl Brain {
             total_cost: CostEstimate::default(),
             token_counter: TokenCounter::for_model(&model_name),
             knowledge_addendum: String::new(),
+            cached_full_prompt: None,
+            rate_limiter: None,
+            tool_precision_hints: HashMap::new(),
+            costs_by_provider: HashMap::new(),
+        }
+    }
+
+    /// Configure client-side rate limiting from provider limits.
+    ///
+    /// When configured, `think()` will proactively wait before sending requests
+    /// to stay within provider rate limits instead of relying on 429 backpressure.
+    pub fn set_rate_limits(&mut self, config: crate::providers::rate_limiter::RateLimitConfig) {
+        self.rate_limiter = Some(crate::providers::rate_limiter::TokenBucketLimiter::new(
+            config,
+        ));
+    }
+
+    /// Update rate limits from provider response headers (raw HeaderMap).
+    pub fn update_rate_limits_from_headers(&mut self, headers: &reqwest::header::HeaderMap) {
+        let (itpm, otpm, rpm) = crate::providers::rate_limiter::parse_rate_limit_headers(headers);
+        if itpm.is_some() || otpm.is_some() || rpm.is_some() {
+            let limiter = self.rate_limiter.get_or_insert_with(|| {
+                crate::providers::rate_limiter::TokenBucketLimiter::new(Default::default())
+            });
+            limiter.update_from_headers(itpm, otpm, rpm);
+        }
+    }
+
+    /// Update rate limits from parsed response headers embedded in CompletionResponse.
+    pub fn update_rate_limits_from_response(&mut self, headers: &crate::types::RateLimitHeaders) {
+        if headers.itpm_limit.is_some()
+            || headers.otpm_limit.is_some()
+            || headers.rpm_limit.is_some()
+        {
+            let limiter = self.rate_limiter.get_or_insert_with(|| {
+                crate::providers::rate_limiter::TokenBucketLimiter::new(Default::default())
+            });
+            limiter.update_from_headers(headers.itpm_limit, headers.otpm_limit, headers.rpm_limit);
         }
     }
 
     /// Set knowledge addendum (distilled rules) to append to the system prompt.
     pub fn set_knowledge_addendum(&mut self, addendum: String) {
         self.knowledge_addendum = addendum;
+        self.cached_full_prompt = None; // invalidate cache
+    }
+
+    /// Apply expert-aware system prompt stripping.
+    ///
+    /// Removes lines from the system prompt that contain irrelevant keywords
+    /// based on the MoE expert's exclusion list. This saves 500-1500 tokens
+    /// per request for domain-specific experts (e.g., ML expert doesn't need
+    /// macOS/AppleScript instructions).
+    pub fn apply_expert_prompt_exclusions(&mut self, exclusions: &[&str]) {
+        if exclusions.is_empty() {
+            return;
+        }
+        let optimizer = crate::moe::PromptOptimizer::default();
+        self.system_prompt = optimizer.strip_irrelevant_sections(&self.system_prompt, exclusions);
+        self.cached_full_prompt = None; // invalidate cache
+    }
+
+    /// Set MoE tool precision hints for the next completion request.
+    ///
+    /// Providers that support deferred tool loading (e.g., Anthropic Tool Search)
+    /// will map Half/Quarter precision tools to `defer_loading: true`, reducing
+    /// prompt token cost for secondary/tertiary expert tools to zero.
+    pub fn set_tool_precision_hints(
+        &mut self,
+        hints: HashMap<String, crate::moe::ToolPrecision>,
+    ) {
+        self.tool_precision_hints = hints;
     }
 
     /// Estimate token count for messages using tiktoken-rs.
@@ -349,6 +472,43 @@ impl Brain {
         total
     }
 
+    /// Extract prediction content from the conversation for OpenAI Predicted Outputs.
+    ///
+    /// When the last tool result in the conversation is from `file_read`, its output
+    /// is likely to appear (largely unchanged) in the LLM's response for code-editing
+    /// tasks. Providing it as a prediction hint enables speculative decoding, yielding
+    /// 2-4x faster output for OpenAI models. Other providers ignore this field.
+    fn extract_prediction_content(conversation: &[Message]) -> Option<String> {
+        // Walk backwards to find the last tool result
+        for msg in conversation.iter().rev() {
+            match &msg.content {
+                Content::ToolResult { output, is_error, .. } => {
+                    if *is_error || output.len() < 100 || output.len() > 50_000 {
+                        return None;
+                    }
+                    return Some(output.clone());
+                }
+                Content::MultiPart { parts } => {
+                    // Check the last ToolResult in a multi-part message
+                    for part in parts.iter().rev() {
+                        if let Content::ToolResult { output, is_error, .. } = part {
+                            if *is_error || output.len() < 100 || output.len() > 50_000 {
+                                return None;
+                            }
+                            return Some(output.clone());
+                        }
+                    }
+                }
+                Content::Text { .. } if msg.role == Role::Assistant => {
+                    // If the last message is assistant text, skip and keep looking
+                    continue;
+                }
+                _ => return None,
+            }
+        }
+        None
+    }
+
     /// Construct messages for the LLM with system prompt prepended.
     ///
     /// If a knowledge addendum has been set via `set_knowledge_addendum()`,
@@ -356,14 +516,19 @@ impl Brain {
     ///
     /// After assembly, [`sanitize_tool_sequence`] runs to ensure tool_call→tool_result
     /// ordering is never broken regardless of compression, pinning, or system message injection.
-    pub fn build_messages(&self, conversation: &[Message]) -> Vec<Message> {
+    pub fn build_messages(&mut self, conversation: &[Message]) -> Vec<Message> {
         let mut messages = Vec::with_capacity(conversation.len() + 1);
-        if self.knowledge_addendum.is_empty() {
-            messages.push(Message::system(&self.system_prompt));
-        } else {
-            let augmented = format!("{}{}", self.system_prompt, self.knowledge_addendum);
-            messages.push(Message::system(&augmented));
+        // Use cached full prompt to avoid per-request format!() allocation.
+        if self.cached_full_prompt.is_none() {
+            self.cached_full_prompt = Some(if self.knowledge_addendum.is_empty() {
+                self.system_prompt.clone()
+            } else {
+                format!("{}{}", self.system_prompt, self.knowledge_addendum)
+            });
         }
+        messages.push(Message::system(
+            self.cached_full_prompt.as_ref().unwrap().clone(),
+        ));
         messages.extend_from_slice(conversation);
         sanitize_tool_sequence(&mut messages);
         messages
@@ -395,6 +560,21 @@ impl Brain {
             "Sending completion request"
         );
 
+        // Client-side rate limiting: wait if approaching provider limits
+        if let Some(ref mut limiter) = self.rate_limiter {
+            if let Some(delay) = limiter.check(token_estimate) {
+                debug!(
+                    delay_ms = delay.as_millis(),
+                    "Rate limiter: proactively delaying request"
+                );
+                tokio::time::sleep(delay).await;
+            }
+        }
+
+        // OpenAI Predicted Outputs: if the last tool result looks like file content,
+        // provide it as a prediction hint for speculative decoding (2-4x faster output).
+        let prediction_content = Self::extract_prediction_content(conversation);
+
         let request = CompletionRequest {
             messages,
             tools,
@@ -405,11 +585,23 @@ impl Brain {
             cache_hint: crate::cache::CacheHint {
                 enable_prompt_cache: self.provider.supports_caching(),
                 cached_content_ref: None,
+                prediction_content,
             },
+            tool_precision_hints: self.tool_precision_hints.clone(),
             ..Default::default()
         };
 
         let response = self.provider.complete(request).await?;
+
+        // Update rate limits from provider response headers
+        if let Some(ref rl_headers) = response.rate_limit_headers {
+            self.update_rate_limits_from_response(rl_headers);
+        }
+
+        // Record actual usage in rate limiter
+        if let Some(ref mut limiter) = self.rate_limiter {
+            limiter.record(response.usage.input_tokens, response.usage.output_tokens);
+        }
 
         // Track usage (cache-aware)
         self.track_usage(&response.usage);
@@ -488,6 +680,21 @@ impl Brain {
     ) -> Result<(), LlmError> {
         let messages = self.build_messages(conversation);
 
+        // Client-side rate limiting for streaming requests
+        if let Some(ref mut limiter) = self.rate_limiter {
+            let token_estimate = self.provider.estimate_tokens(&messages);
+            if let Some(delay) = limiter.check(token_estimate) {
+                debug!(
+                    delay_ms = delay.as_millis(),
+                    "Rate limiter: proactively delaying streaming request"
+                );
+                tokio::time::sleep(delay).await;
+            }
+        }
+
+        // OpenAI Predicted Outputs: speculative decoding from last file content
+        let prediction_content = Self::extract_prediction_content(conversation);
+
         let request = CompletionRequest {
             messages,
             tools,
@@ -498,7 +705,9 @@ impl Brain {
             cache_hint: crate::cache::CacheHint {
                 enable_prompt_cache: self.provider.supports_caching(),
                 cached_content_ref: None,
+                prediction_content,
             },
+            tool_precision_hints: self.tool_precision_hints.clone(),
             ..Default::default()
         };
 
@@ -561,10 +770,22 @@ impl Brain {
             cache_savings,
         };
         self.total_cost.accumulate(&cost);
+
+        // Per-provider cost tracking for transparency
+        let provider_name = self.provider.model_name().to_string();
+        self.costs_by_provider
+            .entry(provider_name)
+            .or_default()
+            .accumulate(&cost);
+    }
+
+    /// Get per-provider cost breakdown for transparency reporting.
+    pub fn costs_by_provider(&self) -> &HashMap<String, CostEstimate> {
+        &self.costs_by_provider
     }
 
     /// Get the current token usage as a fraction of the context window.
-    pub fn context_usage_ratio(&self, conversation: &[Message]) -> f32 {
+    pub fn context_usage_ratio(&mut self, conversation: &[Message]) -> f32 {
         let messages = self.build_messages(conversation);
         let tokens = self.provider.estimate_tokens(&messages);
         tokens as f32 / self.provider.context_window() as f32
@@ -614,6 +835,7 @@ impl MockLlmProvider {
             },
             model: "mock-model".to_string(),
             finish_reason: Some("stop".to_string()),
+            rate_limit_headers: None,
         }
     }
 
@@ -632,6 +854,7 @@ impl MockLlmProvider {
             },
             model: "mock-model".to_string(),
             finish_reason: Some("tool_calls".to_string()),
+            rate_limit_headers: None,
         }
     }
 
@@ -659,6 +882,7 @@ impl MockLlmProvider {
             },
             model: "mock-model".to_string(),
             finish_reason: Some("tool_calls".to_string()),
+            rate_limit_headers: None,
         }
     }
 }
@@ -776,7 +1000,7 @@ Workflows (structured multi-step templates — run via shell_exec "rustant workf
   code_review, refactor, test_generation, documentation, dependency_update,
   security_scan, deployment, incident_response, morning_briefing, pr_review,
   dependency_audit, changelog, meeting_recorder, daily_briefing_full,
-  end_of_day_summary, app_automation, email_triage, arxiv_research,
+  end_of_day_summary, app_automation, email_triage, arxiv_research, deep_research,
   knowledge_graph, experiment_tracking, code_analysis, content_pipeline,
   skill_development, career_planning, system_monitoring, life_planning,
   privacy_audit, self_improvement_loop, compliance_audit
@@ -1037,7 +1261,7 @@ mod tests {
     #[tokio::test]
     async fn test_brain_builds_messages_with_system_prompt() {
         let provider = Arc::new(MockLlmProvider::new());
-        let brain = Brain::new(provider, "system prompt");
+        let mut brain = Brain::new(provider, "system prompt");
         let conversation = vec![Message::user("hello")];
 
         let messages = brain.build_messages(&conversation);
@@ -1050,7 +1274,7 @@ mod tests {
     #[test]
     fn test_brain_context_usage_ratio() {
         let provider = Arc::new(MockLlmProvider::new());
-        let brain = Brain::new(provider, "system");
+        let mut brain = Brain::new(provider, "system");
         let conversation = vec![Message::user("short message")];
 
         let ratio = brain.context_usage_ratio(&conversation);

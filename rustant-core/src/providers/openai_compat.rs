@@ -176,7 +176,7 @@ impl OpenAiCompatibleProvider {
         let supports_tools = meta.as_ref().map(|m| m.supports_tools).unwrap_or(true);
 
         Ok(Self {
-            client: Client::new(),
+            client: super::shared_http_client(),
             base_url,
             api_key,
             model: config.model.clone(),
@@ -443,6 +443,7 @@ impl OpenAiCompatibleProvider {
             usage,
             model: resp_model,
             finish_reason,
+            rate_limit_headers: None,
         })
     }
 
@@ -594,20 +595,21 @@ impl OpenAiCompatibleProvider {
             },
         }
     }
-}
 
-#[async_trait]
-impl LlmProvider for OpenAiCompatibleProvider {
-    async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, LlmError> {
-        let url = format!("{}/chat/completions", self.base_url);
-
+    /// Build the JSON request body for OpenAI-compatible APIs.
+    /// Shared between `complete()` and `complete_streaming()`.
+    fn build_request_body(&self, request: &CompletionRequest, stream: bool) -> Value {
         let messages_json = Self::fix_openai_turns(Self::messages_to_json(&request.messages));
         let mut body = json!({
             "model": request.model.as_deref().unwrap_or(&self.model),
             "messages": messages_json,
             "temperature": request.temperature,
-            "stream": false,
+            "stream": stream,
         });
+
+        if stream {
+            body["stream_options"] = json!({ "include_usage": true });
+        }
 
         if let Some(max_tokens) = request.max_tokens {
             body["max_tokens"] = json!(max_tokens);
@@ -621,7 +623,6 @@ impl LlmProvider for OpenAiCompatibleProvider {
             body["tools"] = json!(Self::tools_to_json(tools));
         }
 
-        // Structured output / response format
         if let Some(ref format) = request.response_format {
             match format {
                 crate::types::ResponseFormat::JsonObject => {
@@ -645,7 +646,6 @@ impl LlmProvider for OpenAiCompatibleProvider {
             }
         }
 
-        // Tool choice
         match &request.tool_choice {
             crate::types::ToolChoice::Auto => {}
             crate::types::ToolChoice::Required => {
@@ -659,10 +659,29 @@ impl LlmProvider for OpenAiCompatibleProvider {
             }
         }
 
-        // Seed for deterministic outputs
         if let Some(seed) = request.seed {
             body["seed"] = json!(seed);
         }
+
+        // OpenAI Predicted Outputs: include a `prediction` field for speculative
+        // decoding when a prediction hint is provided. This accelerates code-editing
+        // tasks where most of the output is known ahead of time.
+        if let Some(ref prediction_text) = request.cache_hint.prediction_content {
+            body["prediction"] = json!({
+                "type": "content",
+                "content": [{"type": "text", "text": prediction_text}]
+            });
+        }
+
+        body
+    }
+}
+
+#[async_trait]
+impl LlmProvider for OpenAiCompatibleProvider {
+    async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, LlmError> {
+        let url = format!("{}/chat/completions", self.base_url);
+        let body = self.build_request_body(&request, false);
 
         debug!(url = %url, model = %self.model, "Sending OpenAI completion request");
 
@@ -679,6 +698,9 @@ impl LlmProvider for OpenAiCompatibleProvider {
             })?;
 
         let status = response.status();
+        // Capture rate limit headers before consuming the response body.
+        let rl_headers =
+            crate::providers::rate_limiter::parse_rate_limit_headers(response.headers());
         let response_body = response.text().await.map_err(|e| LlmError::ApiRequest {
             message: format!("Failed to read response body: {e}"),
         })?;
@@ -692,7 +714,13 @@ impl LlmProvider for OpenAiCompatibleProvider {
                 message: format!("Invalid JSON: {e}"),
             })?;
 
-        Self::parse_response(&json, &self.model)
+        let mut resp = Self::parse_response(&json, &self.model)?;
+        resp.rate_limit_headers = Some(crate::types::RateLimitHeaders {
+            itpm_limit: rl_headers.0,
+            rpm_limit: rl_headers.2,
+            otpm_limit: rl_headers.1,
+        });
+        Ok(resp)
     }
 
     async fn complete_streaming(
@@ -701,69 +729,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
         tx: mpsc::Sender<StreamEvent>,
     ) -> Result<(), LlmError> {
         let url = format!("{}/chat/completions", self.base_url);
-
-        let messages_json = Self::fix_openai_turns(Self::messages_to_json(&request.messages));
-        let mut body = json!({
-            "model": request.model.as_deref().unwrap_or(&self.model),
-            "messages": messages_json,
-            "temperature": request.temperature,
-            "stream": true,
-            "stream_options": { "include_usage": true },
-        });
-
-        if let Some(max_tokens) = request.max_tokens {
-            body["max_tokens"] = json!(max_tokens);
-        }
-        if !request.stop_sequences.is_empty() {
-            body["stop"] = json!(request.stop_sequences);
-        }
-        if let Some(tools) = &request.tools
-            && !tools.is_empty()
-        {
-            body["tools"] = json!(Self::tools_to_json(tools));
-        }
-
-        // Structured output / response format (streaming)
-        if let Some(ref format) = request.response_format {
-            match format {
-                crate::types::ResponseFormat::JsonObject => {
-                    body["response_format"] = json!({"type": "json_object"});
-                }
-                crate::types::ResponseFormat::JsonSchema {
-                    name,
-                    schema,
-                    strict,
-                } => {
-                    body["response_format"] = json!({
-                        "type": "json_schema",
-                        "json_schema": {
-                            "name": name,
-                            "schema": schema,
-                            "strict": strict,
-                        }
-                    });
-                }
-                crate::types::ResponseFormat::Text => {}
-            }
-        }
-
-        // Tool choice (streaming)
-        match &request.tool_choice {
-            crate::types::ToolChoice::Auto => {}
-            crate::types::ToolChoice::Required => {
-                body["tool_choice"] = json!("required");
-            }
-            crate::types::ToolChoice::None => {
-                body["tool_choice"] = json!("none");
-            }
-            crate::types::ToolChoice::Specific(name) => {
-                body["tool_choice"] = json!({"type": "function", "function": {"name": name}});
-            }
-        }
-
-        if let Some(seed) = request.seed {
-            body["seed"] = json!(seed);
-        }
+        let body = self.build_request_body(&request, true);
 
         let response = self
             .client
@@ -964,6 +930,7 @@ mod tests {
             auth_method: String::new(),
             api_key: None,
             retry: crate::config::RetryConfig::default(),
+            rate_limits: None,
         }
     }
 
@@ -1371,5 +1338,63 @@ mod tests {
         let messages: Vec<Value> = vec![];
         let result = OpenAiCompatibleProvider::fix_openai_turns(messages);
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_build_request_body_with_prediction() {
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var("RUSTANT_TEST_OPENAI_KEY", "sk-test-prediction") };
+        let config = test_config();
+        let provider = OpenAiCompatibleProvider::new(&config).unwrap();
+
+        let request = CompletionRequest {
+            messages: vec![Message::user("Edit this code")],
+            cache_hint: crate::cache::CacheHint {
+                enable_prompt_cache: false,
+                cached_content_ref: None,
+                prediction_content: Some("fn main() {\n    println!(\"hello\");\n}".to_string()),
+            },
+            ..Default::default()
+        };
+
+        let body = provider.build_request_body(&request, false);
+
+        // Verify the prediction field is present with correct structure
+        assert!(body.get("prediction").is_some(), "prediction field missing");
+        assert_eq!(body["prediction"]["type"], "content");
+        let content = body["prediction"]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 1);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(
+            content[0]["text"],
+            "fn main() {\n    println!(\"hello\");\n}"
+        );
+
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("RUSTANT_TEST_OPENAI_KEY") };
+    }
+
+    #[test]
+    fn test_build_request_body_without_prediction() {
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var("RUSTANT_TEST_OPENAI_KEY", "sk-test-no-pred") };
+        let config = test_config();
+        let provider = OpenAiCompatibleProvider::new(&config).unwrap();
+
+        let request = CompletionRequest {
+            messages: vec![Message::user("Hello")],
+            ..Default::default()
+        };
+
+        let body = provider.build_request_body(&request, false);
+
+        // Prediction field should NOT be present when prediction_content is None
+        assert!(
+            body.get("prediction").is_none(),
+            "prediction field should not be present"
+        );
+
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var("RUSTANT_TEST_OPENAI_KEY") };
     }
 }

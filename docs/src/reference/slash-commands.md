@@ -53,6 +53,8 @@ Rustant provides 110+ slash commands in the interactive REPL. Type `/help` to se
 | `/career goals\|achieve\|portfolio\|gaps` | `/portfolio` | Career strategy and portfolio |
 | `/monitor add\|topology\|check\|incident` | `/sysmon`, `/health` | Service monitoring and health checks |
 | `/planner deadline\|habits\|daily\|review` | `/plan-life`, `/deadlines` | Life planning with energy-aware scheduling |
+| `/deepresearch start\|status\|resume\|sessions\|report` | `/dr` | Deep multi-phase research with source synthesis |
+| `/decisions [n]` | `/agentexplain` | Show recent agent decisions with reasoning |
 
 ## Safety
 
@@ -63,6 +65,8 @@ Rustant provides 110+ slash commands in the interactive REPL. Type `/help` to se
 | `/trust` | | Show safety trust dashboard with per-tool approval stats |
 | `/audit [show\|verify\|export\|query]` | | Show, query, export, or verify audit trail |
 | `/privacy boundaries\|audit\|compliance\|export` | `/priv` | Privacy management and data boundaries |
+| `/dataflow [recent\|filter\|stats\|persist]` | | Track and inspect data flow through the agent |
+| `/consent status\|grant\|revoke\|list` | | Manage user consent for data usage scopes |
 
 ## Development
 
@@ -106,6 +110,8 @@ Rustant provides 110+ slash commands in the interactive REPL. Type `/help` to se
 | `/cdc [status\|on\|off\|interval\|enable\|disable\|cursors\|style]` | | Change Data Capture channel polling |
 | `/voicecmd [on\|off\|status]` | `/vc` | Toggle voice command mode |
 | `/record [start\|stop\|status]` | `/rec` | Toggle meeting recording |
+| `/siri setup\|activate\|deactivate\|shortcuts\|status\|test` | | Siri voice integration (macOS) |
+| `/daemon start\|stop\|status\|install\|uninstall` | | Manage background daemon process |
 
 ## UI
 

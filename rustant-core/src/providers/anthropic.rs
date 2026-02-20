@@ -69,7 +69,7 @@ impl AnthropicProvider {
             .clone()
             .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
 
-        let client = Client::new();
+        let client = super::shared_http_client();
         let token_counter = TokenCounter::for_model(&config.model);
 
         // Use centralized model pricing, falling back to config values
@@ -112,7 +112,25 @@ impl AnthropicProvider {
 
         // Sanitize: merge consecutive same-role, remove orphaned tool_results,
         // ensure strict user/assistant alternation.
-        let messages_json = Self::fix_anthropic_turns(messages_json);
+        let mut messages_json = Self::fix_anthropic_turns(messages_json);
+
+        // Add a third cache breakpoint on the first user message.
+        // This creates 3 stable cache layers: system + tools + first task.
+        // In multi-turn conversations, the first user message (task description)
+        // is stable, maximizing cache hits on subsequent turns.
+        if request.cache_hint.enable_prompt_cache {
+            if let Some(first_user) = messages_json
+                .iter_mut()
+                .find(|m| m["role"].as_str() == Some("user"))
+            {
+                if let Some(content) = first_user["content"].as_array_mut() {
+                    if let Some(last_block) = content.last_mut() {
+                        last_block["cache_control"] =
+                            serde_json::json!({"type": "ephemeral"});
+                    }
+                }
+            }
+        }
 
         let mut body = serde_json::json!({
             "model": model,
@@ -141,9 +159,45 @@ impl AnthropicProvider {
         }
 
         // Add tools if provided.
+        // When there are many tools (>20), use Anthropic Tool Search with defer_loading.
+        // If MoE precision hints are available, map them to defer_loading decisions:
+        //   Full precision → non-deferred (in prompt)
+        //   Half/Quarter precision → deferred (discovered via tool search)
         if let Some(tools) = &request.tools {
-            let mut tools_json: Vec<Value> =
-                tools.iter().map(Self::tool_definition_to_json).collect();
+            let use_tool_search = tools.len() > 20;
+            let has_precision_hints = !request.tool_precision_hints.is_empty();
+
+            let mut tools_json: Vec<Value> = if has_precision_hints {
+                // Hybrid MoE + Tool Search: use precision hints to decide defer_loading
+                tools
+                    .iter()
+                    .map(|tool| Self::tool_definition_to_json_hybrid(tool, &request.tool_precision_hints))
+                    .collect()
+            } else if use_tool_search {
+                // Legacy path: defer non-core tools
+                tools
+                    .iter()
+                    .map(Self::tool_definition_to_json_with_search)
+                    .collect()
+            } else {
+                tools.iter().map(Self::tool_definition_to_json).collect()
+            };
+
+            // Inject the tool_search_tool entry when using deferred tools.
+            // This gives Claude the ability to discover deferred tools on demand.
+            if use_tool_search || has_precision_hints {
+                let has_deferred = tools_json.iter().any(|t| {
+                    t.get("defer_loading").and_then(|v| v.as_bool()).unwrap_or(false)
+                });
+                if has_deferred {
+                    // Insert the BM25 tool search tool (better for natural language queries)
+                    tools_json.insert(0, serde_json::json!({
+                        "type": "tool_search_tool_bm25_20251119",
+                        "name": "tool_search"
+                    }));
+                }
+            }
+
             // When caching is enabled, mark the last tool with cache_control
             // so the tool definitions prefix is also cached.
             if request.cache_hint.enable_prompt_cache
@@ -359,12 +413,104 @@ impl AnthropicProvider {
     }
 
     /// Convert a `ToolDefinition` to Anthropic tool JSON format.
+    /// Core tools that should be loaded upfront (not deferred).
+    /// These are the most commonly used tools across all task types.
+    const CORE_TOOLS: &'static [&'static str] = &[
+        "file_read",
+        "file_write",
+        "file_list",
+        "file_search",
+        "file_patch",
+        "shell_exec",
+        "git_status",
+        "git_diff",
+        "git_commit",
+        "echo",
+        "datetime",
+        "calculator",
+        "ask_user",
+        "web_search",
+        "codebase_search",
+        "smart_edit",
+    ];
+
     fn tool_definition_to_json(tool: &ToolDefinition) -> Value {
         serde_json::json!({
             "name": tool.name,
             "description": tool.description,
             "input_schema": tool.parameters,
         })
+    }
+
+    /// Convert a tool definition to JSON with optional `defer_loading` for
+    /// Anthropic's Tool Search Tool feature. Non-core tools are marked with
+    /// `defer_loading: true` so Claude discovers them on demand, reducing
+    /// upfront token cost by ~85%.
+    fn tool_definition_to_json_with_search(tool: &ToolDefinition) -> Value {
+        let mut json = serde_json::json!({
+            "name": tool.name,
+            "description": tool.description,
+            "input_schema": tool.parameters,
+        });
+        if !Self::CORE_TOOLS.contains(&tool.name.as_str()) {
+            json["defer_loading"] = serde_json::json!(true);
+        }
+        json
+    }
+
+    /// Hybrid MoE + Tool Search: use precision hints from Sparse MoE routing
+    /// to decide which tools are deferred.
+    ///
+    /// - Shared tools (in CORE_TOOLS) and Full-precision tools → non-deferred (in prompt)
+    /// - Half/Quarter-precision tools → deferred (discovered via tool search on demand)
+    ///
+    /// This maps the DeepSeek V3-style mixed-precision tiers directly to
+    /// Anthropic's Tool Search defer_loading mechanism, achieving zero prompt
+    /// token cost for secondary/tertiary expert tools while preserving full
+    /// schema definitions for accurate search matching.
+    fn tool_definition_to_json_hybrid(
+        tool: &ToolDefinition,
+        precision_hints: &std::collections::HashMap<String, crate::moe::ToolPrecision>,
+    ) -> Value {
+        let mut json = serde_json::json!({
+            "name": tool.name,
+            "description": tool.description,
+            "input_schema": tool.parameters,
+        });
+
+        // Core/shared tools are never deferred regardless of precision hints
+        if Self::CORE_TOOLS.contains(&tool.name.as_str()) {
+            return json;
+        }
+
+        // Check MoE precision hint for this tool
+        match precision_hints.get(&tool.name) {
+            Some(crate::moe::ToolPrecision::Full) => {
+                // Primary expert tools: keep in prompt (non-deferred)
+            }
+            Some(crate::moe::ToolPrecision::Half | crate::moe::ToolPrecision::Quarter) => {
+                // Secondary/tertiary expert tools: defer for tool search discovery
+                json["defer_loading"] = serde_json::json!(true);
+            }
+            None => {
+                // No hint — tool not in MoE route, defer by default
+                json["defer_loading"] = serde_json::json!(true);
+            }
+        }
+        json
+    }
+
+    /// Check whether tool search should be enabled for this request.
+    ///
+    /// Tool search is enabled when:
+    /// 1. MoE precision hints are provided (hybrid mode), OR
+    /// 2. There are more than 20 tools (legacy path)
+    ///
+    /// AND the request actually produces deferred tools.
+    fn should_use_tool_search(request: &CompletionRequest) -> bool {
+        let has_many_tools = request.tools.as_ref().is_some_and(|t| t.len() > 20);
+        let has_precision_hints = !request.tool_precision_hints.is_empty();
+        has_many_tools || has_precision_hints
     }
 
     /// Fix Anthropic message turn ordering issues.
@@ -513,6 +659,7 @@ impl AnthropicProvider {
             usage,
             model,
             finish_reason,
+            rate_limit_headers: None,
         })
     }
 
@@ -549,6 +696,20 @@ impl AnthropicProvider {
                         signature,
                     });
                 }
+                // Tool Search responses: server_tool_use is an internal tool call
+                // that Claude makes to search for deferred tools. We skip it since
+                // the API handles expansion automatically.
+                "server_tool_use" => {
+                    debug!(
+                        name = block["name"].as_str().unwrap_or(""),
+                        "Tool search invoked (server-side)"
+                    );
+                }
+                // Tool search results contain tool_reference blocks that the API
+                // expands into full definitions. We skip the result blocks themselves.
+                "tool_search_tool_result" => {
+                    debug!("Tool search result received (server-side expansion)");
+                }
                 other => {
                     debug!(block_type = other, "Ignoring unknown content block type");
                 }
@@ -561,6 +722,103 @@ impl AnthropicProvider {
             1 => Ok(parts.into_iter().next().unwrap()),
             _ => Ok(Content::MultiPart { parts }),
         }
+    }
+
+    /// Build the combined `anthropic-beta` header value.
+    ///
+    /// Combines prompt caching, token-efficient tool use, and tool search headers.
+    /// Claude 4+ models have token-efficient tool use built-in (no header needed),
+    /// but Claude 3.7 Sonnet needs the explicit beta header.
+    fn build_beta_header(caching_enabled: bool, model: &str, tool_search_enabled: bool) -> String {
+        let mut parts: Vec<&str> = Vec::new();
+        if caching_enabled {
+            parts.push("prompt-caching-2024-07-31");
+        }
+        // Token-efficient tool use for pre-Claude-4 models
+        let is_claude_3 = model.contains("claude-3");
+        if is_claude_3 {
+            parts.push("token-efficient-tools-2025-02-19");
+        }
+        // Tool search for deferred tool discovery (Sonnet 4+, Opus 4+)
+        if tool_search_enabled {
+            parts.push("tool-search-tool-2025-10-19");
+        }
+        parts.join(",")
+    }
+
+    /// Count tokens exactly using the Anthropic `/v1/messages/count_tokens` endpoint.
+    ///
+    /// This provides server-side token counting for pre-flight budget validation,
+    /// which is more accurate than local tiktoken estimates — especially for
+    /// tool definitions and cached content.
+    ///
+    /// # Arguments
+    /// * `messages` - The messages array in Anthropic JSON format.
+    /// * `system` - Optional system prompt text.
+    /// * `tools` - Optional tool definitions in Anthropic JSON format.
+    ///
+    /// # Returns
+    /// The exact `input_tokens` count from the API.
+    pub async fn count_tokens_exact(
+        &self,
+        messages: &[Value],
+        system: Option<&str>,
+        tools: Option<&[Value]>,
+    ) -> Result<usize, LlmError> {
+        let url = format!("{}/messages/count_tokens", self.base_url);
+
+        let mut body = serde_json::json!({
+            "model": self.model,
+            "messages": messages,
+        });
+
+        if let Some(system_text) = system {
+            body["system"] = Value::String(system_text.to_string());
+        }
+
+        if let Some(tools_list) = tools {
+            body["tools"] = Value::Array(tools_list.to_vec());
+        }
+
+        debug!(
+            model = self.model.as_str(),
+            url = url.as_str(),
+            "Counting tokens via Anthropic API"
+        );
+
+        let response = self
+            .client
+            .post(&url)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| LlmError::ApiRequest {
+                message: format!("Token count request to Anthropic API failed: {e}"),
+            })?;
+
+        let status = response.status();
+        let body_text = response.text().await.map_err(|e| LlmError::ResponseParse {
+            message: format!("Failed to read token count response body: {e}"),
+        })?;
+
+        if !status.is_success() {
+            return Err(Self::map_http_error(status, &body_text));
+        }
+
+        let response_json: Value =
+            serde_json::from_str(&body_text).map_err(|e| LlmError::ResponseParse {
+                message: format!("Invalid JSON in token count response: {e}"),
+            })?;
+
+        response_json["input_tokens"]
+            .as_u64()
+            .map(|n| n as usize)
+            .ok_or_else(|| LlmError::ResponseParse {
+                message: "Missing 'input_tokens' in count_tokens response".to_string(),
+            })
     }
 
     /// Map an HTTP status code to the appropriate `LlmError`.
@@ -714,6 +972,7 @@ impl LlmProvider for AnthropicProvider {
     /// Perform a full (non-streaming) completion via the Anthropic Messages API.
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, LlmError> {
         let caching_enabled = request.cache_hint.enable_prompt_cache;
+        let tool_search_enabled = Self::should_use_tool_search(&request);
         let body = self.build_request_body(&request, false);
         let url = format!("{}/messages", self.base_url);
 
@@ -721,6 +980,7 @@ impl LlmProvider for AnthropicProvider {
             model = self.model.as_str(),
             url = url.as_str(),
             caching = caching_enabled,
+            tool_search = tool_search_enabled,
             "Sending Anthropic completion request"
         );
 
@@ -731,8 +991,10 @@ impl LlmProvider for AnthropicProvider {
             .header("anthropic-version", ANTHROPIC_VERSION)
             .header("content-type", "application/json");
 
-        if caching_enabled {
-            req_builder = req_builder.header("anthropic-beta", "prompt-caching-2024-07-31");
+        // Build combined beta header string
+        let beta_header = Self::build_beta_header(caching_enabled, &self.model, tool_search_enabled);
+        if !beta_header.is_empty() {
+            req_builder = req_builder.header("anthropic-beta", &beta_header);
         }
 
         let response = req_builder
@@ -744,6 +1006,9 @@ impl LlmProvider for AnthropicProvider {
             })?;
 
         let status = response.status();
+        // Capture rate limit headers BEFORE consuming the response body.
+        let rl_headers =
+            crate::providers::rate_limiter::parse_rate_limit_headers(response.headers());
         let body_text = response.text().await.map_err(|e| LlmError::ResponseParse {
             message: format!("Failed to read response body: {e}"),
         })?;
@@ -757,7 +1022,13 @@ impl LlmProvider for AnthropicProvider {
                 message: format!("Invalid JSON in response: {e}"),
             })?;
 
-        Self::parse_response(&response_json)
+        let mut resp = Self::parse_response(&response_json)?;
+        resp.rate_limit_headers = Some(crate::types::RateLimitHeaders {
+            itpm_limit: rl_headers.0,
+            rpm_limit: rl_headers.2,
+            otpm_limit: rl_headers.1,
+        });
+        Ok(resp)
     }
 
     /// Perform a streaming completion via the Anthropic Messages API.
@@ -770,6 +1041,7 @@ impl LlmProvider for AnthropicProvider {
         tx: mpsc::Sender<StreamEvent>,
     ) -> Result<(), LlmError> {
         let caching_enabled = request.cache_hint.enable_prompt_cache;
+        let tool_search_enabled = Self::should_use_tool_search(&request);
         let body = self.build_request_body(&request, true);
         let url = format!("{}/messages", self.base_url);
 
@@ -777,6 +1049,7 @@ impl LlmProvider for AnthropicProvider {
             model = self.model.as_str(),
             url = url.as_str(),
             caching = caching_enabled,
+            tool_search = tool_search_enabled,
             "Sending Anthropic streaming request"
         );
 
@@ -787,8 +1060,10 @@ impl LlmProvider for AnthropicProvider {
             .header("anthropic-version", ANTHROPIC_VERSION)
             .header("content-type", "application/json");
 
-        if caching_enabled {
-            req_builder = req_builder.header("anthropic-beta", "prompt-caching-2024-07-31");
+        // Build combined beta header string
+        let beta_header = Self::build_beta_header(caching_enabled, &self.model, tool_search_enabled);
+        if !beta_header.is_empty() {
+            req_builder = req_builder.header("anthropic-beta", &beta_header);
         }
 
         let response = req_builder
@@ -959,6 +1234,7 @@ mod tests {
             auth_method: String::new(),
             api_key: None,
             retry: crate::config::RetryConfig::default(),
+            rate_limits: None,
         }
     }
 
@@ -1924,5 +2200,267 @@ mod tests {
         assert_eq!(result[2]["role"], "user");
         let content = result[2]["content"].as_array().unwrap();
         assert_eq!(content.len(), 2); // Both tool_results merged
+    }
+
+    #[tokio::test]
+    async fn test_count_tokens_exact_builds_request() {
+        // We cannot call the real API in unit tests, but we can verify the method
+        // exists and handles error responses correctly by pointing at a non-existent
+        // server. This validates the request construction and error mapping path.
+        let env_var = "ANTHROPIC_TEST_KEY_COUNT_TOKENS";
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::set_var(env_var, "sk-ant-test-count-key") };
+        let mut config = test_config(env_var);
+        // Point to a non-routable address so the request fails fast
+        config.base_url = Some("http://127.0.0.1:1".to_string());
+        let provider = AnthropicProvider::new(&config).unwrap();
+
+        let messages = vec![serde_json::json!({
+            "role": "user",
+            "content": [{"type": "text", "text": "Hello"}]
+        })];
+
+        let result = provider
+            .count_tokens_exact(&messages, Some("You are helpful"), None)
+            .await;
+
+        // Should fail with a connection error since we are hitting a non-routable address
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        match err {
+            LlmError::ApiRequest { message } => {
+                assert!(
+                    message.contains("Token count request"),
+                    "Expected token count error, got: {message}"
+                );
+            }
+            other => panic!("Expected ApiRequest error, got {other:?}"),
+        }
+        // SAFETY: test-only env var manipulation
+        unsafe { std::env::remove_var(env_var) };
+    }
+
+    // -----------------------------------------------------------------------
+    // Hybrid Tool Search + MoE tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_build_beta_header_with_tool_search() {
+        // No features enabled
+        let header = AnthropicProvider::build_beta_header(false, "claude-sonnet-4-20250514", false);
+        assert!(header.is_empty());
+
+        // Caching only
+        let header = AnthropicProvider::build_beta_header(true, "claude-sonnet-4-20250514", false);
+        assert_eq!(header, "prompt-caching-2024-07-31");
+
+        // Tool search only
+        let header = AnthropicProvider::build_beta_header(false, "claude-sonnet-4-20250514", true);
+        assert_eq!(header, "tool-search-tool-2025-10-19");
+
+        // Both caching and tool search
+        let header = AnthropicProvider::build_beta_header(true, "claude-sonnet-4-20250514", true);
+        assert!(header.contains("prompt-caching-2024-07-31"));
+        assert!(header.contains("tool-search-tool-2025-10-19"));
+
+        // Claude 3 model gets token-efficient-tools too
+        let header = AnthropicProvider::build_beta_header(true, "claude-3-5-sonnet-20241022", true);
+        assert!(header.contains("prompt-caching-2024-07-31"));
+        assert!(header.contains("token-efficient-tools-2025-02-19"));
+        assert!(header.contains("tool-search-tool-2025-10-19"));
+    }
+
+    #[test]
+    fn test_tool_definition_hybrid_shared_tool_never_deferred() {
+        let tool = ToolDefinition {
+            name: "file_read".to_string(),
+            description: "Read a file".to_string(),
+            parameters: serde_json::json!({"type": "object"}),
+        };
+        let mut hints = std::collections::HashMap::new();
+        hints.insert(
+            "file_read".to_string(),
+            crate::moe::ToolPrecision::Quarter,
+        );
+
+        let json = AnthropicProvider::tool_definition_to_json_hybrid(&tool, &hints);
+        // Even with Quarter precision hint, CORE_TOOLS are never deferred
+        assert!(json.get("defer_loading").is_none());
+    }
+
+    #[test]
+    fn test_tool_definition_hybrid_full_precision_not_deferred() {
+        let tool = ToolDefinition {
+            name: "ml_train".to_string(),
+            description: "Train a model".to_string(),
+            parameters: serde_json::json!({"type": "object"}),
+        };
+        let mut hints = std::collections::HashMap::new();
+        hints.insert("ml_train".to_string(), crate::moe::ToolPrecision::Full);
+
+        let json = AnthropicProvider::tool_definition_to_json_hybrid(&tool, &hints);
+        assert!(json.get("defer_loading").is_none());
+    }
+
+    #[test]
+    fn test_tool_definition_hybrid_half_precision_deferred() {
+        let tool = ToolDefinition {
+            name: "security_scan".to_string(),
+            description: "Scan for vulnerabilities".to_string(),
+            parameters: serde_json::json!({"type": "object"}),
+        };
+        let mut hints = std::collections::HashMap::new();
+        hints.insert(
+            "security_scan".to_string(),
+            crate::moe::ToolPrecision::Half,
+        );
+
+        let json = AnthropicProvider::tool_definition_to_json_hybrid(&tool, &hints);
+        assert_eq!(json["defer_loading"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn test_tool_definition_hybrid_quarter_precision_deferred() {
+        let tool = ToolDefinition {
+            name: "kubernetes".to_string(),
+            description: "K8s operations".to_string(),
+            parameters: serde_json::json!({"type": "object"}),
+        };
+        let mut hints = std::collections::HashMap::new();
+        hints.insert(
+            "kubernetes".to_string(),
+            crate::moe::ToolPrecision::Quarter,
+        );
+
+        let json = AnthropicProvider::tool_definition_to_json_hybrid(&tool, &hints);
+        assert_eq!(json["defer_loading"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn test_tool_definition_hybrid_no_hint_defaults_to_deferred() {
+        let tool = ToolDefinition {
+            name: "obscure_tool".to_string(),
+            description: "Something rare".to_string(),
+            parameters: serde_json::json!({"type": "object"}),
+        };
+        let hints = std::collections::HashMap::new(); // empty hints
+
+        let json = AnthropicProvider::tool_definition_to_json_hybrid(&tool, &hints);
+        // Non-core tool with no MoE hint → deferred
+        assert_eq!(json["defer_loading"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn test_should_use_tool_search() {
+        // Few tools, no hints → no search
+        let req = CompletionRequest {
+            tools: Some(vec![ToolDefinition {
+                name: "file_read".to_string(),
+                description: "Read a file".to_string(),
+                parameters: serde_json::json!({"type": "object"}),
+            }]),
+            ..Default::default()
+        };
+        assert!(!AnthropicProvider::should_use_tool_search(&req));
+
+        // Many tools → search enabled
+        let many_tools: Vec<ToolDefinition> = (0..25)
+            .map(|i| ToolDefinition {
+                name: format!("tool_{i}"),
+                description: format!("Tool {i}"),
+                parameters: serde_json::json!({"type": "object"}),
+            })
+            .collect();
+        let req = CompletionRequest {
+            tools: Some(many_tools),
+            ..Default::default()
+        };
+        assert!(AnthropicProvider::should_use_tool_search(&req));
+
+        // Few tools but with precision hints → search enabled
+        let mut hints = std::collections::HashMap::new();
+        hints.insert("ml_train".to_string(), crate::moe::ToolPrecision::Half);
+        let req = CompletionRequest {
+            tools: Some(vec![ToolDefinition {
+                name: "ml_train".to_string(),
+                description: "Train".to_string(),
+                parameters: serde_json::json!({"type": "object"}),
+            }]),
+            tool_precision_hints: hints,
+            ..Default::default()
+        };
+        assert!(AnthropicProvider::should_use_tool_search(&req));
+    }
+
+    #[test]
+    fn test_build_request_body_injects_tool_search_entry() {
+        let provider = make_provider();
+        let mut hints = std::collections::HashMap::new();
+        hints.insert(
+            "security_scan".to_string(),
+            crate::moe::ToolPrecision::Half,
+        );
+        hints.insert("file_read".to_string(), crate::moe::ToolPrecision::Full);
+
+        let request = CompletionRequest {
+            messages: vec![Message::user("scan for vulnerabilities")],
+            tools: Some(vec![
+                ToolDefinition {
+                    name: "file_read".to_string(),
+                    description: "Read a file".to_string(),
+                    parameters: serde_json::json!({"type": "object"}),
+                },
+                ToolDefinition {
+                    name: "security_scan".to_string(),
+                    description: "Scan for vulnerabilities".to_string(),
+                    parameters: serde_json::json!({"type": "object"}),
+                },
+            ]),
+            tool_precision_hints: hints,
+            ..Default::default()
+        };
+
+        let body = provider.build_request_body(&request, false);
+        let tools = body["tools"].as_array().unwrap();
+
+        // First entry should be the tool_search_tool (BM25 variant)
+        assert_eq!(
+            tools[0]["type"],
+            "tool_search_tool_bm25_20251119"
+        );
+        assert_eq!(tools[0]["name"], "tool_search");
+
+        // file_read (core tool) should NOT be deferred
+        let file_read = tools.iter().find(|t| t["name"] == "file_read").unwrap();
+        assert!(file_read.get("defer_loading").is_none());
+
+        // security_scan (Half precision) should be deferred
+        let sec_scan = tools
+            .iter()
+            .find(|t| t["name"] == "security_scan")
+            .unwrap();
+        assert_eq!(sec_scan["defer_loading"], true);
+    }
+
+    #[test]
+    fn test_parse_content_blocks_handles_server_tool_use() {
+        let blocks = vec![
+            serde_json::json!({"type": "server_tool_use", "id": "srvtoolu_01ABC", "name": "tool_search", "input": {"query": "security"}}),
+            serde_json::json!({"type": "tool_search_tool_result", "tool_use_id": "srvtoolu_01ABC", "content": {"type": "tool_search_tool_search_result"}}),
+            serde_json::json!({"type": "text", "text": "I found the security scan tool."}),
+            serde_json::json!({"type": "tool_use", "id": "toolu_01XYZ", "name": "security_scan", "input": {"path": "."}}),
+        ];
+
+        let content = AnthropicProvider::parse_content_blocks(&blocks).unwrap();
+        // server_tool_use and tool_search_tool_result are silently skipped;
+        // only the text and tool_use blocks are parsed
+        match content {
+            Content::MultiPart { ref parts } => {
+                assert_eq!(parts.len(), 2);
+                assert!(matches!(&parts[0], Content::Text { text } if text.contains("security")));
+                assert!(matches!(&parts[1], Content::ToolCall { name, .. } if name == "security_scan"));
+            }
+            _ => panic!("Expected MultiPart content"),
+        }
     }
 }

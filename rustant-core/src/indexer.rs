@@ -11,7 +11,7 @@ use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Maximum file size to index (256 KB).
 const MAX_FILE_SIZE: u64 = 256 * 1024;
@@ -253,6 +253,11 @@ impl ProjectIndexer {
             files_indexed += 1;
         }
 
+        // Flush any pending Tantivy writes accumulated during batch indexing.
+        if let Err(e) = self.engine.flush() {
+            warn!("Failed to flush search index after indexing: {e}");
+        }
+
         info!(
             "Indexing complete: {} files indexed, {} entries, {} skipped",
             files_indexed, entries_indexed, files_skipped
@@ -279,6 +284,11 @@ impl ProjectIndexer {
     /// Get a reference to the underlying search engine.
     pub fn engine(&self) -> &HybridSearchEngine {
         &self.engine
+    }
+
+    /// Get a mutable reference to the underlying search engine.
+    pub fn engine_mut(&mut self) -> &mut HybridSearchEngine {
+        &mut self.engine
     }
 
     /// Build a project structure summary for the system prompt.
@@ -1007,6 +1017,11 @@ impl IncrementalIndexer {
         // Persist hash registry
         if let Err(e) = self.hash_registry.save() {
             debug!("Failed to save hash registry: {}", e);
+        }
+
+        // Flush any pending Tantivy writes accumulated during batch indexing.
+        if let Err(e) = self.indexer.engine_mut().flush() {
+            warn!("Failed to flush search index after re-indexing: {e}");
         }
 
         info!(

@@ -1351,6 +1351,14 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                     } else {
                         println!("Cost: ${:.4}", cost.total());
                     }
+                    // Per-provider cost breakdown
+                    let by_provider = agent.brain().costs_by_provider();
+                    if !by_provider.is_empty() {
+                        println!("Per-provider breakdown:");
+                        for (provider, pcost) in by_provider {
+                            println!("  {}: ${:.4}", provider, pcost.total());
+                        }
+                    }
                     continue;
                 }
                 "/tools" => {

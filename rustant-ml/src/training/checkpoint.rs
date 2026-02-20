@@ -109,10 +109,7 @@ impl CheckpointManager {
             checkpoints.remove(0);
         }
 
-        let content = serde_json::to_string_pretty(&checkpoints)?;
-        let tmp = manifest_path.with_extension("tmp");
-        std::fs::write(&tmp, &content)?;
-        std::fs::rename(&tmp, &manifest_path)?;
+        rustant_core::persistence::atomic_write_json(&manifest_path, &checkpoints)?;
 
         Ok(checkpoint)
     }

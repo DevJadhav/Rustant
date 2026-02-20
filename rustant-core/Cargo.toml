@@ -84,6 +84,9 @@ tree-sitter-java = { workspace = true, optional = true }
 # Graph data structure for code reference graph
 petgraph = { workspace = true }
 
+# LRU cache for MoE classification routing
+lru = "0.12"
+
 [features]
 default = ["ast-rust"]
 voice = ["dep:cpal", "dep:whisper-rs"]

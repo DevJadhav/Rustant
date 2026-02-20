@@ -118,6 +118,33 @@ When adding tools, ensure they are registered in the `ToolRegistry` — the brid
 3. Register it in `rustant-core/src/channels/mod.rs` via `build_channel_manager()`.
 4. Add integration tests.
 
+## Performance Guidelines
+
+When contributing to Rustant, follow these patterns to maintain the optimized performance characteristics:
+
+### Token Efficiency
+- **MoE Expert Assignment**: When adding a new tool, assign it to the appropriate expert in `rustant-core/src/moe/experts.rs` via `ExpertId::tool_names()`. Every tool must belong to exactly one expert.
+- **Tool Definition Caching**: The Agent caches tool definitions via `Arc<Vec<ToolDefinition>>` keyed by `TaskClassification`. Never bypass `tool_definitions()` to build definitions ad-hoc.
+- **Observation Masking**: Large tool outputs are automatically masked after consumption. Keep tool output under 5000 chars when possible.
+
+### Avoid Expensive Operations in Hot Paths
+- **Batch Tantivy commits**: When indexing multiple facts, call `flush()` once at the end rather than committing per-fact. The `HybridSearchEngine` batches at 100 documents automatically.
+- **Lazy initialization**: Expensive components (`ContextSummarizer`, tiktoken BPE) are lazily initialized. Don't eagerly create resources that may not be used in every session.
+- **Safety fast-path**: ReadOnly tools in Safe/Yolo mode skip injection scanning. Don't mark tools as higher risk than necessary.
+
+### State Persistence
+- **Use `atomic_write_json()`** from `rustant_core::persistence` for all state files. Never use raw `std::fs::write()` for JSON state — it risks corruption on crash.
+- **Atomic write pattern**: write to `.tmp` file, then `rename()` into place. The shared utility handles this.
+
+### Tool Boilerplate
+- **Use `define_tool!` macro** from `rustant-tools/src/macros.rs` for new simple tools. Use `ml_tool!` from `rustant-ml/src/tools/` for ML tools.
+- **Unit struct tools** (no workspace dependency): use the no-fields `define_tool!` variant.
+- **Workspace tools** (need PathBuf): use the fields variant.
+
+### Rate Limiting
+- Provider rate limits are tracked via `TokenBucketLimiter` in Brain. Response headers from Anthropic/OpenAI update limits automatically.
+- `ProviderLimits` config (`itpm`, `otpm`, `rpm`) can be set per-provider in config. Values of 0 mean unlimited.
+
 ## Common Pitfalls
 
 - When changing config defaults, update ALL test assertions (unit, integration, AND MCP tests).

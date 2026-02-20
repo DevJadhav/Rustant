@@ -262,7 +262,7 @@ struct IncomingMessage {
 
 /// Search macOS Contacts via AppleScript.
 async fn search_contacts_applescript(query: &str) -> Result<Vec<ContactResult>, String> {
-    let escaped = query.replace('"', "\\\"");
+    let escaped = crate::macos::sanitize_applescript_string(query);
     let script = format!(
         r#"tell application "Contacts"
     set matchingPeople to every person whose name contains "{escaped}"
@@ -333,8 +333,8 @@ end tell"#
 
 /// Send an iMessage via AppleScript.
 async fn send_imessage_applescript(recipient: &str, text: &str) -> Result<(), String> {
-    let escaped_recipient = recipient.replace('"', "\\\"");
-    let escaped_text = text.replace('"', "\\\"");
+    let escaped_recipient = crate::macos::sanitize_applescript_string(recipient);
+    let escaped_text = crate::macos::sanitize_applescript_string(text);
     let script = format!(
         "tell application \"Messages\"\n\
          \tset targetService to 1st service whose service type = iMessage\n\

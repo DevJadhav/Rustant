@@ -20,6 +20,11 @@ ai_inference = false
 ai_rag = false
 ai_training = false
 ai_research = false
+deep_research = false
+siri_integration = false
+data_flow_tracking = true
+consent_framework = false
+dynamic_risk_scoring = false
 ```
 
 All flags can also be set via environment variables using the `RUSTANT_FEATURES__` prefix:
@@ -169,6 +174,65 @@ Enables AI training tools: experiment tracking, hyperparameter sweeps, checkpoin
 **Default: `false`**
 
 Enables AI research tools: methodology comparison, literature review, reproducibility checking, bibliography management.
+
+### deep_research
+
+**Default: `false`**
+
+Enables the deep research engine with multi-phase pipeline: question decomposition, parallel querying, contradiction detection, iterative verification, and report generation.
+
+When enabled:
+- 5-phase research pipeline becomes available.
+- Research sessions persist to `.rustant/research/sessions/`.
+- MoE routes research tasks to the dedicated Research expert.
+- `/deepresearch` slash command becomes functional.
+- Optional LLM Council integration for synthesis phase.
+
+### siri_integration
+
+**Default: `false`**
+
+Enables Siri voice control integration on macOS. Requires the background daemon to be running.
+
+When enabled:
+- `siri_integration` tool becomes active.
+- Siri shortcuts can be installed via `rustant siri setup`.
+- Voice commands route through the daemon IPC socket.
+- Requires macOS 12+ with Shortcuts app.
+
+### data_flow_tracking
+
+**Default: `true`**
+
+Enables tracking of all data movements through the system (user input to LLM, tool output to LLM, etc.). Part of the Transparency pillar.
+
+When enabled:
+- `DataFlowTracker` records source/destination/token count for every data transfer.
+- Ring buffer persists to `.rustant/data_flows.json`.
+- `/dataflow` slash command shows recent flows.
+
+### consent_framework
+
+**Default: `false`**
+
+Enables the user consent framework for controlling data access per scope (provider, tool, channel, storage).
+
+When enabled:
+- `ConsentManager` checks consent before data transfers.
+- Consent records persist to `.rustant/consent.json`.
+- `/consent` slash command for grant/revoke/status.
+
+### dynamic_risk_scoring
+
+**Default: `false`**
+
+Enables context-aware dynamic risk scoring that adjusts tool risk levels based on time of day, error rates, active incidents, and circuit breaker state.
+
+When enabled:
+- Late-night operations escalate risk levels.
+- Active incidents restrict deployment tools.
+- Circuit breaker open state limits to read-only.
+- Custom risk modifiers can be configured.
 
 ## Checking Active Flags
 
