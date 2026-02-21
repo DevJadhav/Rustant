@@ -590,7 +590,11 @@ impl TaskClassification {
             || (lower.contains("system") && lower.contains("info"))
             || lower.contains("disk space")
             || lower.contains("cpu")
-            || lower.contains("ram")
+            || lower.contains("ram usage")
+            || lower.contains("free ram")
+            || lower.contains("how much ram")
+            || lower.contains("check ram")
+            || (lower.contains(" ram") && !lower.contains("diagram") && !lower.contains("param"))
             || lower.contains("memory usage")
         {
             return Self::SystemInfo;
@@ -696,6 +700,7 @@ impl TaskClassification {
             return Self::Messaging;
         }
         // ArXiv (tool-level, not workflow-level)
+        // Checked BEFORE KnowledgeGraph to ensure visual-paper intent routes here.
         if lower.contains("arxiv")
             || lower.contains("scientific paper")
             || lower.contains("paper search")
@@ -708,6 +713,9 @@ impl TaskClassification {
             || lower.contains("paperbanana")
             || lower.contains("bibtex")
             || lower.contains("preprint")
+            || lower.contains("visualize paper")
+            || lower.contains("illustrate paper")
+            || lower.contains("draw paper")
             || (lower.contains("paper")
                 && (lower.contains("search")
                     || lower.contains("find")
@@ -743,10 +751,13 @@ impl TaskClassification {
         {
             return Self::DeepResearch;
         }
-        if lower.contains("knowledge graph")
+        if (lower.contains("knowledge graph")
             || lower.contains("concept")
             || lower.contains("citation")
-            || lower.contains("paper relationship")
+            || lower.contains("paper relationship"))
+            && !lower.contains("visual")
+            && !lower.contains("illustrat")
+            && !lower.contains("diagram")
         {
             return Self::KnowledgeGraph;
         }
@@ -1792,5 +1803,82 @@ mod tests {
         };
         let json2 = serde_json::to_string(&gt2).unwrap();
         assert!(json2.contains("url_context"));
+    }
+
+    // ── TaskClassification::classify tests ──────────────────────
+
+    #[test]
+    fn test_classify_visualize_paper_is_arxiv() {
+        // "visualize paper 1" must classify as ArxivResearch, not KnowledgeGraph
+        assert!(
+            matches!(
+                TaskClassification::classify("visualize paper 1"),
+                TaskClassification::ArxivResearch
+            ),
+            "Expected ArxivResearch for 'visualize paper 1'"
+        );
+    }
+
+    #[test]
+    fn test_classify_visual_paper_variants() {
+        let cases = [
+            "visualize paper 1",
+            "illustrate paper 2",
+            "draw paper 1",
+            "visualize the paper",
+            "paper to visual for 2401.12345",
+            "paper_to_visual 2401.12345",
+            "generate a visual of paper 1",
+        ];
+        for input in cases {
+            assert!(
+                matches!(
+                    TaskClassification::classify(input),
+                    TaskClassification::ArxivResearch
+                ),
+                "Expected ArxivResearch for '{input}', got {:?}",
+                TaskClassification::classify(input),
+            );
+        }
+    }
+
+    #[test]
+    fn test_classify_knowledge_graph_not_visual() {
+        // Pure knowledge_graph intent should still classify correctly.
+        // Note: "knowledge graph" as a phrase hits the Workflow check first.
+        assert!(matches!(
+            TaskClassification::classify("show me the citation network"),
+            TaskClassification::KnowledgeGraph
+        ));
+        assert!(matches!(
+            TaskClassification::classify("link these concepts together"),
+            TaskClassification::KnowledgeGraph
+        ));
+    }
+
+    #[test]
+    fn test_classify_knowledge_graph_excludes_visual() {
+        // "concept" + "visual" should NOT be KnowledgeGraph
+        let result = TaskClassification::classify("visualize the concept from paper 1");
+        assert!(
+            !matches!(result, TaskClassification::KnowledgeGraph),
+            "Expected NOT KnowledgeGraph for visual intent, got {result:?}",
+        );
+    }
+
+    #[test]
+    fn test_classify_arxiv_search() {
+        assert!(matches!(
+            TaskClassification::classify("search for papers about transformers"),
+            TaskClassification::ArxivResearch
+        ));
+        assert!(matches!(
+            TaskClassification::classify("top 3 papers in Agentic AI"),
+            TaskClassification::ArxivResearch
+        ));
+        assert!(matches!(
+            TaskClassification::classify("find papers about diffusion models"),
+            TaskClassification::ArxivResearch
+        ));
     }
 }

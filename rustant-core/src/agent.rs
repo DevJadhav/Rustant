@@ -698,7 +698,9 @@ impl Agent {
 
             // Visual intent: add mandatory tool directive to prevent text-based diagrams.
             // Without this, LLMs tend to generate Mermaid/ASCII instead of calling paper_to_visual.
-            if matches!(classification, TaskClassification::ArxivResearch) {
+            // Not gated on ArxivResearch — has_visual_intent() alone is sufficient.
+            // This ensures the directive fires even if classify() returned KnowledgeGraph.
+            {
                 let goal_lower = self
                     .state
                     .current_goal
@@ -711,9 +713,10 @@ impl Agent {
                          'paper_to_visual' to generate an AI-rendered illustration. Rules:\n\
                          1. Do NOT generate Mermaid diagrams, ASCII art, or text-based visuals yourself.\n\
                          2. Do NOT call ask_user to clarify what 'visualize' means — it means paper_to_visual.\n\
-                         3. If the user also asks to analyze: call arxiv_research with 'analyze' FIRST, \
+                         3. Do NOT call knowledge_graph — use arxiv_research paper_to_visual instead.\n\
+                         4. If the user also asks to analyze: call arxiv_research with 'analyze' FIRST, \
                             then call arxiv_research with 'paper_to_visual' as a SECOND tool call.\n\
-                         4. The task is NOT complete until paper_to_visual has been called.",
+                         5. The task is NOT complete until paper_to_visual has been called.",
                     );
                 }
             }
@@ -821,11 +824,10 @@ impl Agent {
 
         // Visual intent tracking: detect paper_to_visual calls across iterations
         // so the text retry fires on ANY iteration (not just iteration 1).
+        // Does NOT require ArxivResearch classification — has_visual_intent() alone
+        // is sufficient, so it works even if classify() returned KnowledgeGraph/General.
         let visual_intent_active =
-            matches!(
-                self.state.task_classification,
-                Some(TaskClassification::ArxivResearch)
-            ) && Self::has_visual_intent(self.state.current_goal.as_deref().unwrap_or(""));
+            Self::has_visual_intent(self.state.current_goal.as_deref().unwrap_or(""));
         let mut visual_tool_called = false;
         let mut visual_retry_count: usize = 0;
 
@@ -1449,7 +1451,8 @@ impl Agent {
         if tool_name == "ask_user" {
             // When visual intent is clear, auto-answer clarification questions
             // about visualization instead of bothering the user.
-            if let Some(TaskClassification::ArxivResearch) = &self.state.task_classification {
+            // Not gated on ArxivResearch classification — has_visual_intent() alone suffices.
+            {
                 let goal_lower = self
                     .state
                     .current_goal
@@ -1692,13 +1695,10 @@ impl Agent {
     /// single-ToolCall and MultiPart code paths.
     async fn handle_tool_call(&mut self, id: &str, name: &str, arguments: &serde_json::Value) {
         // Hard redirect: knowledge_graph → arxiv_research paper_to_visual for visual intent.
-        // Catches any provider that allows hallucinated function calls (e.g. Gemini without
-        // allowedFunctionNames, or future models with similar behavior).
+        // Does NOT depend on TaskClassification — catches cases where classification is
+        // wrong (e.g. "visualize paper 1" classified as KnowledgeGraph instead of ArxivResearch)
+        // or where the provider hallucinated the tool call.
         let (name, arguments) = if name == "knowledge_graph"
-            && matches!(
-                self.state.task_classification,
-                Some(TaskClassification::ArxivResearch)
-            )
             && Self::has_visual_intent(self.state.current_goal.as_deref().unwrap_or(""))
         {
             info!("Hard redirect: knowledge_graph → arxiv_research paper_to_visual");
