@@ -144,7 +144,7 @@ impl ArxivResearchTool {
             ));
         }
 
-        output.push_str("---\nTo work with a paper, ask the user which one they'd like to select (by number or title). Then use the paper's arxiv_id with actions like: fetch (full details), analyze (deep analysis), save (to library), implement (generate code scaffold), or paper_to_code/paper_to_notebook.");
+        output.push_str("---\nTo work with a paper, use the paper's arxiv_id with actions like: fetch (full details), analyze (deep analysis), save (to library), implement (code scaffold), or paper_to_code/paper_to_notebook.\nTo VISUALIZE a paper as an AI-generated illustration/diagram, use: arxiv_research with action=paper_to_visual.");
 
         Ok(ToolOutput::text(output))
     }
@@ -1432,6 +1432,8 @@ impl ArxivResearchTool {
             ));
         }
 
+        output.push_str("---\nTo work with a paper, use the paper's arxiv_id with actions like: fetch, analyze, save, implement, paper_to_code, or paper_to_notebook.\nTo VISUALIZE a paper as an AI-generated illustration/diagram, use: arxiv_research with action=paper_to_visual.");
+
         Ok(ToolOutput::text(output))
     }
 
@@ -2629,17 +2631,12 @@ impl Tool for ArxivResearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search, fetch, analyze, and implement academic papers from arXiv with multi-source \
-         enrichment. Actions: search, fetch, analyze, compare, trending, save/library/remove, \
-         export_bibtex, collections, digest_config, paper_to_code, paper_to_notebook, implement \
-         (full TDD scaffold), setup_env, verify, implementation_status, semantic_search (keyword \
-         search over library), summarize (multi-level LLM summary), citation_graph (build/pagerank/\
-         similar/path), blueprint (implementation planning), reindex, \
-         paper_to_visual (generate illustrations using Gemini image models aka PaperBanana). \
-         When user says 'generate a visual', 'create an illustration', 'visualize this paper', \
-         or similar — use paper_to_visual action. \
-         IMPORTANT workflow: after 'search', present numbered results and ask user to select. \
-         For implement/paper_to_code/paper_to_notebook, ask language and mode. Python uses venv."
+        "Search, fetch, analyze, visualize, and implement academic papers from arXiv. \
+         paper_to_visual generates AI-rendered illustrations/diagrams of papers via Gemini \
+         (aka PaperBanana) — use for ANY visualization request. \
+         After 'search', present numbered results. \
+         For implement/paper_to_code/paper_to_notebook, ask language. \
+         See action enum for all available actions."
     }
 
     fn parameters_schema(&self) -> Value {

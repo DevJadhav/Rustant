@@ -44,7 +44,7 @@ On startup, Rustant checks for the last session and offers to resume it. On exit
 ## Memory System
 
 ### Working Memory
-The current context window sent to the LLM. Auto-compression triggers when messages exceed 2x the window size (default: 40 messages).
+The current context window sent to the LLM. Auto-compression triggers when messages exceed 2x the window size (default: 24 messages).
 
 ### Message Pinning
 

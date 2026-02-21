@@ -1258,7 +1258,7 @@ pub struct MemoryConfig {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
-            window_size: 20,
+            window_size: 12,
             compression_threshold: 0.7,
             persist_path: None,
             enable_persistence: true,
@@ -2011,7 +2011,7 @@ mod tests {
         assert_eq!(config.llm.provider, "openai");
         assert_eq!(config.llm.model, "gpt-4o");
         assert_eq!(config.safety.approval_mode, ApprovalMode::Safe);
-        assert_eq!(config.memory.window_size, 20);
+        assert_eq!(config.memory.window_size, 12);
         assert!(!config.ui.vim_mode);
         assert!(config.tools.enable_builtins);
         // Fullstack fields default to None/false
@@ -2225,7 +2225,7 @@ allowed_hosts = []
     #[test]
     fn test_memory_config_defaults() {
         let config = MemoryConfig::default();
-        assert_eq!(config.window_size, 20);
+        assert_eq!(config.window_size, 12);
         assert!((config.compression_threshold - 0.7).abs() < f32::EPSILON);
         assert!(config.enable_persistence);
     }

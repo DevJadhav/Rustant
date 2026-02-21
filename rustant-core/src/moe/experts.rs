@@ -159,8 +159,10 @@ impl ExpertId {
             // Web/Browser
             TaskClassification::Browser
             | TaskClassification::WebSearch
-            | TaskClassification::WebFetch
-            | TaskClassification::ArxivResearch => ExpertId::WebBrowse,
+            | TaskClassification::WebFetch => ExpertId::WebBrowse,
+
+            // ArXiv/paper research → Research expert (not WebBrowse)
+            TaskClassification::ArxivResearch => ExpertId::Research,
 
             // Productivity/Cognitive tools
             TaskClassification::KnowledgeGraph
@@ -463,13 +465,7 @@ impl ExpertId {
                 "oncall",
                 "system_monitor",
             ],
-            ExpertId::Research => vec![
-                "arxiv_research",
-                "web_fetch",
-                "http_api",
-                "document_read",
-                "knowledge_graph",
-            ],
+            ExpertId::Research => vec!["arxiv_research", "web_fetch", "http_api", "document_read"],
         }
     }
 
@@ -660,7 +656,6 @@ impl ExpertId {
             ],
             ExpertId::WebBrowse => &[
                 "browser", "web", "fetch", "http", "url", "navigate", "webpage", "download", "api",
-                "arxiv",
             ],
             ExpertId::DevTools => &[
                 "scaffold",
@@ -815,6 +810,13 @@ impl ExpertId {
                 "literature",
                 "source",
                 "deep research",
+                "arxiv",
+                "paper",
+                "preprint",
+                "citation",
+                "visual",
+                "diagram",
+                "illustrat",
             ],
         }
     }

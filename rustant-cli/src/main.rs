@@ -4,6 +4,7 @@
 
 pub(crate) mod channel_setup;
 pub mod commands;
+pub(crate) mod markdown;
 mod repl;
 mod repl_input;
 pub(crate) mod setup;

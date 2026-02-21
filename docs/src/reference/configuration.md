@@ -81,7 +81,7 @@ credential_store_key = "anthropic"  # OS keychain (preferred)
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `window_size` | int | `20` | Short-term memory window (messages) |
+| `window_size` | int | `12` | Short-term memory window (messages) |
 | `compression_threshold` | float | `0.7` | Context fraction triggering compression |
 | `persist_path` | string? | `null` | Path for persistent long-term memory |
 | `enable_persistence` | bool | `true` | Enable long-term memory |
@@ -482,7 +482,7 @@ approval_mode = "safe"
 max_iterations = 50
 
 [memory]
-window_size = 20
+window_size = 12
 enable_persistence = true
 
 [budget]

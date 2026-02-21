@@ -751,6 +751,14 @@ impl Brain {
         Arc::clone(&self.provider)
     }
 
+    /// Hot-swap the LLM provider (e.g., after /setup re-configures credentials).
+    ///
+    /// Resets accumulated cost/usage since the provider pricing has changed.
+    pub fn set_provider(&mut self, provider: Arc<dyn LlmProvider>) {
+        self.provider = provider;
+        self.cached_full_prompt = None; // Invalidate prompt cache
+    }
+
     /// Track usage and cost from an external completion (e.g., streaming).
     pub fn track_usage(&mut self, usage: &TokenUsage) {
         self.total_usage.accumulate(usage);
@@ -993,7 +1001,7 @@ Other behaviors:
 
 Tools:
 - Use the tools provided to you. Each tool has a name, description, and parameter schema.
-- For arXiv/paper searches: ALWAYS use arxiv_research (built-in API client), never safari/curl.
+- For arXiv/paper searches and visuals: ALWAYS use arxiv_research (built-in API client), never safari/curl. For paper diagrams/illustrations, use action paper_to_visual.
 - For web searches: use web_search (DuckDuckGo), not safari/shell.
 - For fetching URLs: use web_fetch, not safari/shell.
 - For meeting recording: use macos_meeting_recorder with 'record_and_transcribe' for full flow.

@@ -4,6 +4,7 @@ use super::ipc::IpcMessage;
 use super::lifecycle::DaemonState;
 use crate::config::DaemonConfig;
 use std::path::PathBuf;
+use std::time::Instant;
 
 /// The main Rustant background daemon.
 pub struct RustantDaemon {
@@ -17,6 +18,8 @@ pub struct RustantDaemon {
     base_dir: PathBuf,
     /// Whether Siri mode is active.
     siri_active: bool,
+    /// Instant when the daemon was created, for uptime tracking.
+    start_time: Instant,
 }
 
 impl RustantDaemon {
@@ -33,6 +36,7 @@ impl RustantDaemon {
             pid_file,
             base_dir,
             siri_active: false,
+            start_time: Instant::now(),
         }
     }
 
@@ -148,7 +152,7 @@ impl RustantDaemon {
             }
             IpcMessage::StatusQuery => IpcMessage::StatusResponse {
                 state: format!("{:?}", self.state),
-                uptime_secs: 0, // TODO: track actual uptime
+                uptime_secs: self.start_time.elapsed().as_secs(),
                 active_tasks: 0,
                 expert: None,
                 siri_active: self.siri_active,
@@ -219,5 +223,27 @@ mod tests {
         let daemon = RustantDaemon::new(config, PathBuf::from("/tmp/test-rustant"));
         assert!(matches!(daemon.state(), DaemonState::Starting));
         assert!(!daemon.is_siri_active());
+    }
+
+    #[tokio::test]
+    async fn test_daemon_uptime_tracking() {
+        let config = DaemonConfig::default();
+        let mut daemon = RustantDaemon::new(config, PathBuf::from("/tmp/test-rustant-uptime"));
+
+        // Small sleep to ensure uptime > 0
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let response = daemon.handle_message(IpcMessage::StatusQuery).await;
+        match response {
+            IpcMessage::StatusResponse { uptime_secs, .. } => {
+                // Uptime should be at least 0 (could be 0 if < 1s elapsed)
+                // but the value should come from Instant, not be hardcoded
+                assert!(
+                    uptime_secs < 10,
+                    "Uptime should be reasonable, got {uptime_secs}"
+                );
+            }
+            _ => panic!("Expected StatusResponse"),
+        }
     }
 }

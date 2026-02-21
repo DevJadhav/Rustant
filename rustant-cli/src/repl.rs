@@ -693,6 +693,7 @@ pub(crate) fn extract_tool_detail(tool_name: &str, args: &serde_json::Value) -> 
 pub(crate) struct CliCallback {
     pub verbose: Arc<AtomicBool>,
     has_streamed: Arc<AtomicBool>,
+    md_renderer: Arc<std::sync::Mutex<crate::markdown::TerminalMarkdownRenderer>>,
 }
 
 impl CliCallback {
@@ -700,6 +701,9 @@ impl CliCallback {
         Self {
             verbose: Arc::new(AtomicBool::new(verbose)),
             has_streamed: Arc::new(AtomicBool::new(false)),
+            md_renderer: Arc::new(std::sync::Mutex::new(
+                crate::markdown::TerminalMarkdownRenderer::new(),
+            )),
         }
     }
 }
@@ -708,16 +712,33 @@ impl CliCallback {
 impl AgentCallback for CliCallback {
     async fn on_assistant_message(&self, message: &str) {
         if self.has_streamed.swap(false, Ordering::SeqCst) {
-            // Streaming tokens already displayed this content — just terminate the line.
+            // Streaming tokens already rendered — flush any buffered partial line.
+            if let Ok(mut renderer) = self.md_renderer.lock() {
+                let remaining = renderer.flush();
+                if !remaining.is_empty() {
+                    print!("{remaining}");
+                }
+                renderer.reset();
+            }
             println!();
         } else {
-            println!("\n\x1b[32mRustant:\x1b[0m {message}");
+            // Non-streaming: render the full message with markdown formatting.
+            let rendered = crate::markdown::render_markdown(message);
+            println!("\n\x1b[32mRustant:\x1b[0m {rendered}");
         }
     }
 
     async fn on_token(&self, token: &str) {
         self.has_streamed.store(true, Ordering::SeqCst);
-        print!("{token}");
+        if let Ok(mut renderer) = self.md_renderer.lock() {
+            let formatted = renderer.feed(token);
+            if !formatted.is_empty() {
+                print!("{formatted}");
+            }
+        } else {
+            // Fallback: raw output if lock is poisoned
+            print!("{token}");
+        }
         let _ = io::stdout().flush();
     }
 
@@ -1387,6 +1408,45 @@ pub async fn run_interactive(config: AgentConfig, workspace: PathBuf) -> anyhow:
                 "/setup" => {
                     if let Err(e) = crate::setup::run_setup(&workspace).await {
                         println!("Setup failed: {e}");
+                        continue;
+                    }
+                    // Hot-reload: re-read config and swap the provider so the new
+                    // API key / model takes effect without restarting the REPL.
+                    match rustant_core::config::load_config(Some(&workspace), None) {
+                        Ok(new_config) => {
+                            let new_provider = if new_config.llm.auth_method == "oauth" {
+                                let cred_store =
+                                    rustant_core::credentials::KeyringCredentialStore::new();
+                                rustant_core::create_provider_with_auth(
+                                    &new_config.llm,
+                                    &cred_store,
+                                )
+                                .await
+                            } else {
+                                rustant_core::create_provider(&new_config.llm)
+                            };
+                            match new_provider {
+                                Ok(p) => {
+                                    agent.brain_mut().set_provider(p);
+                                    println!(
+                                        "\x1b[32mProvider hot-reloaded:\x1b[0m {}",
+                                        agent.brain().model_name()
+                                    );
+                                }
+                                Err(e) => {
+                                    println!(
+                                        "\x1b[33mWarning:\x1b[0m Could not create provider \
+                                         from new config: {e}. Keeping current provider."
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            println!(
+                                "\x1b[33mWarning:\x1b[0m Could not reload config: {e}. \
+                                 Keeping current provider."
+                            );
+                        }
                     }
                     continue;
                 }

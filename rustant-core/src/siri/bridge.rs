@@ -50,18 +50,54 @@ impl SiriBridge {
         flag_path.exists()
     }
 
-    /// Send a command to the daemon and get a response.
-    pub fn send_to_daemon(&self, _msg: IpcMessage) -> Result<IpcMessage, SiriError> {
-        // In a real implementation, this would connect to the Unix socket
-        // and send/receive JSON messages. For now, return a stub response.
-        Ok(IpcMessage::CommandResult {
-            success: true,
-            response: "Command received".into(),
-            audio_text: Some("Command received".into()),
-            needs_confirmation: false,
-            confirmation_prompt: None,
-            session_id: None,
-        })
+    /// Send a command to the daemon and get a response via Unix socket IPC.
+    pub fn send_to_daemon(&self, msg: IpcMessage) -> Result<IpcMessage, SiriError> {
+        #[cfg(unix)]
+        {
+            use std::io::{BufRead, BufReader, Write};
+            use std::os::unix::net::UnixStream;
+            use std::time::Duration;
+
+            let sock_path = self.base_dir.join("daemon.sock");
+            let stream = UnixStream::connect(&sock_path).map_err(|e| {
+                SiriError::IoError(format!("Failed to connect to daemon socket: {e}"))
+            })?;
+            stream
+                .set_read_timeout(Some(Duration::from_secs(30)))
+                .map_err(|e| SiriError::IoError(format!("Failed to set read timeout: {e}")))?;
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .map_err(|e| SiriError::IoError(format!("Failed to set write timeout: {e}")))?;
+
+            let mut writer = stream
+                .try_clone()
+                .map_err(|e| SiriError::IoError(format!("Failed to clone stream: {e}")))?;
+            let mut payload = serde_json::to_string(&msg)
+                .map_err(|e| SiriError::IoError(format!("Failed to serialize message: {e}")))?;
+            payload.push('\n');
+            writer
+                .write_all(payload.as_bytes())
+                .map_err(|e| SiriError::IoError(format!("Failed to write to socket: {e}")))?;
+            writer
+                .flush()
+                .map_err(|e| SiriError::IoError(format!("Failed to flush socket: {e}")))?;
+
+            let mut reader = BufReader::new(stream);
+            let mut response_line = String::new();
+            reader
+                .read_line(&mut response_line)
+                .map_err(|e| SiriError::IoError(format!("Failed to read from socket: {e}")))?;
+
+            serde_json::from_str(response_line.trim())
+                .map_err(|e| SiriError::IoError(format!("Failed to parse daemon response: {e}")))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = msg;
+            Err(SiriError::IoError(
+                "Unix sockets not available on this platform".into(),
+            ))
+        }
     }
 
     /// Send a voice command to the daemon for execution.
@@ -166,12 +202,13 @@ mod tests {
     }
 
     #[test]
-    fn test_send_command_when_active() {
+    fn test_send_command_when_active_no_daemon() {
         let tmp = tempfile::tempdir().unwrap();
         let bridge = SiriBridge::new(tmp.path().to_path_buf());
 
         bridge.activate().unwrap();
+        // With real IPC, this fails because no daemon socket is listening
         let result = bridge.send_command("check calendar");
-        assert!(result.is_ok());
+        assert!(result.is_err(), "Should fail without a running daemon");
     }
 }

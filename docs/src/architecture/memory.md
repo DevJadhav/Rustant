@@ -11,7 +11,7 @@ The current context window sent to the LLM. Contains system prompt, recent conve
 ### Short-Term Memory
 
 A sliding window of recent messages beyond the working memory limit:
-- Configurable size (default: 20 messages, compression at 40)
+- Configurable size (default: 12 messages, compression at 24)
 - **Message pinning** — `/pin [n]` pins messages that survive context compression. `/unpin <n>` removes the pin. Pinned messages are always included in the context window regardless of compression.
 - Older messages are summarized and moved to long-term storage
 
@@ -28,7 +28,7 @@ The `KnowledgeDistiller` processes accumulated facts and corrections into behavi
 
 ## Auto-Summarization
 
-When working memory approaches the context limit (compression triggers at 2x window_size = 40 messages):
+When working memory approaches the context limit (compression triggers at 2x window_size = 24 messages):
 
 1. Identifies the oldest messages in the context window
 2. Generates a summary via the LLM
@@ -61,7 +61,7 @@ The search engine combines two backends:
 
 ```toml
 [memory]
-window_size = 20            # Max messages in working memory
+window_size = 12            # Max messages in working memory
 enable_persistence = true   # Enable persistent long-term memory
 
 [search]

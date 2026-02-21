@@ -155,6 +155,18 @@ Requires `GEMINI_API_KEY` environment variable. Generated images are saved to `.
 
 When visuals exist for a paper, `paper_to_code` and `paper_to_notebook` automatically embed them in generated output.
 
+#### Natural Language Triggers
+
+The following plain English phrases automatically route to `paper_to_visual`:
+
+- "visualize this paper 1706.03762"
+- "create a diagram for paper 1706.03762"
+- "illustrate the architecture of paper 1706.03762"
+- "paper to visual 1706.03762"
+- "paper banana 1706.03762"
+
+All visual keywords require "paper" context — phrases like "create a diagram" or "visualize the data" without a paper reference will **not** trigger `paper_to_visual`.
+
 ### Implementation Tracking (2 actions)
 
 | Action | Description |

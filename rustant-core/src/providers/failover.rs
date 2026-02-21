@@ -11,6 +11,7 @@ use crate::error::LlmError;
 use crate::types::{CompletionRequest, CompletionResponse, Message, StreamEvent};
 use async_trait::async_trait;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, info, warn};
@@ -164,6 +165,8 @@ struct ProviderEntry {
 /// skipping providers with open circuit breakers.
 pub struct FailoverProvider {
     providers: Vec<ProviderEntry>,
+    /// Index of the provider that last handled a request successfully.
+    active_index: AtomicUsize,
 }
 
 impl FailoverProvider {
@@ -188,12 +191,22 @@ impl FailoverProvider {
             })
             .collect();
 
-        Self { providers: entries }
+        Self {
+            providers: entries,
+            active_index: AtomicUsize::new(0),
+        }
     }
 
     /// Get the primary (first) provider.
     fn primary(&self) -> &dyn LlmProvider {
         &*self.providers[0].provider
+    }
+
+    /// Get the provider that last handled a request successfully.
+    /// Falls back to the primary if no request has been completed yet.
+    fn active(&self) -> &dyn LlmProvider {
+        let idx = self.active_index.load(Ordering::Relaxed);
+        &*self.providers[idx].provider
     }
 }
 
@@ -212,6 +225,7 @@ impl LlmProvider for FailoverProvider {
 
             match entry.provider.complete(request.clone()).await {
                 Ok(response) => {
+                    self.active_index.store(i, Ordering::Relaxed);
                     let mut cb = entry.circuit_breaker.lock().await;
                     cb.record_success();
                     return Ok(response);
@@ -256,6 +270,7 @@ impl LlmProvider for FailoverProvider {
                 .await
             {
                 Ok(()) => {
+                    self.active_index.store(i, Ordering::Relaxed);
                     let mut cb = entry.circuit_breaker.lock().await;
                     cb.record_success();
                     return Ok(());
@@ -295,7 +310,7 @@ impl LlmProvider for FailoverProvider {
     }
 
     fn model_name(&self) -> &str {
-        self.primary().model_name()
+        self.active().model_name()
     }
 }
 

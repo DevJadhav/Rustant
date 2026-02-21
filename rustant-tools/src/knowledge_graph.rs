@@ -241,7 +241,7 @@ impl Tool for KnowledgeGraphTool {
     }
 
     fn description(&self) -> &str {
-        "Local knowledge graph of concepts, papers, methods, and relationships. Actions: add_node, get_node, update_node, remove_node, add_edge, remove_edge, neighbors, search, list, path, stats, import_arxiv, export_dot."
+        "Local knowledge graph for managing concept relationships and citations. NOT for visualizing or illustrating papers (use arxiv_research paper_to_visual for that). Actions: add_node, get_node, update_node, remove_node, add_edge, remove_edge, neighbors, search, list, path, stats, import_arxiv, export_dot."
     }
 
     fn parameters_schema(&self) -> Value {

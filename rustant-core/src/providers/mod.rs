@@ -387,18 +387,15 @@ pub fn create_provider(config: &LlmConfig) -> Result<Arc<dyn LlmProvider>, LlmEr
     // Build fallback providers, logging warnings for any that fail to initialize
     let mut providers: Vec<Arc<dyn LlmProvider>> = vec![primary];
     for fallback_config in &config.fallback_providers {
-        // Use the fallback's own credential_store_key if set, otherwise derive
-        // from the provider name so keychain lookups resolve correctly.
-        let fb_credential_key = fallback_config
-            .credential_store_key
-            .clone()
-            .or_else(|| Some(fallback_config.provider.clone()));
+        // Use the fallback's own credential_store_key if explicitly set.
+        // Do NOT auto-derive from provider name — that causes unnecessary
+        // keychain lookups that fail and mask the real env var fallback.
         let fb_llm_config = LlmConfig {
             provider: fallback_config.provider.clone(),
             model: fallback_config.model.clone(),
             api_key_env: fallback_config.api_key_env.clone(),
             base_url: fallback_config.base_url.clone(),
-            credential_store_key: fb_credential_key,
+            credential_store_key: fallback_config.credential_store_key.clone(),
             api_key: None, // Don't inherit primary provider's resolved key
             ..config.clone()
         };
@@ -446,16 +443,12 @@ pub async fn create_provider_with_auth(
 
     let mut providers: Vec<Arc<dyn LlmProvider>> = vec![primary];
     for fallback_config in &config.fallback_providers {
-        let fb_credential_key = fallback_config
-            .credential_store_key
-            .clone()
-            .or_else(|| Some(fallback_config.provider.clone()));
         let fb_llm_config = LlmConfig {
             provider: fallback_config.provider.clone(),
             model: fallback_config.model.clone(),
             api_key_env: fallback_config.api_key_env.clone(),
             base_url: fallback_config.base_url.clone(),
-            credential_store_key: fb_credential_key,
+            credential_store_key: fallback_config.credential_store_key.clone(),
             api_key: None, // Don't inherit primary provider's resolved key
             ..config.clone()
         };

@@ -169,6 +169,18 @@ impl GeminiProvider {
                 }
             }
             body["tools"] = Value::Array(tools_array);
+
+            // Restrict Gemini to only call functions we declared.
+            // Without this, Gemini can hallucinate calls to functions
+            // not in the declaration list (e.g., knowledge_graph when only
+            // arxiv_research is provided).
+            let allowed_names: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
+            body["toolConfig"] = serde_json::json!({
+                "functionCallingConfig": {
+                    "mode": "AUTO",
+                    "allowedFunctionNames": allowed_names
+                }
+            });
         } else if !request.grounding_tools.is_empty() {
             // Grounding tools without function tools
             let tools_array: Vec<Value> = request
@@ -766,7 +778,7 @@ impl GeminiProvider {
         })?;
 
         if !status.is_success() {
-            return Err(Self::map_http_error(status, &body_text));
+            return Err(Self::map_http_error(status, &body_text, None));
         }
 
         let response_json: Value =
@@ -792,14 +804,29 @@ impl GeminiProvider {
     }
 
     /// Map an HTTP status code to the appropriate `LlmError`.
-    fn map_http_error(status: reqwest::StatusCode, body_text: &str) -> LlmError {
+    ///
+    /// When `headers` are available, parses the `retry-after` header for 429
+    /// responses instead of hardcoding a default.
+    fn map_http_error(
+        status: reqwest::StatusCode,
+        body_text: &str,
+        headers: Option<&reqwest::header::HeaderMap>,
+    ) -> LlmError {
         match status.as_u16() {
             401 | 403 => LlmError::AuthFailed {
                 provider: "Gemini".to_string(),
             },
-            429 => LlmError::RateLimited {
-                retry_after_secs: 30,
-            },
+            429 => {
+                // Parse Retry-After header if available (seconds or HTTP-date).
+                let retry_after = headers
+                    .and_then(|h| h.get(reqwest::header::RETRY_AFTER))
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(30);
+                LlmError::RateLimited {
+                    retry_after_secs: retry_after,
+                }
+            }
             _ => LlmError::ApiRequest {
                 message: format!("HTTP {status} from Gemini API: {body_text}"),
             },
@@ -926,12 +953,13 @@ impl LlmProvider for GeminiProvider {
             })?;
 
         let status = response.status();
+        let headers = response.headers().clone();
         let body_text = response.text().await.map_err(|e| LlmError::ResponseParse {
             message: format!("Failed to read response body: {e}"),
         })?;
 
         if !status.is_success() {
-            return Err(Self::map_http_error(status, &body_text));
+            return Err(Self::map_http_error(status, &body_text, Some(&headers)));
         }
 
         let response_json: Value =
@@ -979,8 +1007,9 @@ impl LlmProvider for GeminiProvider {
 
         let status = response.status();
         if !status.is_success() {
+            let headers = response.headers().clone();
             let body_text = response.text().await.unwrap_or_default();
-            return Err(Self::map_http_error(status, &body_text));
+            return Err(Self::map_http_error(status, &body_text, Some(&headers)));
         }
 
         // Stream SSE events incrementally using bytes_stream.
@@ -1482,6 +1511,7 @@ mod tests {
         let err = GeminiProvider::map_http_error(
             reqwest::StatusCode::UNAUTHORIZED,
             r#"{"error":{"message":"Invalid API key"}}"#,
+            None,
         );
         match err {
             LlmError::AuthFailed { provider } => {
@@ -1494,13 +1524,15 @@ mod tests {
         let err = GeminiProvider::map_http_error(
             reqwest::StatusCode::FORBIDDEN,
             r#"{"error":{"message":"Forbidden"}}"#,
+            None,
         );
         assert!(matches!(err, LlmError::AuthFailed { .. }));
 
-        // 429 -> RateLimited
+        // 429 -> RateLimited (no headers → falls back to 30s default)
         let err = GeminiProvider::map_http_error(
             reqwest::StatusCode::TOO_MANY_REQUESTS,
             r#"{"error":{"message":"Rate limited"}}"#,
+            None,
         );
         match err {
             LlmError::RateLimited { retry_after_secs } => {
@@ -1509,10 +1541,26 @@ mod tests {
             _ => panic!("Expected RateLimited, got {err:?}"),
         }
 
+        // 429 with Retry-After header → parses actual value
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(reqwest::header::RETRY_AFTER, "5".parse().unwrap());
+        let err = GeminiProvider::map_http_error(
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            r#"{"error":{"message":"Rate limited"}}"#,
+            Some(&headers),
+        );
+        match err {
+            LlmError::RateLimited { retry_after_secs } => {
+                assert_eq!(retry_after_secs, 5);
+            }
+            _ => panic!("Expected RateLimited with 5s, got {err:?}"),
+        }
+
         // 500 -> ApiRequest
         let err = GeminiProvider::map_http_error(
             reqwest::StatusCode::INTERNAL_SERVER_ERROR,
             r#"{"error":{"message":"Internal server error"}}"#,
+            None,
         );
         match err {
             LlmError::ApiRequest { message } => {
@@ -1586,6 +1634,76 @@ mod tests {
         assert_eq!(func_decls.len(), 1);
         assert_eq!(func_decls[0]["name"], "file_read");
         assert_eq!(func_decls[0]["description"], "Read a file from disk");
+
+        // Verify toolConfig restricts Gemini to only declared functions
+        let tool_config = &body["toolConfig"];
+        assert_eq!(
+            tool_config["functionCallingConfig"]["mode"], "AUTO",
+            "toolConfig should use AUTO mode"
+        );
+        let allowed = tool_config["functionCallingConfig"]["allowedFunctionNames"]
+            .as_array()
+            .expect("allowedFunctionNames should be an array");
+        assert_eq!(allowed.len(), 1);
+        assert_eq!(allowed[0], "file_read");
+    }
+
+    #[test]
+    fn test_build_request_body_allowed_function_names_multiple_tools() {
+        let provider = make_provider();
+
+        let tools = vec![
+            ToolDefinition {
+                name: "arxiv_research".to_string(),
+                description: "Search arXiv papers".to_string(),
+                parameters: serde_json::json!({"type": "object", "properties": {}}),
+            },
+            ToolDefinition {
+                name: "web_fetch".to_string(),
+                description: "Fetch a URL".to_string(),
+                parameters: serde_json::json!({"type": "object", "properties": {}}),
+            },
+            ToolDefinition {
+                name: "file_read".to_string(),
+                description: "Read a file".to_string(),
+                parameters: serde_json::json!({"type": "object", "properties": {}}),
+            },
+        ];
+
+        let request = CompletionRequest {
+            messages: vec![Message::user("Do something")],
+            tools: Some(tools),
+            ..Default::default()
+        };
+
+        let body = provider.build_request_body(&request, false);
+        let allowed = body["toolConfig"]["functionCallingConfig"]["allowedFunctionNames"]
+            .as_array()
+            .expect("allowedFunctionNames should be present");
+        assert_eq!(allowed.len(), 3);
+        let names: Vec<&str> = allowed.iter().filter_map(|v| v.as_str()).collect();
+        assert!(names.contains(&"arxiv_research"));
+        assert!(names.contains(&"web_fetch"));
+        assert!(names.contains(&"file_read"));
+        // knowledge_graph is NOT in the list (not declared)
+        assert!(!names.contains(&"knowledge_graph"));
+    }
+
+    #[test]
+    fn test_build_request_body_no_tool_config_without_tools() {
+        let provider = make_provider();
+
+        let request = CompletionRequest {
+            messages: vec![Message::user("Hello")],
+            tools: None,
+            ..Default::default()
+        };
+
+        let body = provider.build_request_body(&request, false);
+        assert!(
+            body.get("toolConfig").is_none() || body["toolConfig"].is_null(),
+            "toolConfig should not be present when no tools are declared"
+        );
     }
 
     #[test]

@@ -2077,6 +2077,23 @@ impl CommandRegistry {
         results
     }
 
+    /// Return command name completions with descriptions matching a prefix.
+    pub fn completions_with_desc(&self, prefix: &str) -> Vec<(&str, &str)> {
+        let mut results = Vec::new();
+        for cmd in &self.commands {
+            if cmd.name.starts_with(prefix) {
+                results.push((cmd.name, cmd.description));
+            }
+            for alias in cmd.aliases {
+                if alias.starts_with(prefix) {
+                    results.push((alias, cmd.description));
+                }
+            }
+        }
+        results.sort_by_key(|(name, _)| *name);
+        results
+    }
+
     /// Return all registered commands.
     pub fn all(&self) -> &[CommandInfo] {
         &self.commands

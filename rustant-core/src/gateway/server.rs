@@ -53,6 +53,8 @@ pub struct GatewayServer {
     config_json: String,
     /// Shared toggle state for voice/meeting sessions.
     toggle_state: Option<Arc<crate::voice::toggle::ToggleState>>,
+    /// Shared audit store for the `/api/audit` endpoint.
+    audit_store: Option<Arc<Mutex<crate::audit::AuditStore>>>,
 }
 
 /// A pending approval request awaiting user decision.
@@ -99,6 +101,7 @@ impl GatewayServer {
             pending_approvals: std::collections::HashMap::new(),
             config_json: "{}".to_string(),
             toggle_state: None,
+            audit_store: None,
         }
     }
 
@@ -161,6 +164,16 @@ impl GatewayServer {
     /// Get a reference to the toggle state (if set).
     pub fn toggle_state(&self) -> Option<&Arc<crate::voice::toggle::ToggleState>> {
         self.toggle_state.as_ref()
+    }
+
+    /// Set the shared audit store for the audit API endpoint.
+    pub fn set_audit_store(&mut self, store: Arc<Mutex<crate::audit::AuditStore>>) {
+        self.audit_store = Some(store);
+    }
+
+    /// Get a reference to the audit store (if configured).
+    pub fn audit_store(&self) -> Option<&Arc<Mutex<crate::audit::AuditStore>>> {
+        self.audit_store.as_ref()
     }
 
     /// Number of active connections.
@@ -437,15 +450,42 @@ async fn api_metrics_handler(State(gw): State<SharedGateway>) -> impl IntoRespon
     axum::Json(body)
 }
 
-/// REST API: Get audit trail (placeholder — returns recent events).
-async fn api_audit_handler(State(_gw): State<SharedGateway>) -> impl IntoResponse {
-    // In a full implementation, this would query the AuditTrail from rustant-core.
-    // For now, return an empty list to indicate the endpoint is functional.
-    let body = serde_json::json!({
-        "entries": [],
-        "total": 0,
-    });
-    axum::Json(body)
+/// REST API: Get audit trail — returns recent execution traces.
+async fn api_audit_handler(State(gw): State<SharedGateway>) -> impl IntoResponse {
+    let gw = gw.lock().await;
+    let store_arc = match gw.audit_store() {
+        Some(s) => s.clone(),
+        None => {
+            return axum::Json(serde_json::json!({
+                "entries": [],
+                "total": 0,
+                "note": "Audit store not configured",
+            }));
+        }
+    };
+    drop(gw); // Release gateway lock before locking audit store
+
+    let store = store_arc.lock().await;
+    let traces = store.latest(50);
+    let entries: Vec<serde_json::Value> = traces
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "trace_id": t.trace_id.to_string(),
+                "goal": t.goal,
+                "started_at": t.started_at.to_rfc3339(),
+                "completed_at": t.completed_at.map(|dt| dt.to_rfc3339()),
+                "success": t.success,
+                "events_count": t.events.len(),
+                "iterations": t.iterations,
+            })
+        })
+        .collect();
+    let total = store.len();
+    axum::Json(serde_json::json!({
+        "entries": entries,
+        "total": total,
+    }))
 }
 
 /// REST API: Get pending approval requests.

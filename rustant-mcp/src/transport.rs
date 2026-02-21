@@ -253,7 +253,7 @@ impl Transport for ChannelTransport {
 /// This will eventually support Server-Sent Events (SSE) for server-to-client
 /// streaming and regular HTTP POST for client-to-server requests.
 ///
-/// **Not yet implemented** — all methods currently panic with `todo!`.
+/// **Not yet implemented** — all methods return `McpError::TransportError`.
 pub struct HttpTransport {
     /// The port the HTTP server will listen on.
     pub port: u16,

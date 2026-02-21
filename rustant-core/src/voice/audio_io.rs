@@ -360,9 +360,11 @@ pub async fn record_audio_chunk(
     audio_convert::decode_wav(&data)
 }
 
-// Feature-gated AudioInput / AudioOutput stubs.
-// Real implementation would use cpal; we provide struct definitions
-// behind the feature flag so they can be referenced.
+// Feature-gated AudioInput / AudioOutput struct definitions.
+// The active audio implementation uses CLI tools (`afplay`/`afrecord` on macOS,
+// `aplay`/`arecord` on Linux) via the functions above. These structs are provided
+// for future `cpal`-based direct device I/O, which is deferred in favor of the
+// simpler CLI approach that requires no native audio library dependencies.
 
 /// Configuration for audio input capture.
 #[cfg(feature = "voice")]

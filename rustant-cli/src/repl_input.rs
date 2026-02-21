@@ -3,7 +3,8 @@
 //! Replaces raw `stdin.read_line()` with a crossterm-based input handler
 //! that provides:
 //! - Up/Down arrow history navigation with draft preservation
-//! - `/` prefix slash command autocomplete (Tab to accept, Esc to dismiss)
+//! - `/` prefix slash command autocomplete with visible dropdown list
+//! - Tab to accept selected completion, Esc to dismiss
 //! - Ctrl-C to clear line, Ctrl-D on empty line for EOF
 //! - Persistent history file at `.rustant/repl_history`
 
@@ -15,6 +16,9 @@ use crossterm::{
 };
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+
+/// Maximum number of completion items to show in the dropdown.
+const MAX_VISIBLE_COMPLETIONS: usize = 8;
 
 /// Persistent command history.
 pub struct InputHistory {
@@ -118,15 +122,45 @@ impl InputHistory {
     }
 }
 
+/// A single completion entry with name and description.
+struct CompletionEntry {
+    name: String,
+    description: String,
+}
+
 /// Completion state for slash commands.
 struct CompletionState {
-    matches: Vec<String>,
+    entries: Vec<CompletionEntry>,
     selected: usize,
+    /// Scroll offset for long lists.
+    scroll: usize,
+}
+
+impl CompletionState {
+    fn selected_name(&self) -> &str {
+        &self.entries[self.selected].name
+    }
+
+    /// Compute visible window range for the dropdown.
+    fn visible_range(&self) -> (usize, usize) {
+        let total = self.entries.len();
+        let max_vis = MAX_VISIBLE_COMPLETIONS.min(total);
+        let start = if self.selected < self.scroll {
+            self.selected
+        } else if self.selected >= self.scroll + max_vis {
+            self.selected + 1 - max_vis
+        } else {
+            self.scroll
+        };
+        (start, (start + max_vis).min(total))
+    }
 }
 
 /// Interactive REPL input handler.
 pub struct ReplInput {
     history: InputHistory,
+    /// Number of completion lines currently displayed below the input.
+    rendered_lines: usize,
 }
 
 impl ReplInput {
@@ -134,6 +168,7 @@ impl ReplInput {
     pub fn new(workspace: &Path) -> Self {
         Self {
             history: InputHistory::new(workspace),
+            rendered_lines: 0,
         }
     }
 
@@ -152,6 +187,8 @@ impl ReplInput {
 
         terminal::enable_raw_mode()?;
         let result = self.read_line_raw(cmd_registry);
+        // Clean up completion lines before disabling raw mode
+        self.clear_completion_lines()?;
         terminal::disable_raw_mode()?;
 
         // Move to next line after input
@@ -180,8 +217,8 @@ impl ReplInput {
                     // Ctrl-C: clear line
                     (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
                         buffer.clear();
-                        // Redraw empty line
-                        self.redraw_line("", 0, None)?;
+                        self.clear_completion_lines()?;
+                        self.redraw_input("", 0, None)?;
                         return Ok(Some(String::new()));
                     }
                     // Ctrl-D on empty line: EOF
@@ -193,75 +230,92 @@ impl ReplInput {
                     // Tab: accept completion
                     (KeyCode::Tab, _) => {
                         if let Some(ref comp) = completion {
-                            buffer = comp.matches[comp.selected].clone();
-                            // Add a space after the command
+                            buffer = comp.selected_name().to_string();
                             buffer.push(' ');
                             cursor_pos = buffer.len();
                             completion = None;
-                            self.redraw_line(&buffer, cursor_pos, None)?;
+                            self.clear_completion_lines()?;
+                            self.redraw_input(&buffer, cursor_pos, None)?;
                         }
                     }
-                    // Enter: submit
+                    // Enter: submit (or accept completion if active)
                     (KeyCode::Enter, _) => {
-                        let line = buffer.trim().to_string();
-                        if !line.is_empty() {
-                            self.history.push(&line);
+                        if let Some(ref comp) = completion {
+                            buffer = comp.selected_name().to_string();
+                            buffer.push(' ');
+                            cursor_pos = buffer.len();
+                            completion = None;
+                            self.clear_completion_lines()?;
+                            self.redraw_input(&buffer, cursor_pos, None)?;
+                        } else {
+                            let line = buffer.trim().to_string();
+                            if !line.is_empty() {
+                                self.history.push(&line);
+                            }
+                            return Ok(Some(line));
                         }
-                        return Ok(Some(line));
                     }
                     // Escape: dismiss completion
                     (KeyCode::Esc, _) => {
                         if completion.is_some() {
                             completion = None;
-                            self.redraw_line(&buffer, cursor_pos, None)?;
+                            self.clear_completion_lines()?;
+                            self.redraw_input(&buffer, cursor_pos, None)?;
                         }
                     }
-                    // Up arrow: history or cycle completion
+                    // Up arrow: cycle completion or history
                     (KeyCode::Up, _) => {
                         if let Some(ref mut comp) = completion {
                             if comp.selected > 0 {
                                 comp.selected -= 1;
+                                // Update scroll
+                                let (start, _) = comp.visible_range();
+                                comp.scroll = start;
                             }
-                            let hint = Some(comp.matches[comp.selected].as_str());
-                            self.redraw_line(&buffer, cursor_pos, hint)?;
+                            self.render_with_completion(&buffer, cursor_pos, &completion)?;
                         } else if let Some(entry) = self.history.navigate_up(&buffer) {
                             buffer = entry.to_string();
                             cursor_pos = buffer.len();
-                            self.redraw_line(&buffer, cursor_pos, None)?;
+                            self.redraw_input(&buffer, cursor_pos, None)?;
                         }
                     }
-                    // Down arrow: history or cycle completion
+                    // Down arrow: cycle completion or history
                     (KeyCode::Down, _) => {
                         if let Some(ref mut comp) = completion {
-                            if comp.selected < comp.matches.len() - 1 {
+                            if comp.selected < comp.entries.len() - 1 {
                                 comp.selected += 1;
+                                let (start, _) = comp.visible_range();
+                                comp.scroll = start;
                             }
-                            let hint = Some(comp.matches[comp.selected].as_str());
-                            self.redraw_line(&buffer, cursor_pos, hint)?;
+                            self.render_with_completion(&buffer, cursor_pos, &completion)?;
                         } else if let Some(entry) = self.history.navigate_down() {
                             buffer = entry;
                             cursor_pos = buffer.len();
-                            self.redraw_line(&buffer, cursor_pos, None)?;
+                            self.redraw_input(&buffer, cursor_pos, None)?;
                         }
                     }
                     // Right arrow: accept completion inline, or move cursor
                     (KeyCode::Right, _) => {
                         if let Some(ref comp) = completion {
-                            buffer = comp.matches[comp.selected].clone();
+                            buffer = comp.selected_name().to_string();
                             buffer.push(' ');
                             cursor_pos = buffer.len();
                             completion = None;
-                            self.redraw_line(&buffer, cursor_pos, None)?;
+                            self.clear_completion_lines()?;
+                            self.redraw_input(&buffer, cursor_pos, None)?;
                         } else if cursor_pos < buffer.len() {
                             cursor_pos += 1;
-                            self.redraw_line(&buffer, cursor_pos, None)?;
+                            self.redraw_input(&buffer, cursor_pos, None)?;
                         }
                     }
                     // Left arrow: dismiss completion, move cursor
                     (KeyCode::Left, _) => {
-                        completion = None;
+                        if completion.is_some() {
+                            completion = None;
+                            self.clear_completion_lines()?;
+                        }
                         cursor_pos = cursor_pos.saturating_sub(1);
-                        self.redraw_line(&buffer, cursor_pos, None)?;
+                        self.redraw_input(&buffer, cursor_pos, None)?;
                     }
                     // Backspace
                     (KeyCode::Backspace, _) => {
@@ -269,21 +323,22 @@ impl ReplInput {
                             buffer.remove(cursor_pos - 1);
                             cursor_pos -= 1;
                         }
-                        // Update completion
                         completion = self.update_completion(&buffer, cmd_registry);
-                        let hint = completion.as_ref().map(|c| c.matches[c.selected].as_str());
-                        self.redraw_line(&buffer, cursor_pos, hint)?;
+                        self.render_with_completion(&buffer, cursor_pos, &completion)?;
                     }
                     // Home
                     (KeyCode::Home, _) => {
                         cursor_pos = 0;
-                        completion = None;
-                        self.redraw_line(&buffer, cursor_pos, None)?;
+                        if completion.is_some() {
+                            completion = None;
+                            self.clear_completion_lines()?;
+                        }
+                        self.redraw_input(&buffer, cursor_pos, None)?;
                     }
                     // End
                     (KeyCode::End, _) => {
                         cursor_pos = buffer.len();
-                        self.redraw_line(&buffer, cursor_pos, None)?;
+                        self.redraw_input(&buffer, cursor_pos, None)?;
                     }
                     // Regular character input
                     (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
@@ -291,10 +346,8 @@ impl ReplInput {
                         cursor_pos += 1;
                         self.history.reset_navigation();
 
-                        // Update completions for slash commands
                         completion = self.update_completion(&buffer, cmd_registry);
-                        let hint = completion.as_ref().map(|c| c.matches[c.selected].as_str());
-                        self.redraw_line(&buffer, cursor_pos, hint)?;
+                        self.render_with_completion(&buffer, cursor_pos, &completion)?;
                     }
                     _ => {}
                 }
@@ -308,30 +361,139 @@ impl ReplInput {
         buffer: &str,
         cmd_registry: &CommandRegistry,
     ) -> Option<CompletionState> {
-        // Only complete if buffer starts with / and has no spaces yet (typing a command name)
+        // Only complete if buffer starts with / and has no spaces yet
         if !buffer.starts_with('/') || buffer.contains(' ') {
             return None;
         }
-        let matches: Vec<String> = cmd_registry
-            .completions(buffer)
-            .into_iter()
-            .map(|s| s.to_string())
-            .collect();
-        if matches.is_empty() || (matches.len() == 1 && matches[0] == buffer) {
+        let matches = cmd_registry.completions_with_desc(buffer);
+        if matches.is_empty() || (matches.len() == 1 && matches[0].0 == buffer) {
             return None;
         }
+        let entries: Vec<CompletionEntry> = matches
+            .into_iter()
+            .map(|(name, desc)| CompletionEntry {
+                name: name.to_string(),
+                description: desc.to_string(),
+            })
+            .collect();
         Some(CompletionState {
-            matches,
+            entries,
             selected: 0,
+            scroll: 0,
         })
     }
 
-    /// Redraw the current input line (overwrites the current line).
-    fn redraw_line(
+    /// Render the input line plus the completion dropdown (if any).
+    fn render_with_completion(
+        &mut self,
+        buffer: &str,
+        cursor_pos: usize,
+        completion: &Option<CompletionState>,
+    ) -> io::Result<()> {
+        // First clear any previously rendered completion lines
+        self.clear_completion_lines()?;
+
+        // Redraw the input line with ghost text from the selected completion
+        let ghost = completion.as_ref().map(|c| c.selected_name());
+        self.redraw_input(buffer, cursor_pos, ghost)?;
+
+        // Render the dropdown list below
+        if let Some(comp) = completion {
+            self.render_dropdown(comp)?;
+            // Move cursor back up to the input line
+            if self.rendered_lines > 0 {
+                let mut stdout = io::stdout();
+                let lines_up = self.rendered_lines;
+                let col = 2 + cursor_pos; // 2 = prompt "> " width
+                write!(stdout, "\x1b[{lines_up}A")?;
+                write!(stdout, "\r\x1b[{col}C")?;
+                stdout.flush()?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Render the completion dropdown list below the input line.
+    fn render_dropdown(&mut self, comp: &CompletionState) -> io::Result<()> {
+        let mut stdout = io::stdout();
+        let (start, end) = comp.visible_range();
+        let visible_count = end - start;
+
+        // Get terminal width for truncation
+        let term_width = terminal::size().map(|(w, _)| w as usize).unwrap_or(80);
+
+        for i in start..end {
+            let entry = &comp.entries[i];
+            let is_selected = i == comp.selected;
+
+            // Format: "  /command  description"
+            let name = &entry.name;
+            let desc = &entry.description;
+
+            // Truncate description to fit terminal width
+            let prefix_len = 2 + name.len() + 2; // "  /cmd  "
+            let max_desc = term_width.saturating_sub(prefix_len + 2);
+            let desc_truncated = if desc.len() > max_desc {
+                &desc[..max_desc]
+            } else {
+                desc
+            };
+
+            let padded_name = format!("{name:<20}");
+            write!(stdout, "\r\n")?;
+            if is_selected {
+                // Highlighted: white on dark bg
+                write!(
+                    stdout,
+                    "\x1b[2K\x1b[7m  {padded_name} {desc_truncated}\x1b[0m",
+                )?;
+            } else {
+                write!(
+                    stdout,
+                    "\x1b[2K  \x1b[36m{padded_name}\x1b[0m \x1b[90m{desc_truncated}\x1b[0m",
+                )?;
+            }
+        }
+
+        // Show scroll indicator if there are more items
+        let total = comp.entries.len();
+        if total > visible_count {
+            write!(stdout, "\r\n")?;
+            write!(
+                stdout,
+                "\x1b[2K  \x1b[90m({visible_count}/{total} commands)\x1b[0m",
+            )?;
+            self.rendered_lines = visible_count + 1;
+        } else {
+            self.rendered_lines = visible_count;
+        }
+
+        stdout.flush()?;
+        Ok(())
+    }
+
+    /// Clear previously rendered completion lines below the input.
+    fn clear_completion_lines(&mut self) -> io::Result<()> {
+        if self.rendered_lines > 0 {
+            let mut stdout = io::stdout();
+            // Save cursor position, go down and clear each line, restore
+            for _ in 0..self.rendered_lines {
+                write!(stdout, "\r\n\x1b[2K")?;
+            }
+            // Move back up
+            write!(stdout, "\x1b[{}A", self.rendered_lines)?;
+            stdout.flush()?;
+            self.rendered_lines = 0;
+        }
+        Ok(())
+    }
+
+    /// Redraw just the input line (row 0) with optional ghost text.
+    fn redraw_input(
         &self,
         buffer: &str,
         cursor_pos: usize,
-        completion_hint: Option<&str>,
+        ghost_hint: Option<&str>,
     ) -> io::Result<()> {
         let mut stdout = io::stdout();
         // Move to start of line and clear
@@ -341,7 +503,7 @@ impl ReplInput {
         // Print buffer
         write!(stdout, "{buffer}")?;
         // Print ghost completion text if available
-        if let Some(hint) = completion_hint
+        if let Some(hint) = ghost_hint
             && hint.len() > buffer.len()
             && hint.starts_with(buffer)
         {

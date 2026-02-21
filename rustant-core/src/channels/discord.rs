@@ -269,8 +269,10 @@ impl DiscordHttpClient for RealDiscordHttp {
     }
 
     async fn connect_gateway(&self) -> Result<(), String> {
-        // Gateway (WebSocket) connection is not implemented yet;
-        // REST-only mode works for sending/receiving via polling.
+        // TODO(future): Discord Gateway v10 WebSocket connection.
+        // Requires: heartbeat loop, IDENTIFY payload with intents,
+        // RESUME for reconnection, and event dispatch for MESSAGE_CREATE.
+        // Current REST-only polling mode works for send/receive.
         Ok(())
     }
 

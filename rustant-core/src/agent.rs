@@ -26,6 +26,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+/// Maximum characters kept per tool result before truncation (~3K tokens).
+const MAX_TOOL_RESULT_CHARS: usize = 12_000;
+
 /// Truncate a string to at most `max_chars` characters, respecting UTF-8 boundaries.
 fn truncate_str(s: &str, max_chars: usize) -> &str {
     match s.char_indices().nth(max_chars) {
@@ -262,6 +265,10 @@ pub struct Agent {
     cached_tool_defs: HashMap<Option<crate::types::TaskClassification>, Arc<Vec<ToolDefinition>>>,
     /// Optional MoE router for expert-based tool filtering.
     moe_router: Option<crate::moe::MoeRouter>,
+    /// MoE-derived tool filter: when set, only these tools (plus ask_user) are
+    /// sent to the LLM. Takes priority over classification-based filtering.
+    /// Cleared at the start of each task.
+    moe_tool_filter: Option<HashSet<String>>,
     /// Agent decision log for interpretability (tracks reasoning behind decisions).
     decision_log: crate::decision_log::DecisionLog,
     /// Data flow tracker for transparency (records data movements through the agent).
@@ -390,6 +397,7 @@ impl Agent {
             last_classification: None,
             cached_tool_defs: HashMap::new(),
             moe_router,
+            moe_tool_filter: None,
             decision_log: crate::decision_log::DecisionLog::new(),
             data_flow_tracker: crate::data_flow::DataFlowTracker::new(),
             consent_manager,
@@ -426,9 +434,12 @@ impl Agent {
         ];
 
         let extra: &[&str] = match classification {
-            TaskClassification::General
-            | TaskClassification::Workflow(_)
-            | TaskClassification::DeepResearch => return None,
+            // General queries only need core tools — avoid sending all 73 tools.
+            TaskClassification::General => return Some(core.into_iter().collect()),
+            // Deep research needs web tools on top of core.
+            TaskClassification::DeepResearch => &["web_fetch"],
+            // Workflows need all tools (orchestrating multiple steps).
+            TaskClassification::Workflow(_) => return None,
             TaskClassification::FileOperation => &[
                 "file_patch",
                 "smart_edit",
@@ -505,9 +516,7 @@ impl Agent {
                 &["imessage_read", "imessage_send", "imessage_contacts"]
             }
             TaskClassification::Slack => &["slack"],
-            TaskClassification::ArxivResearch => {
-                &["arxiv_research", "knowledge_graph", "web_fetch"]
-            }
+            TaskClassification::ArxivResearch => &["arxiv_research", "web_fetch"],
             TaskClassification::KnowledgeGraph => &["knowledge_graph"],
             TaskClassification::ExperimentTracking => &["experiment_tracker"],
             TaskClassification::CodeIntelligence => {
@@ -546,16 +555,25 @@ impl Agent {
             return (**cached).clone();
         }
 
-        let allowed = classification.and_then(Self::tools_for_classification);
-
-        let mut defs: Vec<ToolDefinition> = if let Some(ref allowed_set) = allowed {
+        // MoE hard-filter takes priority: when active, only MoE-selected tools are sent.
+        // Falls back to classification-based filtering, then all tools.
+        let mut defs: Vec<ToolDefinition> = if let Some(ref moe_filter) = self.moe_tool_filter {
             self.tools
                 .values()
-                .filter(|t| allowed_set.contains(t.definition.name.as_str()))
+                .filter(|t| moe_filter.contains(&t.definition.name))
                 .map(|t| t.definition.clone())
                 .collect()
         } else {
-            self.tools.values().map(|t| t.definition.clone()).collect()
+            let allowed = classification.and_then(Self::tools_for_classification);
+            if let Some(ref allowed_set) = allowed {
+                self.tools
+                    .values()
+                    .filter(|t| allowed_set.contains(t.definition.name.as_str()))
+                    .map(|t| t.definition.clone())
+                    .collect()
+            } else {
+                self.tools.values().map(|t| t.definition.clone()).collect()
+            }
         };
 
         let tool_count = defs.len();
@@ -565,6 +583,7 @@ impl Agent {
                 filtered = tool_count,
                 total = total_registered,
                 classification = ?classification,
+                moe_active = self.moe_tool_filter.is_some(),
                 "Filtered tool definitions for LLM request"
             );
         }
@@ -593,15 +612,24 @@ impl Agent {
     pub fn warm_tool_def_cache(&mut self, classification: Option<&TaskClassification>) {
         let cache_key = classification.cloned();
         let defs = {
-            let allowed = classification.and_then(Self::tools_for_classification);
-            let mut defs: Vec<ToolDefinition> = if let Some(ref allowed_set) = allowed {
+            // MoE hard-filter takes priority over classification-based filtering.
+            let mut defs: Vec<ToolDefinition> = if let Some(ref moe_filter) = self.moe_tool_filter {
                 self.tools
                     .values()
-                    .filter(|t| allowed_set.contains(t.definition.name.as_str()))
+                    .filter(|t| moe_filter.contains(&t.definition.name))
                     .map(|t| t.definition.clone())
                     .collect()
             } else {
-                self.tools.values().map(|t| t.definition.clone()).collect()
+                let allowed = classification.and_then(Self::tools_for_classification);
+                if let Some(ref allowed_set) = allowed {
+                    self.tools
+                        .values()
+                        .filter(|t| allowed_set.contains(t.definition.name.as_str()))
+                        .map(|t| t.definition.clone())
+                        .collect()
+                } else {
+                    self.tools.values().map(|t| t.definition.clone()).collect()
+                }
             };
             defs.push(ToolDefinition {
                 name: "ask_user".to_string(),
@@ -667,13 +695,32 @@ impl Agent {
                 knowledge_addendum.push_str("\n\n");
                 knowledge_addendum.push_str(&hint);
             }
-        }
-        // Warm the tool definition cache for this classification so that
-        // tool_definitions() (which is &self) can serve cached results.
-        let classification_for_cache = self.state.task_classification.clone();
-        self.warm_tool_def_cache(classification_for_cache.as_ref());
 
-        // MoE: inject expert-specific system prompt addendum and precision hints
+            // Visual intent: add mandatory tool directive to prevent text-based diagrams.
+            // Without this, LLMs tend to generate Mermaid/ASCII instead of calling paper_to_visual.
+            if matches!(classification, TaskClassification::ArxivResearch) {
+                let goal_lower = self
+                    .state
+                    .current_goal
+                    .as_deref()
+                    .unwrap_or("")
+                    .to_lowercase();
+                if Self::has_visual_intent(&goal_lower) {
+                    knowledge_addendum.push_str(
+                        "\n\nMANDATORY VISUAL TASK: You MUST call 'arxiv_research' with action \
+                         'paper_to_visual' to generate an AI-rendered illustration. Rules:\n\
+                         1. Do NOT generate Mermaid diagrams, ASCII art, or text-based visuals yourself.\n\
+                         2. Do NOT call ask_user to clarify what 'visualize' means — it means paper_to_visual.\n\
+                         3. If the user also asks to analyze: call arxiv_research with 'analyze' FIRST, \
+                            then call arxiv_research with 'paper_to_visual' as a SECOND tool call.\n\
+                         4. The task is NOT complete until paper_to_visual has been called.",
+                    );
+                }
+            }
+        }
+        // MoE: inject expert-specific system prompt addendum and precision hints.
+        // Must run BEFORE warm_tool_def_cache so the filter is applied to cached defs.
+        self.moe_tool_filter = None; // Reset from previous task
         if let Some(ref mut router) = self.moe_router {
             let route_result = router.route(task);
             debug!(
@@ -686,6 +733,16 @@ impl Agent {
             );
             knowledge_addendum.push_str("\n\n");
             knowledge_addendum.push_str(&route_result.system_prompt_addendum);
+
+            // Hard-filter tools for ALL providers (not just Anthropic).
+            // This is the primary token savings mechanism (~20K tokens saved).
+            let moe_tools: HashSet<String> = route_result.all_tool_names().into_iter().collect();
+            debug!(
+                moe_tool_count = moe_tools.len(),
+                total_registered = self.tools.len(),
+                "MoE hard-filtering tools for LLM request"
+            );
+            self.moe_tool_filter = Some(moe_tools);
 
             // Pass precision hints to Brain for Anthropic Tool Search integration.
             // Half/Quarter precision tools will be deferred (discovered on demand via
@@ -730,6 +787,10 @@ impl Agent {
             }
         }
 
+        // Warm the tool definition cache AFTER MoE routing so the filter is applied.
+        let classification_for_cache = self.state.task_classification.clone();
+        self.warm_tool_def_cache(classification_for_cache.as_ref());
+
         // Hydration: inject relevant codebase context if configured
         if let Some(ref hydration_config) = self.config.hydration
             && hydration_config.enabled
@@ -757,6 +818,16 @@ impl Agent {
         self.callback.on_status_change(AgentStatus::Thinking).await;
 
         let mut final_response = String::new();
+
+        // Visual intent tracking: detect paper_to_visual calls across iterations
+        // so the text retry fires on ANY iteration (not just iteration 1).
+        let visual_intent_active =
+            matches!(
+                self.state.task_classification,
+                Some(TaskClassification::ArxivResearch)
+            ) && Self::has_visual_intent(self.state.current_goal.as_deref().unwrap_or(""));
+        let mut visual_tool_called = false;
+        let mut visual_retry_count: usize = 0;
 
         loop {
             // Check cancellation
@@ -792,6 +863,12 @@ impl Agent {
             // --- THINK ---
             self.state.status = AgentStatus::Thinking;
             self.callback.on_status_change(AgentStatus::Thinking).await;
+
+            // Pre-think: mask consumed/stale observations every iteration to keep context lean.
+            self.memory.short_term.mask_consumed_observations(500);
+            self.memory
+                .short_term
+                .mask_stale_observations(self.config.memory.window_size, 200);
 
             let conversation = self.memory.context_messages();
             let tools = Some(self.tool_definitions(self.state.task_classification.as_ref()));
@@ -920,7 +997,30 @@ impl Agent {
             self.state.status = AgentStatus::Deciding;
             match &response.message.content {
                 Content::Text { text } => {
-                    // LLM produced a text response — task may be complete
+                    // Visual task safety net: if LLM generated text (e.g. a Mermaid
+                    // diagram) instead of calling paper_to_visual, retry with a
+                    // correction message. Fires on ANY iteration where paper_to_visual
+                    // hasn't been called yet, with max 2 retries to prevent loops.
+                    if visual_intent_active && !visual_tool_called && visual_retry_count < 2 {
+                        visual_retry_count += 1;
+                        debug!(
+                            task_id = %task_id,
+                            retry = visual_retry_count,
+                            iteration = self.state.iteration,
+                            "Visual intent detected but LLM generated text — \
+                             retrying with tool directive"
+                        );
+                        // Store in memory for context but don't emit to user
+                        self.memory.add_message(response.message.clone());
+                        self.memory.add_message(Message::user(
+                            "Please use the arxiv_research tool with action \
+                             'paper_to_visual' to generate an AI-rendered \
+                             illustration. Do not generate text diagrams.",
+                        ));
+                        continue;
+                    }
+
+                    // LLM produced a text response — task is complete
                     info!(task_id = %task_id, "Agent produced text response");
                     self.callback.on_assistant_message(text).await;
                     self.memory.add_message(response.message.clone());
@@ -941,7 +1041,40 @@ impl Agent {
                     );
                     self.memory.add_message(response.message.clone());
 
+                    // Visual intent: if the LLM called the wrong tool (e.g.
+                    // knowledge_graph instead of arxiv_research), reject with an
+                    // error result and retry so it uses the correct tool.
+                    if visual_intent_active
+                        && !visual_tool_called
+                        && name != "arxiv_research"
+                        && visual_retry_count < 2
+                    {
+                        visual_retry_count += 1;
+                        debug!(
+                            task_id = %task_id,
+                            wrong_tool = name,
+                            retry = visual_retry_count,
+                            "Visual intent: LLM called wrong tool, redirecting"
+                        );
+                        self.memory.add_message(Message::tool_result(
+                            id,
+                            "Error: For visualization, use the 'arxiv_research' tool \
+                             with action 'paper_to_visual' instead.",
+                            true,
+                        ));
+                        continue;
+                    }
+
                     self.handle_tool_call(id, name, arguments).await;
+
+                    // Track paper_to_visual calls for visual intent retry logic
+                    if visual_intent_active && name == "arxiv_research" {
+                        if let Some(action) = arguments.get("action").and_then(|a| a.as_str()) {
+                            if action == "paper_to_visual" {
+                                visual_tool_called = true;
+                            }
+                        }
+                    }
 
                     // Check context compression
                     self.check_and_compress().await;
@@ -965,7 +1098,42 @@ impl Agent {
                                 arguments,
                             } => {
                                 has_tool_call = true;
+
+                                // Visual intent: redirect wrong tool calls
+                                if visual_intent_active
+                                    && !visual_tool_called
+                                    && name != "arxiv_research"
+                                    && visual_retry_count < 2
+                                {
+                                    visual_retry_count += 1;
+                                    debug!(
+                                        task_id = %task_id,
+                                        wrong_tool = name,
+                                        "Visual intent (multipart): wrong tool, redirecting"
+                                    );
+                                    self.memory.add_message(Message::tool_result(
+                                        id,
+                                        "Error: For visualization, use the 'arxiv_research' \
+                                         tool with action 'paper_to_visual' instead.",
+                                        true,
+                                    ));
+                                    // Don't execute the wrong tool; let the
+                                    // loop continue to give the LLM another chance
+                                    continue;
+                                }
+
                                 self.handle_tool_call(id, name, arguments).await;
+
+                                // Track paper_to_visual calls for visual intent retry logic
+                                if visual_intent_active && name == "arxiv_research" {
+                                    if let Some(action) =
+                                        arguments.get("action").and_then(|a| a.as_str())
+                                    {
+                                        if action == "paper_to_visual" {
+                                            visual_tool_called = true;
+                                        }
+                                    }
+                                }
                             }
                             _ => {}
                         }
@@ -1279,6 +1447,34 @@ impl Agent {
         // Handle ask_user pseudo-tool before regular tool lookup.
         // This bypasses safety checks since it's read-only user interaction.
         if tool_name == "ask_user" {
+            // When visual intent is clear, auto-answer clarification questions
+            // about visualization instead of bothering the user.
+            if let Some(TaskClassification::ArxivResearch) = &self.state.task_classification {
+                let goal_lower = self
+                    .state
+                    .current_goal
+                    .as_deref()
+                    .unwrap_or("")
+                    .to_lowercase();
+                if Self::has_visual_intent(&goal_lower) {
+                    let question = arguments
+                        .get("question")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let q_lower = question.to_lowercase();
+                    if q_lower.contains("visual")
+                        || q_lower.contains("diagram")
+                        || q_lower.contains("illustrat")
+                    {
+                        debug!("Auto-answering ask_user for visual intent: {}", question);
+                        return Ok(ToolOutput::text(
+                            "Use the paper_to_visual action on the arxiv_research tool \
+                             to generate an AI-rendered illustration.",
+                        ));
+                    }
+                }
+            }
+
             self.state.status = AgentStatus::WaitingForClarification;
             self.callback
                 .on_status_change(AgentStatus::WaitingForClarification)
@@ -1495,6 +1691,35 @@ impl Agent {
     /// token usage, and verification hook. Extracted to eliminate duplication between the
     /// single-ToolCall and MultiPart code paths.
     async fn handle_tool_call(&mut self, id: &str, name: &str, arguments: &serde_json::Value) {
+        // Hard redirect: knowledge_graph → arxiv_research paper_to_visual for visual intent.
+        // Catches any provider that allows hallucinated function calls (e.g. Gemini without
+        // allowedFunctionNames, or future models with similar behavior).
+        let (name, arguments) = if name == "knowledge_graph"
+            && matches!(
+                self.state.task_classification,
+                Some(TaskClassification::ArxivResearch)
+            )
+            && Self::has_visual_intent(self.state.current_goal.as_deref().unwrap_or(""))
+        {
+            info!("Hard redirect: knowledge_graph → arxiv_research paper_to_visual");
+            self.callback
+                .on_assistant_message("[Routed: knowledge_graph → arxiv_research paper_to_visual]")
+                .await;
+            let arxiv_id = self.extract_recent_arxiv_id().unwrap_or_default();
+            (
+                "arxiv_research".to_string(),
+                serde_json::json!({
+                    "action": "paper_to_visual",
+                    "arxiv_id": arxiv_id,
+                    "confirm": false
+                }),
+            )
+        } else {
+            (name.to_string(), arguments.clone())
+        };
+        let name = &name;
+        let arguments = &arguments;
+
         // Build and emit decision explanation
         let explanation = self.build_decision_explanation(name, arguments);
         self.callback.on_decision_explanation(&explanation).await;
@@ -1526,11 +1751,20 @@ impl Agent {
             debug!(tool = %actual_name, error = %e, "Tool execution failed");
         }
 
-        // Observe: store result in memory
+        // Observe: store result in memory (truncate large outputs to cap per-result tokens)
         let result_tokens = match &result {
             Ok(output) => {
-                let msg = Message::tool_result(id, &output.content, false);
-                let tokens = output.content.len() / 4;
+                let content = if output.content.len() > MAX_TOOL_RESULT_CHARS {
+                    let original_len = output.content.len();
+                    let truncated = truncate_str(&output.content, MAX_TOOL_RESULT_CHARS);
+                    format!(
+                        "{truncated}\n\n[... truncated from {original_len} chars, showing first {MAX_TOOL_RESULT_CHARS}]"
+                    )
+                } else {
+                    output.content.clone()
+                };
+                let tokens = content.len() / 4;
+                let msg = Message::tool_result(id, &content, false);
                 self.memory.add_message(msg);
                 tokens
             }
@@ -1546,7 +1780,7 @@ impl Agent {
 
         // Track consecutive failures for circuit breaker
         if result.is_err() {
-            if self.consecutive_failures.0 == name {
+            if self.consecutive_failures.0 == *name {
                 self.consecutive_failures.1 += 1;
             } else {
                 self.consecutive_failures = (name.to_string(), 1);
@@ -3015,7 +3249,13 @@ impl Agent {
                 "For this task, call the appropriate iMessage tool: 'imessage_read', 'imessage_send', or 'imessage_contacts'."
             }
             TaskClassification::ArxivResearch => {
-                "For this task, call the 'arxiv_research' tool. Actions: search, fetch, analyze, compare, trending, save/library/remove, export_bibtex, collections, digest_config, paper_to_code, paper_to_notebook, implement, setup_env, verify, implementation_status, semantic_search, summarize, citation_graph, blueprint, reindex, paper_to_visual. When the user says 'generate a visual', 'create an illustration', or 'visualize this paper', use the paper_to_visual action. Do NOT use macos_safari, shell_exec, or curl."
+                "For this task, call the 'arxiv_research' tool. Key actions: search, fetch, analyze, \
+                 compare, paper_to_visual (AI illustration via Gemini), paper_to_code, implement, \
+                 summarize, citation_graph, blueprint. \
+                 IMPORTANT: 'paper_to_visual' is an ACTION on 'arxiv_research' (NOT a separate tool). \
+                 Call it as: arxiv_research({\"action\": \"paper_to_visual\", \"paper_id\": \"...\"}). \
+                 Do NOT use knowledge_graph, macos_safari, shell_exec, or any other tool for visualization. \
+                 When presenting search results, mention that users can visualize papers with paper_to_visual."
             }
             TaskClassification::KnowledgeGraph => {
                 "For this task, call the 'knowledge_graph' tool. Actions: add_node, get_node, update_node, remove_node, add_edge, remove_edge, neighbors, search, list, path, stats, import_arxiv, export_dot."
@@ -3132,7 +3372,13 @@ impl Agent {
                 "For this task, call the 'slack' tool with the appropriate action (send_message, read_messages, list_channels, reply_thread, list_users, add_reaction). Do NOT use shell_exec to interact with Slack."
             }
             TaskClassification::ArxivResearch => {
-                "For this task, call the 'arxiv_research' tool. Actions: search, fetch, analyze, compare, trending, save/library/remove, export_bibtex, collections, digest_config, paper_to_code, paper_to_notebook, implement, setup_env, verify, implementation_status, semantic_search, summarize, citation_graph, blueprint, reindex, paper_to_visual. When the user says 'generate a visual', 'create an illustration', or 'visualize this paper', use the paper_to_visual action. Do NOT use shell_exec or curl."
+                "For this task, call the 'arxiv_research' tool. Key actions: search, fetch, analyze, \
+                 compare, paper_to_visual (AI illustration via Gemini), paper_to_code, implement, \
+                 summarize, citation_graph, blueprint. \
+                 IMPORTANT: 'paper_to_visual' is an ACTION on 'arxiv_research' (NOT a separate tool). \
+                 Call it as: arxiv_research({\"action\": \"paper_to_visual\", \"paper_id\": \"...\"}). \
+                 Do NOT use knowledge_graph, shell_exec, or any other tool for visualization. \
+                 When presenting search results, mention that users can visualize papers with paper_to_visual."
             }
             TaskClassification::KnowledgeGraph => {
                 "For this task, call the 'knowledge_graph' tool. Actions: add_node, get_node, update_node, remove_node, add_edge, remove_edge, neighbors, search, list, path, stats, import_arxiv, export_dot."
@@ -3170,6 +3416,40 @@ impl Agent {
         Some(format!("TOOL ROUTING: {tool_hint}"))
     }
 
+    /// Check if a task description indicates visual/illustration intent for a paper.
+    /// Used by process_task() for mandatory directives and by the agent loop for
+    /// text-response interception.
+    fn has_visual_intent(text: &str) -> bool {
+        let lower = text.to_lowercase();
+        let has_paper =
+            lower.contains("paper") || lower.contains("arxiv") || lower.contains("preprint");
+        let has_visual = lower.contains("visual")
+            || lower.contains("diagram")
+            || lower.contains("illustrat")
+            || lower.contains("paper banana")
+            || lower.contains("paperbanana")
+            || lower.contains("paper_to_visual");
+        let is_search = lower.contains("search for")
+            || lower.contains("find paper")
+            || lower.contains("papers about");
+        has_paper && has_visual && !is_search
+    }
+
+    /// Scan recent conversation messages for an arXiv ID pattern (e.g. `2401.12345`).
+    /// Used by the knowledge_graph → arxiv_research hard redirect.
+    fn extract_recent_arxiv_id(&self) -> Option<String> {
+        let re = regex::Regex::new(r"\d{4}\.\d{4,5}(?:v\d+)?").ok()?;
+        // Scan messages in reverse (most recent first)
+        for msg in self.memory.short_term.messages().iter().rev().take(20) {
+            if let Some(text) = msg.content.as_text() {
+                if let Some(m) = re.find(text) {
+                    return Some(m.as_str().to_string());
+                }
+            }
+        }
+        None
+    }
+
     /// Auto-correct a tool call when the LLM is stuck calling the wrong tool.
     /// Returns Some((corrected_name, corrected_args)) if a correction is possible.
     /// Uses the cached `TaskClassification` from `AgentState` for O(1) matching.
@@ -3200,9 +3480,39 @@ impl Agent {
             TaskClassification::ArxivResearch
                 if matches!(
                     failed_tool,
-                    "macos_safari" | "shell_exec" | "web_fetch" | "web_search"
+                    "macos_safari" | "shell_exec" | "web_fetch" | "web_search" | "knowledge_graph"
                 ) =>
             {
+                let lower = task.to_lowercase();
+                let has_visual_intent = (lower.contains("visual")
+                    || lower.contains("diagram")
+                    || lower.contains("illustrat")
+                    || lower.contains("paper banana")
+                    || lower.contains("paperbanana")
+                    || lower.contains("paper_to_visual"))
+                    && !lower.contains("search for")
+                    && !lower.contains("find paper")
+                    && !lower.contains("papers about");
+                if has_visual_intent {
+                    // Extract arxiv_id if present (pattern: 4+ digits, dot, 4-5 digits)
+                    let arxiv_id = lower
+                        .split_whitespace()
+                        .find(|w| {
+                            w.len() >= 9
+                                && w.chars().next().is_some_and(|c| c.is_ascii_digit())
+                                && w.contains('.')
+                        })
+                        .unwrap_or("")
+                        .to_string();
+                    return Some((
+                        "arxiv_research".to_string(),
+                        serde_json::json!({
+                            "action": "paper_to_visual",
+                            "arxiv_id": arxiv_id,
+                            "confirm": false
+                        }),
+                    ));
+                }
                 return Some((
                     "arxiv_research".to_string(),
                     serde_json::json!({"action": "search", "query": task, "max_results": 10}),
@@ -3405,6 +3715,11 @@ impl Agent {
     /// Get the brain reference (for usage stats).
     pub fn brain(&self) -> &Brain {
         &self.brain
+    }
+
+    /// Get a mutable reference to the brain (for provider hot-swap).
+    pub fn brain_mut(&mut self) -> &mut Brain {
+        &mut self.brain
     }
 
     /// Get the safety guardian reference (for audit log).
@@ -4282,8 +4597,9 @@ mod tests {
     #[tokio::test]
     async fn test_agent_max_iterations() {
         let provider = Arc::new(MockLlmProvider::new());
-        // Queue many tool calls to exhaust iterations (more than max_iterations default of 50)
-        for _ in 0..55 {
+        // Queue many tool calls to exhaust iterations (more than max_iterations default of 50).
+        // With window_size=12, compression fires every ~6 iters consuming extra responses.
+        for _ in 0..65 {
             provider.queue_response(MockLlmProvider::tool_call_response(
                 "echo",
                 serde_json::json!({"text": "loop"}),
@@ -4942,11 +5258,15 @@ mod tests {
     }
 
     #[test]
-    fn test_tools_for_classification_general_returns_none() {
-        assert!(
-            Agent::tools_for_classification(&TaskClassification::General).is_none(),
-            "General classification should return None (all tools)"
-        );
+    fn test_tools_for_classification_general_returns_core_only() {
+        let set = Agent::tools_for_classification(&TaskClassification::General)
+            .expect("General should return Some (core tools only)");
+        // General returns the 10 core tools
+        assert_eq!(set.len(), 10, "General should return 10 core tools");
+        assert!(set.contains("ask_user"));
+        assert!(set.contains("echo"));
+        assert!(set.contains("shell_exec"));
+        assert!(set.contains("web_search"));
     }
 
     #[test]
@@ -5018,8 +5338,33 @@ mod tests {
             "Calendar should NOT include macos_music"
         );
 
-        // General filter: should return all tools
+        // General filter: returns only core tools (echo, file_read match from the 10 core set) + ask_user
         let general_defs = agent.tool_definitions(Some(&TaskClassification::General));
-        assert_eq!(general_defs.len(), 6, "General should return all tools");
+        let general_names: Vec<&str> = general_defs.iter().map(|d| d.name.as_str()).collect();
+        assert!(
+            general_names.contains(&"echo"),
+            "General should include core tool echo"
+        );
+        assert!(
+            general_names.contains(&"file_read"),
+            "General should include core tool file_read"
+        );
+        assert!(
+            general_names.contains(&"ask_user"),
+            "General should include ask_user"
+        );
+        assert!(
+            !general_names.contains(&"macos_calendar"),
+            "General should NOT include macos_calendar"
+        );
+        assert!(
+            !general_names.contains(&"git_status"),
+            "General should NOT include git_status"
+        );
+        assert_eq!(
+            general_defs.len(),
+            3,
+            "General should return only matching core tools + ask_user"
+        );
     }
 }

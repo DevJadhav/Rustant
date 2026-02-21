@@ -52,7 +52,7 @@ default_timeout_secs = 60
 
 ```toml
 [memory]
-window_size = 20           # Messages in working memory
+window_size = 12           # Messages in working memory
 enable_persistence = true  # Persistent long-term memory
 ```
 

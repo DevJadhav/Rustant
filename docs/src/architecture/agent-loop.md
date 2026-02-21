@@ -56,7 +56,7 @@ Each variant produces a rich `ApprovalContext` with `with_preview_from_tool()` f
 2. **Fact Extraction** — Successful results (10-5000 chars) → `Fact` in long-term memory
 3. **Correction Recording** — User denials → `Correction` for behavioral learning
 4. **Knowledge Distillation** — `KnowledgeDistiller` processes facts/corrections → behavioral rules via `Brain.set_knowledge_addendum()`
-5. **Auto-Compression** — Checked after each observation; triggers when messages exceed 2x window_size
+5. **Auto-Compression** — Checked after each observation; triggers when messages exceed 2x window_size. Pre-think observation masking runs every iteration to replace consumed/stale tool results before building context
 
 ## Iteration Budget
 

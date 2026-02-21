@@ -288,14 +288,46 @@ impl TraceEvaluator for CostEfficiencyEvaluator {
     }
 }
 
-/// Checks tool selection against task classification expectations.
+/// Detects likely wrong tool selection by finding patterns where a tool fails
+/// and a *different* tool succeeds immediately after (fail→switch→success).
 pub struct ToolSelectionEvaluator;
 
 impl TraceEvaluator for ToolSelectionEvaluator {
-    fn evaluate(&self, _trace: &ExecutionTrace) -> Vec<TraceAnnotation> {
-        // Placeholder -- requires TaskClassification context not available in trace alone.
-        // Will be enhanced when traces include classification metadata.
-        Vec::new()
+    fn evaluate(&self, trace: &ExecutionTrace) -> Vec<TraceAnnotation> {
+        let mut annotations = Vec::new();
+
+        // Collect all ToolExecuted events with their indices
+        let tool_events: Vec<(usize, &str, bool)> = trace
+            .events
+            .iter()
+            .enumerate()
+            .filter_map(|(i, e)| match &e.kind {
+                TraceEventKind::ToolExecuted { tool, success, .. } => {
+                    Some((i, tool.as_str(), *success))
+                }
+                _ => None,
+            })
+            .collect();
+
+        // Scan consecutive pairs: if tool A failed then different tool B succeeded,
+        // annotate tool A as a likely wrong selection.
+        for window in tool_events.windows(2) {
+            let (idx_a, tool_a, success_a) = window[0];
+            let (_idx_b, tool_b, success_b) = window[1];
+
+            if !success_a && success_b && tool_a != tool_b {
+                annotations.push(TraceAnnotation {
+                    event_index: idx_a,
+                    category: Some(ErrorCategory::WrongToolSelection),
+                    note: format!(
+                        "Tool '{tool_a}' failed, then '{tool_b}' succeeded — likely wrong initial selection"
+                    ),
+                    severity: 1,
+                });
+            }
+        }
+
+        annotations
     }
 
     fn name(&self) -> &str {
@@ -646,10 +678,67 @@ mod tests {
     fn test_tool_selection_evaluator_name() {
         let evaluator = ToolSelectionEvaluator;
         assert_eq!(evaluator.name(), "tool_selection");
-        // Placeholder evaluator returns empty annotations.
-        let trace = make_trace("any", true);
+    }
+
+    #[test]
+    fn test_tool_selection_detects_wrong_tool() {
+        let evaluator = ToolSelectionEvaluator;
+
+        let mut trace = make_trace_raw("wrong tool test");
+        // Tool A fails...
+        trace.push_event(TraceEventKind::ToolExecuted {
+            tool: "shell_exec".into(),
+            success: false,
+            duration_ms: 50,
+            output_preview: "command not found".into(),
+        });
+        // ...then a different tool B succeeds.
+        trace.push_event(TraceEventKind::ToolExecuted {
+            tool: "file_read".into(),
+            success: true,
+            duration_ms: 10,
+            output_preview: "data".into(),
+        });
+
         let annotations = evaluator.evaluate(&trace);
-        assert!(annotations.is_empty());
+        assert_eq!(annotations.len(), 1);
+        assert_eq!(
+            annotations[0].category,
+            Some(ErrorCategory::WrongToolSelection)
+        );
+        assert!(annotations[0].note.contains("shell_exec"));
+        assert!(annotations[0].note.contains("file_read"));
+    }
+
+    #[test]
+    fn test_tool_selection_no_false_positive() {
+        let evaluator = ToolSelectionEvaluator;
+
+        let mut trace = make_trace_raw("all success");
+        trace.push_event(TraceEventKind::ToolExecuted {
+            tool: "file_read".into(),
+            success: true,
+            duration_ms: 5,
+            output_preview: "ok".into(),
+        });
+        trace.push_event(TraceEventKind::ToolExecuted {
+            tool: "file_write".into(),
+            success: true,
+            duration_ms: 10,
+            output_preview: "ok".into(),
+        });
+        trace.push_event(TraceEventKind::ToolExecuted {
+            tool: "shell_exec".into(),
+            success: true,
+            duration_ms: 20,
+            output_preview: "done".into(),
+        });
+
+        let annotations = evaluator.evaluate(&trace);
+        assert!(
+            annotations.is_empty(),
+            "All-success trace should produce no annotations"
+        );
     }
 
     // -----------------------------------------------------------------------
